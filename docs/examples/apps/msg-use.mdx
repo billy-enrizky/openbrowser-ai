@@ -5,11 +5,23 @@ icon: "message"
 mode: "wide"
 ---
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Features](#1-features)
+- [2. Setup](#2-setup)
+- [3. Initial Login](#3-initial-login)
+- [4. Normal Usage](#4-normal-usage)
+- [5. Example Output](#5-example-output)
+- [6. Source Code](#6-source-code)
+
+<!-- toc:end -->
+
 <Note>
 This demo requires openbrowser v0.1.57+.
 </Note>
 
-## Features
+## 1. Features
 
 1. Agent logs into WhatsApp Web automatically
 2. Parses natural language scheduling instructions
@@ -17,7 +29,7 @@ This demo requires openbrowser v0.1.57+.
 4. Schedules messages for future delivery or sends immediately
 5. Reuses the saved browser profile when WhatsApp keeps the session valid
 
-## Setup
+## 2. Setup
 
 Make sure the newest version of openbrowser is installed:
 ```bash
@@ -35,7 +47,7 @@ git clone https://github.com/billy-enrizky/openbrowser-ai.git
 cd openbrowser-ai/examples/apps/msg-use
 ```
 
-## Initial Login
+## 3. Initial Login
 
 WhatsApp Web may require a QR scan on first use or when the saved session expires:
 ```bash
@@ -44,7 +56,7 @@ python login.py
 - Scan the QR code when the browser opens
 - The browser profile is reused on later runs when WhatsApp keeps the session valid
 
-## Normal Usage
+## 4. Normal Usage
 
 1. **Edit your schedule** in `messages.txt`:
 ```
@@ -70,7 +82,7 @@ python scheduler.py --debug
 python scheduler.py --auto
 ```
 
-## Example Output
+## 5. Example Output
 
 The scheduler prints the parsed schedule before sending:
 
@@ -85,6 +97,6 @@ Found 3 messages:
 
 Each parsed record has `contact`, `message`, and `datetime` fields.
 
-## Source Code
+## 6. Source Code
 
 Full implementation: [https://github.com/billy-enrizky/openbrowser-ai/tree/main/examples/apps/msg-use](https://github.com/billy-enrizky/openbrowser-ai/tree/main/examples/apps/msg-use)

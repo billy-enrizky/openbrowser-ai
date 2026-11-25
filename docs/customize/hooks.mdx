@@ -5,11 +5,21 @@ icon: "Wrench"
 mode: "wide"
 ---
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Supported callbacks](#1-supported-callbacks)
+- [2. Example](#2-example)
+- [3. In-step actions](#3-in-step-actions)
+- [4. Why the old example changed](#4-why-the-old-example-changed)
+
+<!-- toc:end -->
+
 <Warning>
 `on_step_start` and `on_step_end` are accepted by `Agent.run()` for compatibility, but they are not invoked in the default LangGraph execution path. Do not build required logic on them until the graph step node calls them.
 </Warning>
 
-## Supported callbacks
+## 1. Supported callbacks
 
 Use these constructor callbacks instead:
 
@@ -22,7 +32,7 @@ Use these constructor callbacks instead:
 
 `register_new_step_callback` and `register_done_callback` can be sync or async.
 
-## Example
+## 2. Example
 
 ```python
 import asyncio
@@ -53,12 +63,12 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-## In-step actions
+## 3. In-step actions
 
 For logic that must run inside a step, use a custom tool instead of a hook. See [Add Tools](/customize/tools/add).
 
 For lifecycle state, read `agent.status`. See [Agent Basics](/customize/agent/basics).
 
-## Why the old example changed
+## 4. Why the old example changed
 
 The previous page showed `await agent.run(on_step_start=..., on_step_end=...)`. Those arguments are still accepted, but the default graph does not call them. The callbacks above are the supported path today.

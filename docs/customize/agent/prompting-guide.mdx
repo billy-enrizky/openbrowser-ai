@@ -4,9 +4,20 @@ description: "Tips and tricks "
 icon: "lightbulb"
 ---
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Be Specific vs Open-Ended](#1-be-specific-vs-open-ended)
+- [2. Name Actions Directly](#2-name-actions-directly)
+- [3. Handle interaction problems via keyboard navigation](#3-handle-interaction-problems-via-keyboard-navigation)
+- [4. Custom Actions Integration](#4-custom-actions-integration)
+- [5. Error Recovery](#5-error-recovery)
+
+<!-- toc:end -->
+
 Prompting can drastically improve performance and solve existing limitations of the library.
 
-### 1. Be Specific vs Open-Ended
+## 1. Be Specific vs Open-Ended
 
 **✅ Specific (Recommended)**
 ```python
@@ -23,7 +34,7 @@ task = """
 task = "Go to web and make money"
 ```
 
-### 2. Name Actions Directly
+## 2. Name Actions Directly
 
 When you know exactly what the agent should do, reference actions by name:
 
@@ -41,7 +52,7 @@ task = """
 See [Available Tools](/customize/tools/available) for the complete list of actions.
 
 
-### 3. Handle interaction problems via keyboard navigation
+## 3. Handle interaction problems via keyboard navigation
 
 Sometimes buttons can't be clicked (you found a bug in the library - open an issue). 
 Good news - often you can work around it with keyboard navigation!
@@ -57,7 +68,7 @@ If the submit button cannot be clicked:
 
 
 
-### 4. Custom Actions Integration
+## 4. Custom Actions Integration
 
 ```python
 # When you have custom actions
@@ -75,7 +86,7 @@ Login with 2FA:
 """
 ```
 
-### 5. Error Recovery
+## 5. Error Recovery
 
 ```python
 task = """

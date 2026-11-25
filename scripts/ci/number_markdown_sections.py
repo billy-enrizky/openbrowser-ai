@@ -41,12 +41,42 @@ def split_frontmatter(lines: list[str]) -> tuple[list[str], list[str]]:
     return [], lines
 
 
+def _heading_levels(body: list[str]) -> list[int]:
+    """Return the heading levels outside fenced code blocks."""
+    levels: list[int] = []
+    in_fence = False
+    for line in body:
+        if FENCE.match(line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        match = HEADING.match(line)
+        if match:
+            levels.append(len(match.group(1)))
+    return levels
+
+
 def number_sections(body: list[str]) -> tuple[list[str], list[tuple[int, str, str]], dict[str, str]]:
-    """Rewrite headings in ``body`` and return the new body, TOC entries, and link map."""
+    """Rewrite headings in ``body`` and return the new body, TOC entries, and link map.
+
+    A document that starts at H3 is numbered from 1, not 0.0.1. The shallowest
+    heading level in the document becomes level 2, and deeper levels keep their
+    relative position.
+    """
     counters = [0, 0, 0]
     toc: list[tuple[int, str, str]] = []
     link_map: dict[str, str] = {}
     output: list[str] = []
+    levels = _heading_levels(body)
+    # A doc can start with H3 and later switch to H2. Promote the leading
+    # block so its first heading becomes level 2, then keep later levels as
+    # written. A doc with no H2 at all is shifted as a whole.
+    first = levels[0] if levels else 2
+    leading_shift = max(0, first - 2)
+    first_h2 = next((index for index, value in enumerate(levels) if value == 2), None)
+    shift_until = first_h2 if first > 2 and first_h2 is not None else len(levels)
+    heading_index = 0
     in_fence = False
     for line in body:
         if FENCE.match(line):
@@ -60,7 +90,9 @@ def number_sections(body: list[str]) -> tuple[list[str], list[tuple[int, str, st
         if not match:
             output.append(line)
             continue
-        level = len(match.group(1))
+        shift = leading_shift if heading_index < shift_until else 0
+        heading_index += 1
+        level = max(2, min(4, len(match.group(1)) - shift))
         title = match.group(2).strip()
         old_slug = slug(title)
         if NUMBERED.match(title):
@@ -75,15 +107,22 @@ def number_sections(body: list[str]) -> tuple[list[str], list[tuple[int, str, st
         if old_slug and old_slug != new_slug:
             link_map[old_slug] = new_slug
         toc.append((level, numbered_title, new_slug))
-        output.append(f"{match.group(1)} {numbered_title}")
+        heading_prefix = "#" * level
+        output.append(f"{heading_prefix} {numbered_title}")
     return output, toc, link_map
+
+
+def _display_title(title: str) -> str:
+    """Remove inline links and code ticks from a TOC label."""
+    title = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", title)
+    return title.replace("`", "").strip()
 
 
 def build_toc(toc: list[tuple[int, str, str]]) -> list[str]:
     lines = [TOC_START, TOC_TITLE, ""]
     for level, title, anchor in toc:
         indent = "  " * (level - 2)
-        lines.append(f"{indent}- [{title}](#{anchor})")
+        lines.append(f"{indent}- [{_display_title(title)}](#{anchor})")
     lines.extend(["", TOC_END])
     return lines
 

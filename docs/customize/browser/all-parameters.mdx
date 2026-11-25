@@ -5,15 +5,36 @@ icon: "sliders"
 mode: "wide"
 ---
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Core Settings](#1-core-settings)
+- [2. Navigation requests](#2-navigation-requests)
+- [3. Display & Appearance](#3-display-appearance)
+- [4. Browser Behavior](#4-browser-behavior)
+- [5. User Data & Profiles](#5-user-data-profiles)
+- [6. Network & Security](#6-network-security)
+- [7. Browser Launch](#7-browser-launch)
+- [8. Timing & Performance](#8-timing-performance)
+- [9. AI Integration](#9-ai-integration)
+- [10. Downloads & Files](#10-downloads-files)
+- [11. Device Emulation](#11-device-emulation)
+- [12. Recording & Debugging](#12-recording-debugging)
+- [13. Advanced Options](#13-advanced-options)
+- [14. Using BrowserProfile](#14-using-browserprofile)
+- [15. Browser vs BrowserSession](#15-browser-vs-browsersession)
+
+<!-- toc:end -->
+
 <Note>
 The `Browser` instance also provides all [Actor](/customize/actor/all-parameters) methods for direct browser control (page management, element interactions, etc.).
 </Note>
 
-## Core Settings
+## 1. Core Settings
 
 - `cdp_url`: CDP URL for connecting to existing browser instance (e.g., `"http://localhost:9222"`)
 
-## Navigation requests
+## 2. Navigation requests
 
 `await session.navigate_to(url, new_tab=False, *, wait_until="load", timeout_ms=None)` uses the shared navigation request implementation. `wait_until` accepts `commit`, `domcontentloaded`, `load`, or `networkidle`. The last option waits for Chromium's matching `networkIdle` lifecycle event. Document milestones do not establish application readiness.
 
@@ -31,7 +52,7 @@ Requested URLs are checked before navigation. While a request owns its captured 
 
 If sent authority remains unconfirmed, the runtime stays failed and refuses replacement. Inspect status before retrying. To recover, close the actual browser and create a new `BrowserSession`. `kill()` can verify the exit of a managed local browser. A lost remote connection does not prove that the remote browser exited. If delayed cleanup is later verified, only its own unchanged lifecycle failure can move to `degraded`, not `ready`; explicit recovery is then available.
 
-## Display & Appearance
+## 3. Display & Appearance
 
 - `headless` (default: `True`): Run browser without UI. `None` resolves to `True`; set `False` to show the window.
 - `auto_split_screen` (default: `True`): In headful mode, position the browser on the right half of the screen unless an explicit window size or position is set.
@@ -41,7 +62,7 @@ If sent authority remains unconfirmed, the runtime stays failed and refuses repl
 - `no_viewport` (default: `None`): Disable viewport emulation, content fits to window size
 - `device_scale_factor`: Device scale factor (DPI). Set to `2.0` or `3.0` for high-resolution screenshots
 
-## Browser Behavior
+## 4. Browser Behavior
 
 - `keep_alive` (default: `None`): Keep browser running after agent completes
 - `allowed_domains`: Restrict navigation to specific domains. Domain pattern formats:
@@ -60,13 +81,13 @@ If sent authority remains unconfirmed, the runtime stays failed and refuses repl
 - `cross_origin_iframes` (default: `True`): Enable cross-origin iframe support (OOPIF). Set to `False` to process only same-origin frames.
 - `is_local` (default: `False`): Whether this is a local browser instance. `BrowserSession` sets it to `True` when no `cdp_url` is supplied, or when `executable_path` is set. Set it explicitly for remote browsers. This affects download behavior.
 
-## User Data & Profiles
+## 5. User Data & Profiles
 
 - `user_data_dir` (default: auto-generated temp): Directory for browser profile data. `None` creates a throwaway temporary profile directory with `tempfile.mkdtemp`, not Chrome incognito mode.
 - `profile_directory` (default: `'Default'`): Chrome profile subdirectory name (`'Profile 1'`, `'Work Profile'`, etc.)
 - `storage_state`: Browser storage state (cookies, localStorage). Can be file path string or dict object
 
-## Network & Security
+## 6. Network & Security
 
 - `proxy`: Proxy configuration using `ProxySettings(server='http://host:8080', bypass='localhost,127.0.0.1', username='user', password='pass')`
 - `permissions` (default: `['clipboardReadWrite', 'notifications']`): Browser permissions to grant. Use list like `['camera', 'microphone', 'geolocation']`
@@ -74,7 +95,7 @@ If sent authority remains unconfirmed, the runtime stays failed and refuses repl
 - `headers`: Additional HTTP headers for connect requests (remote browsers only)
 - `block_ip_addresses` (default: `False`): Block navigation to URLs whose host is a literal IPv4 or IPv6 address. Hostnames such as `localhost` are not resolved, so this flag does not block them by itself.
 
-## Browser Launch
+## 7. Browser Launch
 
 - `executable_path`: Path to browser executable for custom installations. Platform examples:
   - macOS: `'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'`
@@ -87,29 +108,29 @@ If sent authority remains unconfirmed, the runtime stays failed and refuses repl
 - `devtools` (default: `False`): Open DevTools panel automatically (requires `headless=False`)
 - `ignore_default_args`: List of default args to disable, or `True` to disable all. Use list like `['--enable-automation', '--disable-extensions']`
 
-## Timing & Performance
+## 8. Timing & Performance
 
 - `minimum_wait_page_load_time` (default: `0.25`): Minimum time to wait before capturing page state in seconds
 - `wait_for_network_idle_page_load_time` (default: `0.5`): Time to wait for network activity to cease in seconds
 - `wait_between_actions` (default: `0.1`): Time to wait between agent actions in seconds
 
-## AI Integration
+## 9. AI Integration
 
 - `highlight_elements` (default: `True`): Highlight interactive elements for AI vision
 - `paint_order_filtering` (default: `True`): Enable paint order filtering to optimize DOM tree by removing elements hidden behind others. Slightly experimental
 
-## Downloads & Files
+## 10. Downloads & Files
 
 - `accept_downloads` (default: `True`): Automatically accept all downloads
 - `downloads_path` (default: unique `/tmp/openbrowser-downloads-<id>`): Directory for downloaded files. Use a string like `'./downloads'` or a `Path` object.
 - `auto_download_pdfs` (default: `True`): Automatically download PDFs instead of viewing in browser
 
-## Device Emulation
+## 11. Device Emulation
 
 - `user_agent`: Custom user agent string. Example: `'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X)'`
 - `screen`: Screen size information, same format as `window_size`
 
-## Recording & Debugging
+## 12. Recording & Debugging
 
 - `record_video_dir`: Directory to save video recordings as `.mp4` files
 - `record_video_size` (default: `None`): The frame size (width, height) of the video recording. `None` uses the viewport size.
@@ -119,14 +140,14 @@ If sent authority remains unconfirmed, the runtime stays failed and refuses repl
 - `record_har_content` (default: `'embed'`): HAR content mode (`'omit'`, `'embed'`, `'attach'`)
 - `record_har_mode` (default: `'full'`): HAR recording mode (`'full'`, `'minimal'`)
 
-## Advanced Options
+## 13. Advanced Options
 
 - `disable_security` (default: `False`): ⚠️ **NOT RECOMMENDED** - Disables all browser security features
 - `deterministic_rendering` (default: `False`): ⚠️ **NOT RECOMMENDED** - Forces consistent rendering but reduces performance
 
 ---
 
-## Using BrowserProfile
+## 14. Using BrowserProfile
 
 `BrowserProfile` is a first-class configuration object. Pass it to `BrowserSession` when you want to reuse one configuration across sessions. Direct keyword arguments to `BrowserSession` are the convenience path.
 
@@ -136,7 +157,7 @@ profile = BrowserProfile(headless=False)
 browser = BrowserSession(browser_profile=profile)
 ```
 
-## Browser vs BrowserSession
+## 15. Browser vs BrowserSession
 
 `Browser` is an alias for `BrowserSession` - they are exactly the same class:
 Use `Browser` for cleaner, more intuitive code.

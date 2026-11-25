@@ -1,5 +1,18 @@
 # Ad-Use
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Features](#1-features)
+- [2. Setup](#2-setup)
+- [3. Normal Usage](#3-normal-usage)
+- [4. Command Line Options](#4-command-line-options)
+- [5. Programmatic Usage](#5-programmatic-usage)
+- [6. Output](#6-output)
+- [7. License](#7-license)
+
+<!-- toc:end -->
+
 Automatically generate Instagram image ads and TikTok video ads from any landing page using browser agents, Google's Nano Banana 🍌, and Veo3.
 
 > [!WARNING]
@@ -7,7 +20,7 @@ Automatically generate Instagram image ads and TikTok video ads from any landing
 
 https://github.com/user-attachments/assets/7fab54a9-b36b-4fba-ab98-a438f2b86b7e
 
-## Features
+## 1. Features
 
 1. Agent visits your target website
 2. Captures brand name, tagline, and key selling points
@@ -16,7 +29,7 @@ https://github.com/user-attachments/assets/7fab54a9-b36b-4fba-ab98-a438f2b86b7e
 5. Generates viral TikTok video ads with Veo3
 6. Supports parallel generation of multiple ads
 
-## Setup
+## 2. Setup
 
 Make sure the newest version of openbrowser is installed (with screenshot functionality):
 ```bash
@@ -34,7 +47,7 @@ git clone https://github.com/billy-enrizky/openbrowser-ai.git
 cd openbrowser-ai/examples/apps/ad-use
 ```
 
-## Normal Usage
+## 3. Normal Usage
 
 ```bash
 # Basic - Generate Instagram image ad (default)
@@ -51,7 +64,7 @@ python ad_generator.py --tiktok --count 2 --url https://www.apple.com/iphone-17-
 python ad_generator.py --url https://www.apple.com/iphone-17-pro/ --debug
 ```
 
-## Command Line Options
+## 4. Command Line Options
 
 - `--url`: Landing page URL to analyze
 - `--instagram`: Generate Instagram image ad (default if no flag specified)
@@ -59,7 +72,7 @@ python ad_generator.py --url https://www.apple.com/iphone-17-pro/ --debug
 - `--count N`: Generate N ads in parallel (default: 1)
 - `--debug`: Show browser window and enable verbose logging
 
-## Programmatic Usage
+## 5. Programmatic Usage
 ```python
 import asyncio
 from ad_generator import create_ad_from_landing_page
@@ -74,7 +87,7 @@ async def main():
 asyncio.run(main())
 ```
 
-## Output
+## 6. Output
 
 Generated ads are saved in the `output/` directory with:
 - **PNG image files** (ad_timestamp.png) - Instagram ads generated with Gemini 2.5 Flash Image
@@ -82,6 +95,6 @@ Generated ads are saved in the `output/` directory with:
 - **Analysis files** (analysis_timestamp.txt) - Browser agent analysis and prompts used
 - **Landing page screenshots** (landing_page_timestamp.png) - Reference screenshots
 
-## License
+## 7. License
 
 MIT

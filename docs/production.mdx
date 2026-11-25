@@ -4,6 +4,17 @@ description: "Deploy with authentication"
 icon: "rocket-launch"
 ---
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Test Locally with Existing Chrome Profile](#1-test-locally-with-existing-chrome-profile)
+  - [1.1. Chrome Profile Paths by OS](#11-chrome-profile-paths-by-os)
+- [2. Use Persistent Browser Session](#2-use-persistent-browser-session)
+- [3. Remote Browser via CDP](#3-remote-browser-via-cdp)
+- [4. Best Practices](#4-best-practices)
+
+<!-- toc:end -->
+
 Deploy OpenBrowser with saved authentication using browser profiles.
 
 ## 1. Test Locally with Existing Chrome Profile
@@ -24,7 +35,7 @@ await agent.run()
 
 <Warning>Close Chrome completely before running to avoid conflicts.</Warning>
 
-### Chrome Profile Paths by OS
+### 1.1. Chrome Profile Paths by OS
 
 | OS | User Data Dir |
 |----|---------------|
@@ -73,7 +84,7 @@ agent = Agent(
 await agent.run()
 ```
 
-## Best Practices
+## 4. Best Practices
 
 1. **Use environment variables** for API keys
 2. **Run headless** in production (`headless=True`)

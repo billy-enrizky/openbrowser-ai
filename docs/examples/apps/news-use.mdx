@@ -5,11 +5,25 @@ icon: "newspaper"
 mode: "wide"
 ---
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Features](#1-features)
+- [2. Setup](#2-setup)
+- [3. Usage Examples](#3-usage-examples)
+- [4. Output Format](#4-output-format)
+- [5. Data Persistence](#5-data-persistence)
+- [6. Programmatic Usage](#6-programmatic-usage)
+- [7. Advanced Configuration](#7-advanced-configuration)
+- [8. Source Code](#8-source-code)
+
+<!-- toc:end -->
+
 <Note>
 This demo requires openbrowser v0.1.57+.
 </Note>
 
-## Features
+## 1. Features
 
 1. Agent visits any news website automatically
 2. Finds and clicks the most recent headline article
@@ -17,7 +31,7 @@ This demo requires openbrowser v0.1.57+.
 4. Generates short/long summaries with sentiment analysis
 5. Persistent deduplication across monitoring sessions
 
-## Setup
+## 2. Setup
 
 Make sure the newest version of openbrowser is installed:
 ```bash
@@ -35,7 +49,7 @@ git clone https://github.com/billy-enrizky/openbrowser-ai.git
 cd openbrowser-ai/examples/apps/news-use
 ```
 
-## Usage Examples
+## 3. Usage Examples
 
 ```bash
 # One-time extraction - Get the latest article and exit
@@ -51,7 +65,7 @@ python news_monitor.py --url https://techcrunch.com --interval 60
 python news_monitor.py --once --debug
 ```
 
-## Output Format
+## 4. Output Format
 
 Articles are displayed with timestamp, sentiment emoji, and summary:
 
@@ -66,7 +80,7 @@ Articles are displayed with timestamp, sentiment emoji, and summary:
 - 🟡 **Neutral** - Factual reporting, announcements, updates
 - 🔴 **Negative** - Challenges, losses, negative events
 
-## Data Persistence
+## 5. Data Persistence
 
 All extracted articles are saved to `news_data.json` with complete metadata:
 
@@ -85,7 +99,7 @@ All extracted articles are saved to `news_data.json` with complete metadata:
 }
 ```
 
-## Programmatic Usage
+## 6. Programmatic Usage
 
 ```python
 import asyncio
@@ -107,7 +121,7 @@ async def main():
 asyncio.run(main())
 ```
 
-## Advanced Configuration
+## 7. Advanced Configuration
 
 ```python
 # Custom monitoring with filters
@@ -122,6 +136,6 @@ async def monitor_with_filters():
         await asyncio.sleep(300)  # Check every 5 minutes
 ```
 
-## Source Code
+## 8. Source Code
 
 Full implementation: [https://github.com/billy-enrizky/openbrowser-ai/tree/main/examples/apps/news-use](https://github.com/billy-enrizky/openbrowser-ai/tree/main/examples/apps/news-use)

@@ -5,7 +5,21 @@ icon: "laptop-code"
 mode: "wide"
 ---
 
-## Clone and install
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Clone and install](#1-clone-and-install)
+- [2. Configure](#2-configure)
+- [3. Verify without a browser](#3-verify-without-a-browser)
+- [4. Install Chromium](#4-install-chromium)
+- [5. Verify a browser session](#5-verify-a-browser-session)
+- [6. Tests and static checks](#6-tests-and-static-checks)
+- [7. Coding agent skills](#7-coding-agent-skills)
+- [8. Run examples](#8-run-examples)
+
+<!-- toc:end -->
+
+## 1. Clone and install
 
 ```bash
 git clone https://github.com/billy-enrizky/openbrowser-ai
@@ -15,7 +29,7 @@ uv sync --all-extras --dev
 
 Python 3.12 or newer is required. `uv sync --all-extras --dev` installs the base package, optional providers, the interactive CLI, and the test and static-check tools.
 
-## Configure
+## 2. Configure
 
 Create `.env` at the repository root:
 
@@ -41,7 +55,7 @@ OPENBROWSER_ALLOWED_DOMAINS=example.com,*.example.com
 
 Run `uv run openbrowser-ai config status` to inspect the selected config path and state.
 
-## Verify without a browser
+## 3. Verify without a browser
 
 Search and HTTP-only scraping work before Chromium is installed. Neither command starts a browser:
 
@@ -53,13 +67,13 @@ uv run openbrowser-ai scrape https://a.example https://b.example --engine http -
 
 Search snippets are not evidence. Scrape and read the source page before you cite it.
 
-## Install Chromium
+## 4. Install Chromium
 
 ```bash
 uv run openbrowser-ai install
 ```
 
-## Verify a browser session
+## 5. Verify a browser session
 
 ```bash
 uv run openbrowser-ai --version
@@ -76,7 +90,7 @@ uv run openbrowser-ai daemon stop
 
 Poll `uv run openbrowser-ai daemon status` until it reports `daemon_not_running`, or run `daemon force-stop` to wait and verify cleanup.
 
-## Tests and static checks
+## 6. Tests and static checks
 
 ```bash
 # Full non-integration suite
@@ -95,7 +109,7 @@ Integration tests that need a real browser are marked `integration`:
 uv run pytest -q -m integration
 ```
 
-## Coding agent skills
+## 7. Coding agent skills
 
 Install the OpenBrowser skill pack with skills.sh:
 
@@ -116,7 +130,7 @@ claude plugin marketplace add billy-enrizky/openbrowser-ai
 claude plugin install openbrowser@openbrowser-ai
 ```
 
-## Run examples
+## 8. Run examples
 
 ```bash
 uv run examples/simple.py

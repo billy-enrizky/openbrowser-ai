@@ -5,9 +5,34 @@ icon: "microchip-ai"
 
 ---
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Google Gemini example](#1-google-gemini-examplehttpsgithubcombilly-enrizkyopenbrowser-aiblobmainexamplesmodelsgeminipy)
+- [2. OpenAI example](#2-openai-examplehttpsgithubcombilly-enrizkyopenbrowser-aiblobmainexamplesmodelsgpt-41py)
+- [3. Anthropic example](#3-anthropic-examplehttpsgithubcombilly-enrizkyopenbrowser-aiblobmainexamplesmodelsclaude-4-sonnetpy)
+- [4. Azure OpenAI example](#4-azure-openai-examplehttpsgithubcombilly-enrizkyopenbrowser-aiblobmainexamplesmodelsazure_openaipy)
+- [5. AWS Bedrock example](#5-aws-bedrock-examplehttpsgithubcombilly-enrizkyopenbrowser-aiblobmainexamplesmodelsawspy)
+  - [5.1. General AWS Bedrock (supports all providers)](#51-general-aws-bedrock-supports-all-providers)
+  - [5.2. Anthropic Claude via AWS Bedrock (convenience class)](#52-anthropic-claude-via-aws-bedrock-convenience-class)
+  - [5.3. AWS Authentication](#53-aws-authentication)
+- [6. Groq example](#6-groq-examplehttpsgithubcombilly-enrizkyopenbrowser-aiblobmainexamplesmodelsllama4-groqpy)
+- [7. Oracle Cloud Infrastructure (OCI) example](#7-oracle-cloud-infrastructure-oci-examplehttpsgithubcombilly-enrizkyopenbrowser-aiblobmainexamplesmodelsoci_modelspy)
+- [8. Ollama](#8-ollama)
+- [9. Langchain](#9-langchain)
+- [10. Qwen example](#10-qwen-examplehttpsgithubcombilly-enrizkyopenbrowser-aiblobmainexamplesmodelsqwenpy)
+- [11. ModelScope example](#11-modelscope-examplehttpsgithubcombilly-enrizkyopenbrowser-aiblobmainexamplesmodelsmodelscope_examplepy)
+- [12. Other models (DeepSeek, Novita, OpenRouter...)](#12-other-models-deepseek-novita-openrouter)
+  - [12.1. DeepSeek example](#121-deepseek-examplehttpsgithubcombilly-enrizkyopenbrowser-aiblobmainexamplesmodelsdeepseek-chatpy)
+  - [12.2. Novita example](#122-novita-examplehttpsgithubcombilly-enrizkyopenbrowser-aiblobmainexamplesmodelsnovitapy)
+  - [12.3. OpenRouter example](#123-openrouter-examplehttpsgithubcombilly-enrizkyopenbrowser-aiblobmainexamplesmodelsopenrouterpy)
+- [13. Browser-Use LLM example](#13-browser-use-llm-examplehttpsgithubcombilly-enrizkyopenbrowser-aiblobmainexamplesmodelsbrowser_use_llmpy)
+
+<!-- toc:end -->
+
 OpenBrowser supports a wide variety of LLM providers. Choose the one that best fits your needs.
 
-### Google Gemini [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/gemini.py)
+## 1. Google Gemini [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/gemini.py)
 
 <Warning>
 `GEMINI_API_KEY` is deprecated and should be named `GOOGLE_API_KEY` as of 2025-05.
@@ -37,7 +62,7 @@ GOOGLE_API_KEY=
 ```
 
 
-### OpenAI [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/gpt-4.1.py)
+## 2. OpenAI [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/gpt-4.1.py)
 
 `O3` model is recommended for best accuracy.
 
@@ -68,7 +93,7 @@ OPENAI_API_KEY=
   into the normal OpenAI API call).
 </Info>
 
-### Anthropic [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/claude-4-sonnet.py)
+## 3. Anthropic [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/claude-4-sonnet.py)
 
 ```python
 from openbrowser import Agent, ChatAnthropic
@@ -91,7 +116,7 @@ And add the variable:
 ANTHROPIC_API_KEY=
 ```
 
-### Azure OpenAI [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/azure_openai.py)
+## 4. Azure OpenAI [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/azure_openai.py)
 
 ```python
 from openbrowser import Agent, ChatAzureOpenAI
@@ -117,11 +142,11 @@ AZURE_OPENAI_ENDPOINT=https://your-endpoint.openai.azure.com/
 AZURE_OPENAI_API_KEY=
 ```
 
-### AWS Bedrock [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/aws.py)
+## 5. AWS Bedrock [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/aws.py)
 
 AWS Bedrock provides access to multiple model providers through a single API. We support both a general AWS Bedrock client and provider-specific convenience classes.
 
-#### General AWS Bedrock (supports all providers)
+### 5.1. General AWS Bedrock (supports all providers)
 
 ```python
 from openbrowser import Agent
@@ -140,7 +165,7 @@ agent = Agent(
 )
 ```
 
-#### Anthropic Claude via AWS Bedrock (convenience class)
+### 5.2. Anthropic Claude via AWS Bedrock (convenience class)
 
 ```python
 from openbrowser import Agent
@@ -159,7 +184,7 @@ agent = Agent(
 )
 ```
 
-#### AWS Authentication
+### 5.3. AWS Authentication
 
 Required environment variables:
 
@@ -177,7 +202,7 @@ You can also use AWS profiles or IAM roles instead of environment variables. The
 - Session tokens for temporary credentials
 - AWS SSO authentication (`aws_sso_auth=True`)
 
-## Groq [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/llama4-groq.py)
+## 6. Groq [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/llama4-groq.py)
 
 ```python
 from openbrowser import Agent, ChatGroq
@@ -196,7 +221,7 @@ Required environment variables:
 GROQ_API_KEY=
 ```
 
-## Oracle Cloud Infrastructure (OCI) [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/oci_models.py)
+## 7. Oracle Cloud Infrastructure (OCI) [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/oci_models.py)
 
 OCI provides access to various generative AI models including Meta Llama, Cohere, and other providers through their Generative AI service.
 
@@ -233,7 +258,7 @@ Authentication methods supported:
 - `INSTANCE_PRINCIPAL`: Uses instance principal authentication
 - `RESOURCE_PRINCIPAL`: Uses resource principal authentication
 
-## Ollama
+## 8. Ollama
 
 1. Install Ollama: https://github.com/ollama/ollama
 2. Run `ollama serve` to start the server
@@ -245,11 +270,11 @@ from openbrowser import Agent, ChatOllama
 llm = ChatOllama(model="llama3.1:8b")
 ```
 
-## Langchain
+## 9. Langchain
 
 [Example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/langchain) on how to use Langchain with OpenBrowser.
 
-## Qwen [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/qwen.py)
+## 10. Qwen [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/qwen.py)
 
 Currently, only `qwen-vl-max` is recommended for OpenBrowser. Other Qwen models, including `qwen-max`, have issues with the action schema format.
 Smaller Qwen models may return incorrect action schema formats (e.g., `actions: [{"navigate": "google.com"}]` instead of `[{"navigate": {"url": "google.com"}}]`). If you want to use other models, add concrete examples of the correct action format to your prompt.
@@ -280,7 +305,7 @@ Required environment variables:
 ALIBABA_CLOUD=
 ```
 
-## ModelScope [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/modelscope_example.py)
+## 11. ModelScope [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/modelscope_example.py)
 
 ```python
 from openbrowser import Agent, ChatOpenAI
@@ -308,11 +333,11 @@ Required environment variables:
 MODELSCOPE_API_KEY=
 ```
 
-## Other models (DeepSeek, Novita, OpenRouter...)
+## 12. Other models (DeepSeek, Novita, OpenRouter...)
 
 We support all other models that can be called via OpenAI compatible API. We are open to PRs for more providers.
 
-### DeepSeek [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/deepseek-chat.py)
+### 12.1. DeepSeek [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/deepseek-chat.py)
 
 ```python
 from openbrowser import Agent
@@ -340,7 +365,7 @@ Required environment variables:
 DEEPSEEK_API_KEY=
 ```
 
-### Novita [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/novita.py)
+### 12.2. Novita [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/novita.py)
 
 ```python
 from openbrowser import Agent, ChatOpenAI
@@ -365,7 +390,7 @@ Required environment variables:
 NOVITA_API_KEY=
 ```
 
-### OpenRouter [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/openrouter.py)
+### 12.3. OpenRouter [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/openrouter.py)
 
 ```python
 from openbrowser import Agent, ChatOpenAI
@@ -389,7 +414,7 @@ Required environment variables:
 OPENROUTER_API_KEY=
 ```
 
-## Browser-Use LLM [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/browser_use_llm.py)
+## 13. Browser-Use LLM [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/browser_use_llm.py)
 
 `ChatBrowserUse()` is an external LLM service from [browser-use.com](https://browser-use.com) optimized for browser automation tasks.
 

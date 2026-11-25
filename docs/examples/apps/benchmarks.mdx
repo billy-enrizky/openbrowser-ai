@@ -5,7 +5,29 @@ icon: "chart-bar"
 mode: "wide"
 ---
 
-## Overview
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Overview](#1-overview)
+- [2. Quick Comparison](#2-quick-comparison)
+- [3. Benchmark Results](#3-benchmark-results)
+  - [3.1. Task Performance Summary](#31-task-performance-summary)
+  - [3.2. Detailed Results by Model](#32-detailed-results-by-model)
+    - [3.2.1. Gemini 3 Flash Preview](#321-gemini-3-flash-preview)
+    - [3.2.2. Gemini 2.5 Flash](#322-gemini-25-flash)
+- [4. Running Benchmarks](#4-running-benchmarks)
+  - [4.1. Basic Comparison Script](#41-basic-comparison-script)
+  - [4.2. Comprehensive Benchmark](#42-comprehensive-benchmark)
+- [5. Key Findings](#5-key-findings)
+  - [5.1. When to Use Agent](#51-when-to-use-agent)
+  - [5.2. When to Use CodeAgent](#52-when-to-use-codeagent)
+  - [5.3. Performance Tips](#53-performance-tips)
+- [6. Test Tasks](#6-test-tasks)
+- [7. Source Code](#7-source-code)
+
+<!-- toc:end -->
+
+## 1. Overview
 
 OpenBrowser provides two agent types for browser automation:
 
@@ -14,7 +36,7 @@ OpenBrowser provides two agent types for browser automation:
 
 This page documents benchmark results comparing both approaches across various tasks.
 
-## Quick Comparison
+## 2. Quick Comparison
 
 | Feature | Agent | CodeAgent |
 |---------|-------|-----------|
@@ -23,9 +45,9 @@ This page documents benchmark results comparing both approaches across various t
 | **Output** | Action history | Reusable Python code |
 | **File Operations** | Via FileSystem tool | Direct file access |
 
-## Benchmark Results
+## 3. Benchmark Results
 
-### Task Performance Summary
+### 3.1. Task Performance Summary
 
 | Task | Agent Time | CodeAgent Time | Winner |
 |------|------------|----------------|--------|
@@ -34,9 +56,9 @@ This page documents benchmark results comparing both approaches across various t
 | HN Data Extraction + CSV | 18.84s | 10.72s | CodeAgent (1.8x faster) |
 | Google Search (with CAPTCHA) | 146.67s | 35.59s | CodeAgent (4.1x faster) |
 
-### Detailed Results by Model
+### 3.2. Detailed Results by Model
 
-#### Gemini 3 Flash Preview
+#### 3.2.1. Gemini 3 Flash Preview
 
 | Task | Agent | CodeAgent | Notes |
 |------|-------|-----------|-------|
@@ -44,7 +66,7 @@ This page documents benchmark results comparing both approaches across various t
 | Flight Booking Flow | 149.19s (19 steps) | 46.87s (8 steps) | CodeAgent 3.2x faster with JS |
 | HN Data Extraction | 48.10s (5 steps) | 14.72s (3 steps) | CodeAgent 3.3x faster |
 
-#### Gemini 2.5 Flash
+#### 3.2.2. Gemini 2.5 Flash
 
 | Task | Agent | CodeAgent | Notes |
 |------|-------|-----------|-------|
@@ -52,9 +74,9 @@ This page documents benchmark results comparing both approaches across various t
 | Flight Booking Flow | 74.07s (21 steps) | Failed (49 steps) | CodeAgent stuck on seat selection |
 | HN Data Extraction | 18.84s (5 steps) | 10.72s (3 steps) | CodeAgent faster |
 
-## Running Benchmarks
+## 4. Running Benchmarks
 
-### Basic Comparison Script
+### 4.1. Basic Comparison Script
 
 ```python
 import asyncio
@@ -118,7 +140,7 @@ async def main():
 asyncio.run(main())
 ```
 
-### Comprehensive Benchmark
+### 4.2. Comprehensive Benchmark
 
 For a full benchmark suite with multiple tasks and CSV output:
 
@@ -179,29 +201,29 @@ async def run_benchmark():
 asyncio.run(run_benchmark())
 ```
 
-## Key Findings
+## 5. Key Findings
 
-### When to Use Agent
+### 5.1. When to Use Agent
 
 - **Form filling**: Agent excels at multi-step forms with validation
 - **Complex navigation**: Better at handling unexpected popups and dialogs
 - **One-off tasks**: Lower overhead for single executions
 
-### When to Use CodeAgent
+### 5.2. When to Use CodeAgent
 
 - **Data extraction**: 2-4x faster for extracting multiple items
 - **File operations**: Direct CSV/JSON file creation
 - **Repetitive tasks**: Generated code can be reused
 - **Bulk operations**: JavaScript evaluation is faster than individual clicks
 
-### Performance Tips
+### 5.3. Performance Tips
 
 1. **Use headless mode** for benchmarks to reduce rendering overhead
 2. **Set appropriate timeouts** - CodeAgent may need more steps for complex flows
 3. **Match the model** - Results vary significantly between model versions
 4. **Consider task type** - Choose the right agent for your use case
 
-## Test Tasks
+## 6. Test Tasks
 
 The benchmarks use the [OpenBrowser Stress Tests](/examples/apps/stress-tests):
 
@@ -210,7 +232,7 @@ The benchmarks use the [OpenBrowser Stress Tests](/examples/apps/stress-tests):
 - **Flight Booking Flow**: Multi-step wizard with seat selection
 - **Progressive Form**: Form with conditional field revelation
 
-## Source Code
+## 7. Source Code
 
 Full benchmark implementations:
 

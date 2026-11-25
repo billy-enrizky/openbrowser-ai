@@ -5,6 +5,20 @@ icon: "bug"
 mode: "wide"
 ---
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Features](#1-features)
+- [2. Quick Start](#2-quick-start)
+  - [2.1. 1) Claude Code](#21-1-claude-code)
+  - [2.2. 2) Cursor (manual MCP entry)](#22-2-cursor-manual-mcp-entry)
+- [3. Basic Prompts](#3-basic-prompts)
+  - [3.1. Parameters](#31-parameters)
+- [4. Requirements](#4-requirements)
+- [5. Source Code](#5-source-code)
+
+<!-- toc:end -->
+
 <Note>
 This example is maintained in the separate [`billy-enrizky/vibecheck`](https://github.com/billy-enrizky/vibecheck) repository and pins an older OpenBrowser release. Follow that repository's setup instructions. The current OpenBrowser release is not a drop-in upgrade for this app.
 </Note>
@@ -15,14 +29,14 @@ This example is maintained in the separate [`billy-enrizky/vibecheck`](https://g
   src="https://github.com/user-attachments/assets/6450b5b7-10e5-4019-82a4-6d726dbfbe1f">
 </video>
 
-## Features
+## 1. Features
 
 1. Launches multiple headless (or visible) OpenBrowser agents in parallel
 2. Crawls your site and records screenshots, broken links & a11y issues
 3. Works on production URLs *and* `localhost` dev servers
 4. Simple natural-language prompts via MCP in Cursor / Claude Code
 
-## Quick Start
+## 2. Quick Start
 
 ```bash
 
@@ -41,7 +55,7 @@ uv pip install -e .
 uvx openbrowser-ai install
 ```
 
-### 1) Claude Code
+### 2.1. 1) Claude Code
 
 ```bash
 # Register the MCP server
@@ -54,7 +68,7 @@ claude mcp add vibetest /full/path/to/vibetest-use/.venv/bin/vibetest-mcp \
 #    • vibetest: connected
 ```
 
-### 2) Cursor (manual MCP entry)
+### 2.2. 2) Cursor (manual MCP entry)
 
 1. Open **Settings → MCP**  
 2. Click **Add Server** and paste:
@@ -72,24 +86,24 @@ claude mcp add vibetest /full/path/to/vibetest-use/.venv/bin/vibetest-mcp \
 }
 ```
 
-## Basic Prompts
+## 3. Basic Prompts
 ```
 > Vibetest my website with 5 agents: example.com
 > Run vibetest on localhost:3000
 > Run a headless vibetest on localhost:8080 with 10 agents
 ```
 
-### Parameters
+### 3.1. Parameters
 * **URL** – any `https` or `http` host or `localhost:port`
 * **Agents** – `3` by default; more agents = deeper coverage
 * **Headless** – say *headless* to hide the browser, omit to watch it live
 
-## Requirements
+## 4. Requirements
 
 * Python 3.11+
 * Google API key (Gemini flash used for analysis)
 * Cursor / Claude with MCP support
 
-## Source Code
+## 5. Source Code
 
 Full implementation: [https://github.com/billy-enrizky/vibecheck](https://github.com/billy-enrizky/vibecheck)

@@ -5,9 +5,27 @@ icon: "sliders"
 mode: "wide"
 ---
 
-## Available Parameters
+<!-- toc:start -->
+## Table of Contents
 
-### Core Settings
+- [1. Available Parameters](#1-available-parameters)
+  - [1.1. Core Settings](#11-core-settings)
+  - [1.2. Vision & Processing](#12-vision-processing)
+  - [1.3. Actions & Behavior](#13-actions-behavior)
+  - [1.4. System Messages](#14-system-messages)
+  - [1.5. File & Data Management](#15-file-data-management)
+  - [1.6. Visual Output](#16-visual-output)
+  - [1.7. Performance & Limits](#17-performance-limits)
+  - [1.8. Advanced Options](#18-advanced-options)
+  - [1.9. Callbacks](#19-callbacks)
+  - [1.10. Backwards Compatibility](#110-backwards-compatibility)
+- [2. Run Lifecycle](#2-run-lifecycle)
+
+<!-- toc:end -->
+
+## 1. Available Parameters
+
+### 1.1. Core Settings
 - `task`: Task description string that defines what the agent should accomplish
 - `llm`: Chat model instance. When omitted, `CONFIG.DEFAULT_LLM` is used, then `ChatBrowserUse`.
 - `max_steps` (default: `100`): Maximum number of steps in one `run()` call
@@ -15,12 +33,12 @@ mode: "wide"
 - `browser`: Browser object where you can specify the browser settings.
 - `output_model_schema`: Pydantic model class for structured output validation. [Example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/features/custom_output.py)
 
-### Vision & Processing
+### 1.2. Vision & Processing
 - `use_vision` (default: `"auto"`): Vision mode - `"auto"` includes screenshot tool but only uses vision when requested, `True` always includes screenshots, `False` never includes screenshots and excludes screenshot tool
 - `vision_detail_level` (default: `'auto'`): Screenshot detail level - `'low'`, `'high'`, or `'auto'`
 - `page_extraction_llm`: Separate LLM model for page content extraction. You can choose a small & fast model because it only needs to extract text from the page (default: same as `llm`)
 
-### Actions & Behavior
+### 1.3. Actions & Behavior
 - `initial_actions`: List of actions to run before the main task without LLM. [Example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/features/initial_actions.py)
 - `max_actions_per_step` (default: `10`): Maximum actions per step, e.g. for form filling the agent can output 10 fields at once. We execute the actions until the page changes.
 - `max_failures` (default: `3`): Maximum retries for steps with errors
@@ -28,43 +46,45 @@ mode: "wide"
 - `use_thinking` (default: `True`): Controls whether the agent uses its internal "thinking" field for explicit reasoning steps.
 - `flash_mode` (default: `False`): Fast mode that skips evaluation, next goal and thinking and only uses memory. If `flash_mode` is enabled, it overrides `use_thinking` and disables the thinking process entirely. `ChatBrowserUse` forces flash mode on. [Example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/getting_started/05_fast_agent.py)
 
-### System Messages
+<a id="system-messages"></a>
+
+### 1.4. System Messages
 - `override_system_message`: Completely replace the default system prompt. 
 - `extend_system_message`: Add additional instructions to the default system prompt. [Example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/features/custom_system_prompt.py)
 
-### File & Data Management
+### 1.5. File & Data Management
 - `file_system_path`: Base directory for the agent file system. When omitted, each agent uses `openbrowser_agent_<id>_<timestamp>` under the system temp directory. The file system constructor clears its `openbrowser_agent_data` subdirectory.
 - `save_conversation_path`: Path to save complete conversation history
 - `save_conversation_path_encoding` (default: `'utf-8'`): Encoding for saved conversations
 - `available_file_paths`: List of file paths the agent can access
 - `sensitive_data`: Dictionary of sensitive data to handle carefully. [Example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/features/sensitive_data.py)
 
-### Visual Output
+### 1.6. Visual Output
 - `generate_gif` (default: `False`): Generate GIF of agent actions. Set to `True` or string path
 - `include_attributes`: List of HTML attributes to include in page analysis
 
-### Performance & Limits
+### 1.7. Performance & Limits
 - `max_history_items`: Maximum number of last steps to keep in the LLM memory. If `None`, we keep all steps. 
 - `llm_timeout` (default: auto): Timeout in seconds for LLM calls. When omitted, the model name selects 60 seconds generally, 45 for Gemini, 30 for Groq, and 90 for o3, Claude, Sonnet, or DeepSeek.
 - `step_timeout` (default: `120`): Timeout in seconds for each step
 - `directly_open_url` (default: `True`): If we detect a url in the task, we directly open it.
 
-### Advanced Options
+### 1.8. Advanced Options
 - `calculate_cost` (default: `False`): Calculate and track API costs
 - `display_files_in_done_text` (default: `True`): Show file information in completion messages
 
-### Callbacks
+### 1.9. Callbacks
 - `register_new_step_callback`: Called after the model proposes an action and before the actions execute. It receives the pre-action browser state, agent output, and step number. Sync or async. Do not treat it as post-step confirmation.
 - `register_done_callback`: Called with the final `AgentHistoryList`. Sync or async.
 - `register_should_stop_callback`: Async callback that can request a cooperative stop.
 - `register_external_agent_status_raise_error_callback`: Async callback for an external status error.
 
-### Backwards Compatibility
+### 1.10. Backwards Compatibility
 - `controller`: Alias for `tools` for backwards compatibility.
 - `browser_session`: Alias for `browser` for backwards compatibility.
 
 
-## Run Lifecycle
+## 2. Run Lifecycle
 
 `agent.status` returns an `AgentRunStatus` with `phase`, `terminal`, `success`, `terminal_reason`, `result`, `error`, `step`, `max_steps`, `consecutive_failures`, `pause_requested`, `stop_requested`, `started_at`, and `finished_at`.
 

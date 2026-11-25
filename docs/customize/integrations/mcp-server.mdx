@@ -5,25 +5,55 @@ icon: "server"
 mode: "wide"
 ---
 
-## Overview
+<!-- toc:start -->
+## Table of Contents
 
-The MCP server exposes OpenBrowser to Claude Desktop, Claude Code, and other MCP clients. Modern clients negotiate protocol `2026-07-28` and see six tools. Call `create_context` before stateful calls. Pass its `context_id` to `execute_code`, `get_status`, and `reset_browser`. Call `close_context` when finished. The stateless `search_web` tool needs no `context_id` and does not start a browser. Its snippets do not count as evidence. Scrape and read source pages before you cite them. The four supported older protocol versions see four tools. Other versions get MCP error `-32602`. OpenBrowser uses MCP SDK 2.3. The MCP client supplies the model, so users do not need an external LLM API key.
+- [1. Overview](#1-overview)
+- [2. Quick Start](#2-quick-start)
+  - [2.1. Start MCP Server](#21-start-mcp-server)
+- [3. Claude Desktop Integration](#3-claude-desktop-integration)
+  - [3.1. macOS](#31-macos)
+  - [3.2. Windows](#32-windows)
+  - [3.3. Claude Code](#33-claude-code)
+  - [3.4. Environment Variables](#34-environment-variables)
+- [4. Tools](#4-tools)
+  - [4.1. Available Functions](#41-available-functions)
+- [5. Example Usage](#5-example-usage)
+- [6. Programmatic Usage](#6-programmatic-usage)
+- [7. CLI Execute Mode](#7-cli-execute-mode)
+- [8. Troubleshooting](#8-troubleshooting)
+  - [8.1. Common Issues](#81-common-issues)
+  - [8.2. Debug Mode](#82-debug-mode)
+- [9. Security Considerations](#9-security-considerations)
+- [10. Next Steps](#10-next-steps)
 
-## Quick Start
+<!-- toc:end -->
 
-### Start MCP Server
+## 1. Overview
+
+The MCP server exposes OpenBrowser to Claude Desktop, Claude Code, and other MCP clients. Modern `2026-07-28` clients see seven tools: `create_context`, `execute_code`, `get_status`, `reset_browser`, `close_context`, `search_web`, and `scrape_web`. Call `create_context` before stateful calls. Pass its `context_id` to `execute_code`, `get_status`, and `reset_browser`. Call `close_context` when finished. The stateless `search_web` tool needs no `context_id` and does not start a browser. Its snippets do not count as evidence. Scrape and read source pages before you cite them. The stateless `scrape_web` tool fetches one HTTP(S) page in OpenBrowser no-browser mode: it starts no Chrome, Blink, or V8 process and cannot run JavaScript, take screenshots, or use browser cookies. The legacy handshakes `2024-11-05`, `2025-03-26`, `2025-06-18`, and `2025-11-25` see four tools: `execute_code`, `get_status`, `reset_browser`, and `search_web`. Other versions get MCP error `-32602`.
+
+The default stdio transport is a lean JSON-RPC loop. It answers `server/discover` and `tools/list` from a static catalog before it imports the MCP SDK. Set `OPENBROWSER_MCP_TRANSPORT=sdk` to use the MCP SDK 2.3 escape hatch. Invalid values exit with code 2. Both transports share the same context registry and tool implementations. The MCP client supplies the model, so users do not need an external LLM API key.
+
+## 2. Quick Start
+
+### 2.1. Start MCP Server
 
 ```bash
 uvx openbrowser-ai --mcp
 ```
 
-The server will start in stdio mode, ready to accept MCP connections.
+The server starts in stdio mode, ready to accept MCP connections. The lean transport is the default. The SDK transport remains available for compatibility checks:
 
-## Claude Desktop Integration
+```bash
+OPENBROWSER_MCP_TRANSPORT=sdk uvx openbrowser-ai --mcp
+```
+
+## 3. Claude Desktop Integration
 
 Add this configuration to your Claude Desktop config file:
 
-### macOS
+### 3.1. macOS
 Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
@@ -40,7 +70,7 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-### Windows
+### 3.2. Windows
 Edit `%APPDATA%\Claude\claude_desktop_config.json`:
 
 ```json
@@ -57,7 +87,7 @@ Edit `%APPDATA%\Claude\claude_desktop_config.json`:
 }
 ```
 
-### Claude Code
+### 3.3. Claude Code
 
 Add to your project's `.mcp.json`:
 
@@ -72,12 +102,13 @@ Add to your project's `.mcp.json`:
 }
 ```
 
-### Environment Variables
+### 3.4. Environment Variables
 
 Optional configuration:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
+| `OPENBROWSER_MCP_TRANSPORT` | Stdio implementation: `lean` or `sdk`. Invalid values exit with code 2 | `lean` |
 | `OPENBROWSER_HEADLESS` | Run browser without GUI | `true` |
 | `OPENBROWSER_RENDER_MODE` | Rendering policy for new contexts: `full`, `lightweight`, or `no-render` | `full` |
 | `OPENBROWSER_TEXT_ONLY` | Set to `1` to block external CSS, images, web fonts, media, and text tracks while keeping scripts and screenshots | `false` |
@@ -94,9 +125,9 @@ Optional configuration:
 | `OPENBROWSER_SHUTDOWN_TIMEOUT` | Browser and context cleanup bound in seconds | `20` |
 | `ANONYMIZED_TELEMETRY` | Set to `false` to disable anonymized usage telemetry | `true` |
 
-## Tools
+## 4. Tools
 
-Modern 2026-07-28 clients see six tools. Older clients see four tools. Both catalogs include stateless `search_web`.
+Modern `2026-07-28` clients see seven tools. The legacy handshakes `2024-11-05`, `2025-03-26`, `2025-06-18`, and `2025-11-25` see four tools. Both catalogs include stateless `search_web`.
 
 | Tool | Use |
 |---|---|
@@ -105,7 +136,8 @@ Modern 2026-07-28 clients see six tools. Older clients see four tools. Both cata
 | `get_status` | Read server, context, browser, profile, tab, tools, downloads, storage-state, namespace-transfer, and config lifecycle state as JSON. It does not start or mutate a browser. |
 | `reset_browser` | Close a stuck browser and release its profile. Scalar and scalar-only container variables are preserved unless `clear_variables` is true. Inspect `namespace_transfer.dropped`. Cookies and localStorage survive because the profile is reused. |
 | `close_context` | Close one context and release its browser and profile. A successful close invalidates the handle. |
-| `search_web` | Search without a browser or `context_id`. The result is JSON text with title, URL, and snippet fields. Snippets do not count as evidence. |
+| `search_web` | Search without a browser or `context_id` using the package-native DDGS client. The result is JSON text with title, URL, and snippet fields. Snippets do not count as evidence. |
+| `scrape_web` | Fetch one HTTP(S) URL without a browser or `context_id`. This is OpenBrowser no-browser mode: it starts no Chrome, Blink, or V8 process, never falls back to a browser, and cannot run JavaScript, take screenshots, or use browser cookies. It returns JSON with url, title, format, content, stats, and engine_used=http. Use `execute_code` for JavaScript pages. |
 
 If a browser connection fails, call `get_status` before retrying. A page-changing action may have partially run, so do not replay it blindly. `get_status` includes `config.startup`, `config.current`, and `config.restart_required`.
 
@@ -123,7 +155,7 @@ For a forbidden committed redirect, `browser.navigation.containment` records sec
 
 For a managed local browser, use `reset_browser` to close the owned browser before replacement. If cleanup fails, the old runtime remains retained. For a remote browser, close the actual browser before creating a replacement `BrowserSession`. Do not assume cancelling a waiter or losing a connection proves that browser execution stopped.
 
-### Available Functions
+### 4.1. Available Functions
 
 | Category | Functions |
 |----------|-----------|
@@ -147,7 +179,7 @@ Prefer indexed actions whenever an element index exists. Coordinate actions use 
 
 Variables and state persist between `execute_code` calls within the same context. A context is process-local: it lives until `close_context` or server exit, and a new MCP server process cannot resume the same handle. The browser session inside a context auto-closes after 10 minutes without an `execute_code` call. `get_status` does not refresh that timer. The handle and scalar variables remain, and the next `execute_code` call starts a fresh browser. A successful `close_context` invalidates the handle. If cleanup fails, the result is `close_failed` with `retryable: true`. Retry `close_context` to finish cleanup; the handle cannot be used for `execute_code`, `get_status`, or `reset_browser`. The default limit is 16 open contexts total, including the legacy no-handle context; set `OPENBROWSER_MCP_MAX_CONTEXTS` to a positive integer to change it. Default workspaces are under `~/Downloads/openbrowser-mcp/workspace/<owner-id>` and default downloads are under `~/Downloads/openbrowser-mcp/<owner-id>`. Each context also has a managed browser profile under `~/.config/openbrowser/profiles/mcp-<owner-id>`. Close retains the profile, workspace, and downloaded files. The owner ID is internal and is not the `context_id` handle. Read the resolved profile path from `get_status.profile.user_data_dir`. There is no disk quota or expiry cleanup for retained files. `close_context` waits for in-flight calls to finish before it closes the browser and profile. New calls while closing fail with `context_closing`. After a failed close, non-close calls fail with `context_close_failed`; retry `close_context` only. A second close after success returns `context_not_found`. Server shutdown closes every context and can enter a failed shutdown state if cleanup still fails.
 
-## Example Usage
+## 5. Example Usage
 
 Once configured with Claude Desktop or Claude Code, you can ask the AI to perform browser automation tasks:
 
@@ -161,7 +193,7 @@ Once configured with Claude Desktop or Claude Code, you can ask the AI to perfor
 
 The AI will use the `execute_code` tool to write Python code that navigates, interacts, and extracts data.
 
-## Programmatic Usage
+## 6. Programmatic Usage
 
 You can also connect to the MCP server programmatically:
 
@@ -214,17 +246,19 @@ asyncio.run(use_browser_mcp())
 
 Older clients that negotiate `2024-11-05`, `2025-03-26`, `2025-06-18`, or `2025-11-25` keep the original `ClientSession` flow and call `execute_code` without `context_id`.
 
-## CLI Execute Mode
+## 7. CLI Execute Mode
 
 For Bash-based workflows without an MCP client, use the [CLI Daemon](/customize/integrations/cli-daemon) instead. It provides the same `execute_code` functions via `openbrowser-ai -c "code"` with a persistent browser daemon.
 
-## Troubleshooting
+The CLI equivalent of `scrape_web` is `openbrowser-ai scrape URL --no-browser`. It starts no Chrome, Blink, or V8 process and cannot run JavaScript, take screenshots, or use browser cookies.
 
-### Common Issues
+## 8. Troubleshooting
+
+### 8.1. Common Issues
 
 **"MCP SDK is required" Error**
 
-MCP is included in the base package since v0.1.30. Update to the latest version:
+This error can appear only when `OPENBROWSER_MCP_TRANSPORT=sdk` is set. The default lean transport does not import the SDK. MCP is included in the base package since v0.1.30. Update to the latest version:
 ```bash
 pip install --upgrade openbrowser-ai
 ```
@@ -239,18 +273,18 @@ pip install --upgrade openbrowser-ai
 - Check the config file syntax is valid JSON
 - Verify the file path is correct for your OS
 
-### Debug Mode
+### 8.2. Debug Mode
 
 The MCP server keeps Python logging off the stdio channel so JSON-RPC stays valid. `OPENBROWSER_LOG_LEVEL` is not read by the MCP server. To debug a client integration, inspect the client's captured server stderr or run `uvx openbrowser-ai --mcp` directly in a terminal.
 
-## Security Considerations
+## 9. Security Considerations
 
 - The MCP server has access to your browser and file system
 - Only connect trusted MCP clients
 - Be cautious with sensitive websites and data
 - Use `OPENBROWSER_ALLOWED_DOMAINS` to restrict navigation
 
-## Next Steps
+## 10. Next Steps
 
 - Explore the [examples directory](https://github.com/billy-enrizky/openbrowser-ai/tree/main/examples/mcp) for more usage patterns
 - Check out [MCP documentation](https://modelcontextprotocol.io/) to learn more about the protocol

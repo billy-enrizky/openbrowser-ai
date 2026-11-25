@@ -110,14 +110,14 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
 
 - **CodeAgent Architecture** - LLM writes Python code in a persistent Jupyter-like namespace for browser automation
 - **Raw CDP Communication** - Direct Chrome DevTools Protocol for maximum control and speed
-- **Native Web Search** - DDGS search in Python, the CLI, CodeAgent, and MCP. Search snippets do not count as evidence.
+- **Native Web Search** - The package-native DDGS client in Python, the CLI, CodeAgent, and MCP. Search snippets do not count as evidence.
 - **Vision Support** - Screenshot analysis for visual understanding of pages
 - **15 LLM Providers** - OpenAI, Anthropic, Google, Groq, AWS Bedrock, Azure, Ollama, DeepSeek, Cerebras, OpenRouter, OCI, and more
 - **MCP Server** - Model Context Protocol for Claude Desktop, Claude Code, Codex, OpenCode, and other AI assistants.
   Modern clients use explicit contexts and isolated profiles. The server includes read-only status and reset tools.
 - **CLI Daemon** - Persistent browser daemon with `-c` flag for direct code execution from Bash, explicit startup ownership, health and recovery status, saved login state, and 10-minute auto-shutdown
-- **Fast CLI paths** - `-c` uses a standard-library thin client against a warm daemon. `scrape --engine http` uses a light console entry that does not import the browser or configuration stack
-- **Batch scraping** - `scrape_pages` and the CLI batch scrape multiple URLs with bounded concurrency. An explicit `--engine http` batch starts no browser
+- **Fast CLI paths** - `-c` uses a standard-library thin client against a warm daemon. `scrape --no-browser` uses OpenBrowser no-browser mode: a light console entry that starts no Chrome, Blink, or V8 process and does not import the browser or configuration stack
+- **Batch scraping** - `scrape_pages` and the CLI batch scrape multiple URLs with bounded concurrency. An explicit `--no-browser` or `--engine http` batch starts no browser
 - **Explicit Lifecycle State** - Browser, CDP, navigation, focus, storage, downloads, agent runs, and CodeAgent runs report typed phases instead of relying on logs
 - **Workflow Recording** - Record, replay, and export browser sessions to Jupyter notebooks or API crawler code
 - **Video Recording** - Record browser sessions as video files with ffmpeg
@@ -182,10 +182,10 @@ uvx openbrowser-ai -c "await navigate('https://example.com')"
 uvx openbrowser-ai search "OpenBrowser MCP docs"
 uvx openbrowser-ai search "OpenBrowser MCP docs" --json --output search-results.json
 uvx openbrowser-ai search "OpenBrowser MCP docs" --urls-only --output search-urls.txt
-uvx openbrowser-ai scrape --urls-file search-urls.txt --output scraped-pages.jsonl --output-format jsonl
+uvx openbrowser-ai scrape --urls-file search-urls.txt --no-browser --output scraped-pages.jsonl --output-format jsonl
 
-# Fast scraping without an LLM
-uvx openbrowser-ai scrape https://example.com --format markdown
+# OpenBrowser no-browser mode: no Chrome, Blink, or V8 process
+uvx openbrowser-ai scrape https://example.com --no-browser --format markdown
 uvx openbrowser-ai scrape https://example.com --format json --selector "article"
 uvx openbrowser-ai scrape https://example.com --render-mode no-render
 
@@ -202,11 +202,13 @@ uvx openbrowser-ai scrape --urls-file urls.txt --output results.jsonl
 
 `scrape` accepts multiple URLs or a file with one URL per line. Use `--output-format json` or `--output-format jsonl` to select batch output. A `.jsonl` output path selects JSONL by default. Each result records its URL, success state, engine, content or error, duration, and timing. One failed URL does not stop the batch.
 
+`--no-browser` is OpenBrowser no-browser mode. It starts no Chrome, Blink, or V8 process, never falls back to a browser, and cannot run JavaScript, take screenshots, or use browser cookies. The asset flags `--no-css`, `--no-images`, `--no-fonts`, `--no-media`, and `--render-mode` control the browser fallback, not the no-browser HTTP path. Use the default `auto` engine or `--engine browser` when a page needs JavaScript.
+
 In CodeAgent and MCP execution, call `await scrape_pages(urls, concurrency=4)`. HTTP requests run concurrently up to the limit. Browser fallbacks run sequentially, and each URL returns its own result.
 
 `openbrowser-ai search` prints a compact table by default. Use `--json` for a JSON array or `--urls-only` to write one URL per line. Search snippets do not count as evidence. Scrape and read each source page before you cite it. The package caps `max_results` at 20.
 
-The Python API exports synchronous `search` and asynchronous `asearch` from `openbrowser.search`. Both functions return typed `SearchResult` values with `title`, `url`, and `snippet` fields. Provider failures raise `SearchError`. The error recommends browser search as a fallback.
+The Python API exports synchronous `search` and asynchronous `asearch` from `openbrowser.search`. The `openbrowser-ai search` command calls this client directly; it does not shell out to a `ddgs` CLI. Both functions return typed `SearchResult` values with `title`, `url`, and `snippet` fields. Provider failures raise `SearchError`. The error recommends browser search as a fallback.
 
 ```python
 from openbrowser.search import search
@@ -535,7 +537,7 @@ For OpenClaw plugin documentation, see [docs.openclaw.ai/tools/plugin](https://d
 
 [![MCP Registry](https://img.shields.io/badge/MCP-Registry-blue)](https://registry.modelcontextprotocol.io/?q=openbrowser)
 
-OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser automation as tools for AI assistants like Claude. Listed on the [MCP Registry](https://registry.modelcontextprotocol.io/?q=openbrowser) as `me.openbrowser/openbrowser-ai`. It uses the official `mcp` Python SDK 2.3 and negotiates protocol version `2026-07-28` with modern clients. No external LLM API keys required -- the MCP client provides the intelligence.
+OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser automation as tools for AI assistants like Claude. Listed on the [MCP Registry](https://registry.modelcontextprotocol.io/?q=openbrowser) as `me.openbrowser/openbrowser-ai`. The default stdio transport is a lean JSON-RPC loop that answers discovery and the tool catalog before it imports the MCP SDK. It negotiates protocol version `2026-07-28` with modern clients. Set `OPENBROWSER_MCP_TRANSPORT=sdk` to use the MCP SDK 2.3 escape hatch. Invalid values exit with code 2. No external LLM API keys required: the MCP client provides the intelligence.
 
 By default, each modern MCP context uses an isolated managed profile under `~/.config/openbrowser/profiles/mcp-<owner-id>`. The legacy no-handle owner uses `mcp-<server-instance-id>`. The owner ID is internal and is not the `context_id` handle; read the resolved path from `get_status.profile.user_data_dir`. The profile's `storage_state.json` is seeded once from `~/.config/openbrowser/profiles/default/storage_state.json`, so existing logins are available without allowing concurrent contexts to kill or corrupt one another's browser. Profiles are retained on disk after `close_context`. A new MCP server process cannot resume a context handle, and it creates a new isolated profile unless you configure an explicit shared profile. Configure `OPENBROWSER_USER_DATA_DIR` for a profile that survives restarts; `OPENBROWSER_STORAGE_STATE` is a one-time seed for managed profiles, and later changes are saved to the active profile copy rather than copied back automatically. OpenBrowser also auto-cleans disposable Chromium caches in managed profiles, which keeps disk usage down without deleting cookies or login state. If you explicitly configure the same `OPENBROWSER_USER_DATA_DIR` for multiple contexts or servers, the profile lease rejects the second owner with a clear error.
 
@@ -580,14 +582,15 @@ Set `OPENBROWSER_RENDER_MODE` to `full`, `lightweight`, or `no-render` to choose
 
 ### 12.2. Tools
 
-The MCP server exposes six tools to 2026-07-28 clients and four tools to older clients. Both catalogs include the stateless `search_web` tool.
+The MCP server exposes seven tools to modern `2026-07-28` clients and four tools to the legacy handshakes `2024-11-05`, `2025-03-26`, `2025-06-18`, and `2025-11-25`. Both catalogs include the stateless `search_web` tool. The modern catalog adds stateless `scrape_web`, which fetches one HTTP(S) page in OpenBrowser no-browser mode: it starts no Chrome, Blink, or V8 process and cannot run JavaScript, take screenshots, or use browser cookies.
 
 - `create_context` creates an isolated context and returns a server-minted `context_id`. It does not start a browser until the first `execute_code` call.
 - `execute_code` runs Python code in the namespace for one context. Modern calls require `context_id`.
 - `get_status` returns server, context, browser, profile, tab, tools, downloads, storage-state, namespace-transfer, and config state as JSON. It includes `tools` availability and `downloads` (`count`, `pending`, `recent`, `pdf_detection`). It is read-only and does not start a browser.
 - `reset_browser` closes a stuck browser and preserves scalar and scalar-only container variables unless `clear_variables` is true. Inspect `namespace_transfer.dropped` for names that could not be carried. Cookies and localStorage survive because the profile is reused.
 - `close_context` closes one context and releases its browser and profile. The handle cannot be used after a successful close.
-- `search_web` searches the web and returns a JSON array. It needs no `context_id` and does not start a browser. Treat snippets as previews. Scrape and read source pages before citing them.
+- `search_web` searches the web with the package-native DDGS client and returns a JSON array. It needs no `context_id` and does not start a browser. Treat snippets as previews. Scrape and read source pages before citing them.
+- `scrape_web` fetches one static HTTP(S) page without a browser or `context_id`. This is OpenBrowser no-browser mode: it starts no Chrome, Blink, or V8 process, never falls back to a browser, and cannot run JavaScript, take screenshots, or use browser cookies. Use `execute_code` for JavaScript pages.
 
 A context is process-local. It lives until `close_context` or server exit. A new MCP server process cannot resume it.
 
@@ -595,7 +598,7 @@ The browser session closes after 10 minutes without an `execute_code` call. `get
 
 A successful `close_context` invalidates the handle. If cleanup fails, the result is `close_failed` with a retryable flag. Retry `close_context` to finish cleanup. The handle cannot run `execute_code`, `get_status`, or `reset_browser` after a failed close. New calls while closing fail with `context_closing`. Calls after failed close fail with `context_close_failed`.
 
-Clients that negotiate `2024-11-05`, `2025-03-26`, `2025-06-18`, or `2025-11-25` see four tools. The catalog includes stateless `search_web` and uses a legacy no-handle context. OpenBrowser rejects other protocol versions with MCP error `-32602`.
+Clients that negotiate `2024-11-05`, `2025-03-26`, `2025-06-18`, or `2025-11-25` see four tools: `execute_code`, `get_status`, `reset_browser`, and `search_web`. The catalog includes stateless `search_web` and uses a legacy no-handle context. OpenBrowser rejects other protocol versions with MCP error `-32602`.
 
 A modern stateful request without `context_id` fails before it affects a browser. `create_context` does not need a handle. The default limit is 16 open contexts, including the legacy context. Set `OPENBROWSER_MCP_MAX_CONTEXTS` to change the limit.
 
@@ -626,6 +629,7 @@ Prefer indexed actions whenever an element index exists. Coordinate actions use 
 
 | Environment Variable | Description | Default |
 |---------------------|-------------|---------|
+| `OPENBROWSER_MCP_TRANSPORT` | Stdio implementation: `lean` or `sdk`. Invalid values exit with code 2 | `lean` |
 | `OPENBROWSER_HEADLESS` | Run browser without GUI | `true` |
 | `OPENBROWSER_ALLOWED_DOMAINS` | Comma-separated domain whitelist | (none) |
 | `OPENBROWSER_USER_DATA_DIR` | Optional explicit Chrome profile directory. Omit it for one managed profile per context; concurrent owners are rejected | (auto: `~/.config/openbrowser/profiles/mcp-<owner-id>`) |
@@ -659,13 +663,13 @@ Sequential scraping, N=10, OpenBrowser lightweight against Firecrawl Local `0.1.
 
 OpenBrowser won 50 of 50 paired samples. The batch surface measured 2.834 ms against Firecrawl Local batch at 13.448 ms, a 4.75x win in 10 of 10 pairs, with no browser started.
 
-Memory depends on the surface:
+Memory depends on the surface. Values are process-tree RSS on a local fixture:
 
-| Path | p50 latency | p50 peak RSS |
+| Path | p50 latency | p50 peak process-tree RSS (MiB) |
 | --- | ---: | ---: |
-| One-shot static scrape, default engine | 148.6 ms | 47.7 MB |
-| JavaScript scrape, headless shell | 940.1 ms | 355.4 MB |
-| JavaScript scrape, full Chrome | 1296.0 ms | 742.4 MB |
+| OpenBrowser no-browser mode, static scrape | 142.7 ms | 47.6 MiB |
+| JavaScript scrape, headless shell | 940.1 ms | 355.4 MiB |
+| JavaScript scrape, full Chrome | 1296.0 ms | 742.4 MiB |
 
 The `scrape` browser fallback uses the Playwright headless shell by default. `OPENBROWSER_USE_HEADLESS_SHELL=0` restores full Chrome.
 
@@ -766,8 +770,8 @@ uvx openbrowser-ai daemon list      # List sockets and this user's daemon proces
 uvx openbrowser-ai daemon reap      # Stop verified daemons and reap orphaned daemon processes
 uvx openbrowser-ai daemon restart   # Restart daemon
 
-# Scrape static pages, discover a site, or crawl it without a browser
-uvx openbrowser-ai scrape https://example.com --only-main-content
+# OpenBrowser no-browser mode: no Chrome, Blink, or V8 process
+uvx openbrowser-ai scrape https://example.com --no-browser --only-main-content
 uvx openbrowser-ai map https://docs.example.com --max-urls 50
 uvx openbrowser-ai crawl https://docs.example.com --max-pages 20 --max-depth 2
 
@@ -786,7 +790,7 @@ openbrowser-ai warm
 
 Then run the calls in the same environment. The daemon keeps Python variables between calls while it remains running.
 
-Use `--render-mode full`, `--render-mode lightweight`, or `--render-mode no-render` to choose a rendering policy for a one-shot run, or `--no-render` as a shortcut for the last one. No-render mode disables screenshots and visual-only actions. For asset control without changing the mode, use `--text-only` to block external CSS, images, fonts, media, and text tracks while keeping scripts and screenshots, or one of `--no-css`, `--no-images`, `--no-fonts`, `--no-media`, `--no-scripts`. The `scrape` browser fallback uses the Playwright headless shell by default; set `OPENBROWSER_USE_HEADLESS_SHELL=0` to force full Chrome.
+Use `--render-mode full`, `--render-mode lightweight`, or `--render-mode no-render` to choose a rendering policy for a one-shot run, or `--no-render` as a shortcut for the last one. No-render mode disables screenshots and visual-only actions. For asset control without changing the mode, use `--text-only` to block external CSS, images, fonts, media, and text tracks while keeping scripts and screenshots, or one of `--no-css`, `--no-images`, `--no-fonts`, `--no-media`, `--no-scripts`. The `scrape` command accepts `--no-css`, `--no-images`, `--no-fonts`, `--no-media`, and `--render-mode`; `--no-scripts` is available on the one-shot prompt interface. The `scrape` browser fallback uses the Playwright headless shell by default; set `OPENBROWSER_USE_HEADLESS_SHELL=0` to force full Chrome.
 
 The `-c` flag connects to a persistent browser daemon over a Unix socket (localhost TCP on Windows). Variables persist across calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity.
 

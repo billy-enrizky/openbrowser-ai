@@ -13,7 +13,7 @@ allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(uvx:*) Bash(p
 - [1. Setup](#1-setup)
 - [2. Workflow](#2-workflow)
   - [2.1. Step 0 -- Session check](#21-step-0----session-check)
-  - [2.2. Step 0.5 -- Run `/search` to discover sources](#22-step-05----run-search-to-discover-sources)
+  - [2.2. Step 0.5 -- Run /search to discover sources](#22-step-05----run-search-to-discover-sources)
   - [2.3. Step 1 -- Plan](#23-step-1----plan)
   - [2.4. Step 2a -- Dispatch parallel sub-agents (one tab per agent)](#24-step-2a----dispatch-parallel-sub-agents-one-tab-per-agent)
   - [2.5. Step 2b -- Retry weak sub-questions with broader sub-agents](#25-step-2b----retry-weak-sub-questions-with-broader-sub-agents)
@@ -161,9 +161,9 @@ EOF
 
 ### 2.2. Step 0.5 -- Run `/search` to discover sources
 
-Run this step after Step 0 for `/search`, web search, or source-discovery requests. Use the run directory from Step 0. The search command does not start Chromium.
+Run this step after Step 0 for `/search`, web search, or source-discovery requests. Use the run directory from Step 0. The search command calls the package-native DDGS client at `openbrowser.search`. It does not start Chromium and it is not a shell call to a `ddgs` CLI.
 
-Set `SEARCH_QUERY` to the user's exact query. The OpenBrowser package provides DDGS. Do not install DDGS separately.
+Set `SEARCH_QUERY` to the user's exact query. Do not install DDGS separately.
 
 ```bash
 . "<RUN_ENV_FILE>"
@@ -203,7 +203,7 @@ print(f"Selected {min(5, len(urls))} page URLs in {urls_path}")
 PYTHON
     then
         if [ -s "$SEARCH_URLS" ]; then
-            if openbrowser-ai scrape --urls-file "$SEARCH_URLS" --output "$SCRAPE_JSONL" --output-format jsonl; then
+            if openbrowser-ai scrape --urls-file "$SEARCH_URLS" --no-browser --output "$SCRAPE_JSONL" --output-format jsonl; then
                 echo "Scraped search results. Read successful page content before citing it."
             else
                 echo "Native scraping failed. Continue with browser search in Step 2a."
@@ -225,9 +225,13 @@ fi
 
 The search JSON contains `title`, `url`, and `snippet` fields. The URL file contains up to five result URLs in provider order. OpenBrowser removes duplicate and non-HTTP URLs before it writes the JSON.
 
+`openbrowser-ai scrape --no-browser` uses OpenBrowser no-browser mode for the selected URLs. It starts no Chrome, Blink, or V8 process, never falls back to a browser, and cannot run JavaScript, take screenshots, or use browser cookies. A JavaScript-only page is recorded as a failure, and the workflow continues with browser search in Step 2a.
+
 Search snippets do not count as evidence. Do not cite them. Read the scraped `content` field and cite its page URL. If native search fails or returns no results, use the Google search in Step 2a. The package retries provider failures twice with short backoff. It retries a no-results response once. Two consecutive no-results responses produce an empty list.
 
 The search backend lives in the package at `openbrowser.search`, so `openbrowser-ai search` and the CodeAgent `search_web()` helper use the same provider path. Nothing is installed at run time.
+
+In a CodeAgent context, run the same flow with package functions: `await search_web(query)` calls `openbrowser.search`, then `await search_and_scrape(query)` or `await scrape_pages(urls, engine='http')` scrapes the selected URLs. `engine='http'` is OpenBrowser no-browser mode. Read the returned page content, then write the cited report. Do not cite search snippets.
 
 When a source is a documentation site or a wiki rather than a single page, discover its pages before scraping. This does not start a browser:
 

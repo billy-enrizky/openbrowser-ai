@@ -5,15 +5,31 @@ icon: "vial"
 mode: "wide"
 ---
 
-## Overview
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Overview](#1-overview)
+- [2. Available Tests](#2-available-tests)
+  - [2.1. Form Challenges](#21-form-challenges)
+  - [2.2. Interactive Challenges](#22-interactive-challenges)
+- [3. Running Stress Tests](#3-running-stress-tests)
+  - [3.1. Using the Live Site](#31-using-the-live-site)
+  - [3.2. Running Locally](#32-running-locally)
+  - [3.3. Testing with OpenBrowser](#33-testing-with-openbrowser)
+- [4. Contributing Tests](#4-contributing-tests)
+- [5. Source Code](#5-source-code)
+
+<!-- toc:end -->
+
+## 1. Overview
 
 The OpenBrowser Stress Tests are a collection of HTML forms and interactive pages designed to evaluate and benchmark browser automation capabilities. These tests cover various edge cases and challenging scenarios that browser agents may encounter.
 
 **Live Demo**: [billy-enrizky.github.io/openbrowser-ai](https://billy-enrizky.github.io/openbrowser-ai/)
 
-## Available Tests
+## 2. Available Tests
 
-### Form Challenges
+### 2.1. Form Challenges
 
 | Test | Description |
 |------|-------------|
@@ -23,7 +39,7 @@ The OpenBrowser Stress Tests are a collection of HTML forms and interactive page
 | **Validation Form** | Form with various validation rules |
 | **File Upload Form** | Form with file upload capabilities |
 
-### Interactive Challenges
+### 2.2. Interactive Challenges
 
 | Test | Description |
 |------|-------------|
@@ -33,9 +49,9 @@ The OpenBrowser Stress Tests are a collection of HTML forms and interactive page
 | **Shadow DOM** | Elements inside Shadow DOM |
 | **iFrames** | Content embedded in iframes |
 
-## Running Stress Tests
+## 3. Running Stress Tests
 
-### Using the Live Site
+### 3.1. Using the Live Site
 
 Navigate to the stress test you want to run:
 
@@ -43,7 +59,7 @@ Navigate to the stress test you want to run:
 https://billy-enrizky.github.io/openbrowser-ai/challenges-index.html
 ```
 
-### Running Locally
+### 3.2. Running Locally
 
 Clone the repository and open the HTML files:
 
@@ -55,7 +71,7 @@ python -m http.server 8000
 
 Then visit `http://localhost:8000` in your browser.
 
-### Testing with OpenBrowser
+### 3.3. Testing with OpenBrowser
 
 ```python
 import asyncio
@@ -71,7 +87,7 @@ async def run_stress_test():
 asyncio.run(run_stress_test())
 ```
 
-## Contributing Tests
+## 4. Contributing Tests
 
 To add a new stress test:
 
@@ -80,7 +96,6 @@ To add a new stress test:
 3. Document the test in this page
 4. Submit a pull request
 
-## Source Code
+## 5. Source Code
 
 Full implementation: [github.com/billy-enrizky/openbrowser-ai/tree/main/stress-tests](https://github.com/billy-enrizky/openbrowser-ai/tree/main/stress-tests)
-

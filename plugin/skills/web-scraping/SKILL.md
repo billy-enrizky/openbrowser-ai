@@ -60,11 +60,11 @@ openbrowser-ai scrape <url> --format markdown
 openbrowser-ai scrape <url> --format json --selector "article"
 ```
 
-`--engine auto` (default) uses HTTP first and falls back to Chromium for thin JavaScript shells. Use `--engine browser` when JavaScript is required. The browser fallback uses the Playwright headless shell, which uses about half the memory of full Chrome; set `OPENBROWSER_USE_HEADLESS_SHELL=0` to force full Chrome.
+`--engine auto` (default) uses HTTP first and falls back to Chromium for thin JavaScript shells. Use `--engine browser` when JavaScript is required. The browser fallback uses the Playwright headless shell by default; set `OPENBROWSER_USE_HEADLESS_SHELL=0` to force full Chrome.
 
 Add `--only-main-content` to drop navigation, headers, footers, cookie banners, and ad blocks before extraction. `--include-tag` keeps the first matching selector, and `--exclude-tag` removes matches before extraction. They work on the HTTP path and on the browser fallback.
 
-`--render-mode` accepts `full`, `lightweight`, or `no-render`. Lightweight blocks images, fonts, media, and text tracks. No-render adds external stylesheets and disables screenshots. For assets, use the granular flags instead of another mode: `--text-only` blocks CSS, images, fonts, media, and text tracks while keeping scripts and screenshots, and `--no-css`, `--no-images`, `--no-fonts`, `--no-media`, `--no-scripts` each block one group. Blocking external CSS exposes content the page hides with `display:none`, so prefer `lightweight` when visibility matters. Use `--wait-for <selector>` for client-rendered content.
+`--render-mode` accepts `full`, `lightweight`, or `no-render`. Lightweight blocks images, fonts, media, and text tracks. No-render adds external stylesheets and disables screenshots. For browser-fallback assets, use the granular flags instead of another mode: `--text-only` blocks CSS, images, fonts, media, and text tracks while keeping scripts and screenshots, and `--no-css`, `--no-images`, `--no-fonts`, and `--no-media` each block one group. `--no-scripts` is available on the one-shot prompt interface, not on `scrape`. Blocking external CSS exposes content the page hides with `display:none`, so prefer `lightweight` when visibility matters. Use `--wait-for <selector>` for client-rendered content.
 
 For several URLs, use batch mode. HTTP requests run concurrently, while browser fallbacks run one at a time:
 
@@ -76,15 +76,15 @@ openbrowser-ai scrape --urls-file urls.txt --output results.jsonl
 
 Use `--output-format json` or `--output-format jsonl` to choose batch serialization. A `.jsonl` output path selects JSONL by default. Each URL produces a record with `url`, `ok`, `engine_used`, `content`, `error`, `duration_ms`, and `timing`. A failed URL does not stop the batch.
 
-For static pages, add `--engine http`. This uses a light console entry, does not import the browser or configuration stack, and starts no browser:
+For static pages, add `--no-browser`. This is OpenBrowser no-browser mode: a light console entry that does not import the browser or configuration stack, starts no Chrome, Blink, or V8 process, and never falls back to a browser:
 
 ```bash
-openbrowser-ai scrape https://a.example https://b.example --engine http --jsonl --concurrency 8
+openbrowser-ai scrape https://a.example https://b.example --no-browser --jsonl --concurrency 8
 ```
 
-The explicit `--engine http` path is the fastest and lowest-memory option for server-rendered HTML. Use `auto` when a page may need JavaScript, or `browser` when it definitely does.
+It cannot run JavaScript, take screenshots, or use browser cookies. `--engine http` selects the same HTTP-only path. Use `auto` when a page may need JavaScript, or `browser` when it definitely does. The asset flags `--no-css`, `--no-images`, `--no-fonts`, `--no-media`, and `--render-mode` control the browser fallback, not the no-browser HTTP path.
 
-In CodeAgent, call `await scrape_page(url)` for one page or `await scrape_pages(urls, concurrency=4)` for a batch. Each URL returns its own result, and results keep the input order. HTTP requests run concurrently up to the limit. Browser fallbacks run sequentially. Pass `engine="http"` to `scrape_pages()` when the batch is static and must not start a browser. `scrape_page` and `scrape_pages` also accept `only_main_content=True`, `include_tags=[...]`, and `exclude_tags=[...]`.
+In CodeAgent, call `await scrape_page(url)` for one page or `await scrape_pages(urls, concurrency=4)` for a batch. Each URL returns its own result, and results keep the input order. HTTP requests run concurrently up to the limit. Browser fallbacks run sequentially. Pass `engine="http"` to `scrape_pages()` when the batch is static and must not start a browser. That is OpenBrowser no-browser mode: it starts no Chrome, Blink, or V8 process and cannot run JavaScript, take screenshots, or use browser cookies. `scrape_page` and `scrape_pages` also accept `only_main_content=True`, `include_tags=[...]`, and `exclude_tags=[...]`.
 
 ### 2.1. Site discovery: map and crawl
 

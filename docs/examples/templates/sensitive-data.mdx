@@ -5,6 +5,13 @@ icon: "shield"
 mode: "wide"
 ---
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. How it Works](#1-how-it-works)
+- [2. Best Practices](#2-best-practices)
+
+<!-- toc:end -->
 
 ```python
 import asyncio
@@ -41,11 +48,11 @@ if __name__ == '__main__':
     asyncio.run(main())
 ```
 
-## How it Works
+## 1. How it Works
 1. **Text Filtering**: The LLM only sees placeholders (`x_user`, `x_pass`), we filter your sensitive data from the input text.
 2. **DOM Actions**: Real values are injected directly into form fields after the LLM call
 
-## Best Practices
+## 2. Best Practices
 - Use `Browser(allowed_domains=[...])` to restrict navigation
 - Set `use_vision=False` to prevent screenshot leaks  
 - Use `storage_state='./auth.json'` for login cookies instead of passwords when possible

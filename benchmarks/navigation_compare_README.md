@@ -1,8 +1,19 @@
 # Compare local navigation contracts
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Prepare the runtimes](#1-prepare-the-runtimes)
+- [2. Claim tiers and pins](#2-claim-tiers-and-pins)
+- [3. Run after the source stops changing](#3-run-after-the-source-stops-changing)
+- [4. Read the result](#4-read-the-result)
+- [5. Limit the performance claim](#5-limit-the-performance-claim)
+
+<!-- toc:end -->
+
 Run the same navigation, JavaScript input assignment, and POST through OpenBrowser, raw CDP, Lightpanda, agent-browser, and browser-use. This diagnostic uses native local engines and fresh private profiles. It does not invoke an LLM, AWS, Docker, or a user's browser session.
 
-## Prepare the runtimes
+## 1. Prepare the runtimes
 
 Use Python 3.12 or later. The coordinator and each worker need `psutil` and `websockets>=15.0.1`. The OpenBrowser worker also needs the selected source revision's dependencies. Use an existing environment or prepare an isolated environment before measurement. The script never installs packages or downloads browsers.
 
@@ -31,7 +42,7 @@ Use these official metadata endpoints to resolve and retain release pins before 
 
 For example, `curl -fsSL URL -o FILE.json` saves an endpoint response. Combine retained responses into a JSON object and pass its path with `--version-manifest`. The script records that object's contents and SHA-256. This evidence is optional and does not certify that a release remains current. Runtime versions, executable hashes, and installed worker package versions are recorded separately. Retain your full dependency freeze with the results.
 
-## Claim tiers and pins
+## 2. Claim tiers and pins
 
 A result is one of two tiers:
 
@@ -65,7 +76,7 @@ uv run --no-project --offline --python "$NAV_BENCH_OPENBROWSER_PYTHON" \
 
 Without `--claim-tier pinned`, the result is historical even when the versions happen to be current.
 
-## Run after the source stops changing
+## 3. Run after the source stops changing
 
 Run from the repository root. Set these variables to your existing native runtimes:
 
@@ -95,7 +106,7 @@ To test only OpenBrowser and raw CDP, add `--arms raw-cdp openbrowser`. This pro
 uv run --no-sync --offline pytest tests/test_navigation_benchmark.py -q
 ```
 
-## Read the result
+## 4. Read the result
 
 Each arm starts once and receives one fast-page warmup. Measured rounds rotate the arm order. Each round includes a fast page and a page with a deferred external script. The deferred script response waits `--delay` seconds, which defaults to `0.15`. Every page has a fresh nonce and `Cache-Control: no-store`.
 
@@ -119,7 +130,7 @@ The script creates a private run directory, sanitizes browser configuration vari
 
 Cleanup captures descendants and private PID-file identities without treating ancestry alone as ownership. Each process must carry the actual run token and private runtime and home paths. The run directory's ownership marker must match. An explicit Chrome profile argument must identify that runtime's private profile. Graceful shutdown has a ten-second deadline. Before each terminate or kill signal, the fallback rechecks that ownership evidence, the private runtime root, PID creation time, and exact command line. Unverified live processes are not signaled and prevent successful cleanup verification. The directory is deleted only after recorded processes are absent or their PIDs have been reused. On uncertain cleanup, the script retains the directory and reports its path. It never runs a global browser kill or daemon reap. Raw artifacts contain local paths and process command lines. Review them before publishing.
 
-## Limit the performance claim
+## 5. Limit the performance claim
 
 The adapters do not have the same engine, IPC cost, or wait policy:
 

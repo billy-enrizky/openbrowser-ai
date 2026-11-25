@@ -5,13 +5,34 @@ icon: "terminal"
 mode: "wide"
 ---
 
-## Overview
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Overview](#1-overview)
+- [2. Quick Start](#2-quick-start)
+- [3. Native web search](#3-native-web-search)
+- [4. One-shot scraping](#4-one-shot-scraping)
+  - [4.1. Site discovery: map and crawl](#41-site-discovery-map-and-crawl)
+  - [4.2. Render modes and asset flags](#42-render-modes-and-asset-flags)
+  - [4.3. Batch scraping](#43-batch-scraping)
+- [5. Variable Persistence](#5-variable-persistence)
+- [6. Daemon Management](#6-daemon-management)
+- [7. Available Functions](#7-available-functions)
+- [8. Multi-Action Batching](#8-multi-action-batching)
+- [9. Architecture](#9-architecture)
+- [10. Configuration](#10-configuration)
+- [11. Comparison with MCP Server](#11-comparison-with-mcp-server)
+- [12. Troubleshooting](#12-troubleshooting)
+
+<!-- toc:end -->
+
+## 1. Overview
 
 The CLI daemon provides a persistent browser session over a Unix socket. Use the `-c` flag to execute Python code directly from Bash -- no MCP server, no LLM, just code and a browser.
 
 The daemon starts automatically on first use, persists variables across calls, and shuts down after 10 minutes of inactivity.
 
-## Quick Start
+## 2. Quick Start
 
 Before a sequence of `-c` calls, run `openbrowser-ai warm` once to start the daemon and browser. A warm `-c` call uses a standard-library thin client, so it does not import the full CLI or agent stack. A cold call falls back to the full client and starts the daemon.
 
@@ -31,7 +52,7 @@ print(f'{len(state.dom_state.selector_map)} interactive elements')
 "
 ```
 
-## Native web search
+## 3. Native web search
 
 Use `search` to find source URLs without starting Chromium. The command prints a compact table by default.
 
@@ -44,7 +65,7 @@ openbrowser-ai scrape --urls-file search-urls.txt --output scraped-pages.jsonl -
 
 Use `--json` for a JSON array. Use `--urls-only` to write one URL per line. Search snippets do not count as evidence. Scrape and read the source page before you cite it. The package caps `max_results` at 20.
 
-## One-shot scraping
+## 4. One-shot scraping
 
 Use `scrape` for deterministic extraction without an LLM. Static pages use HTTP first. Thin JavaScript shells fall back to Chromium.
 
@@ -67,7 +88,7 @@ openbrowser-ai scrape https://example.com --format json --selector "article" --e
 
 `--engine auto` is the default. `--engine http` never starts a browser. An explicit `--engine http` command uses a light console entry that does not import the browser or configuration stack. `--render-mode no-render` disables screenshots and visual-only actions for the browser fallback. Use `--wait-for` to wait for a selector on JavaScript-rendered pages.
 
-### Site discovery: map and crawl
+### 4.1. Site discovery: map and crawl
 
 Use `map` to list the URLs a site exposes, and `crawl` to read them. Neither starts a browser.
 
@@ -86,7 +107,7 @@ openbrowser-ai crawl https://docs.example.com --max-pages 20 --max-depth 2 --for
 
 Both commands are HTTP-only. A page that needs JavaScript is reported as skipped rather than rendered.
 
-### Render modes and asset flags
+### 4.2. Render modes and asset flags
 
 | Mode | Blocks | Screenshots |
 | --- | --- | --- |
@@ -114,7 +135,7 @@ Blocking external CSS exposes content that the page hides with `display:none` or
 
 The `scrape` browser fallback uses the installed Playwright headless shell by default. The shell has no browser UI or extension support and uses about half the process memory of full Chrome. Set `OPENBROWSER_USE_HEADLESS_SHELL=0` to force full Chrome.
 
-### Batch scraping
+### 4.3. Batch scraping
 
 Pass several URLs or a URL file. HTTP requests run concurrently up to `--concurrency`. Browser fallbacks run one at a time because one session has one global agent focus.
 
@@ -137,7 +158,7 @@ openbrowser-ai scrape https://a.example https://b.example --engine http --jsonl 
 
 `--output-format json|jsonl` selects the batch serialization explicitly. Each batch result has `url`, `ok`, `engine_used`, `content`, `error`, `duration_ms`, and `timing`. A failure for one URL does not abort the batch. A single URL keeps the original content-only output.
 
-## Variable Persistence
+## 5. Variable Persistence
 
 Variables set in one `-c` call are available in the next, as long as the daemon is running:
 
@@ -149,7 +170,7 @@ uvx openbrowser-ai -c "print(title)"  # still available
 
 This enables incremental exploration -- navigate in one call, extract in the next, process in the third.
 
-## Daemon Management
+## 6. Daemon Management
 
 ```bash
 uvx openbrowser-ai config status    # Inspect the selected config file without starting a browser
@@ -180,7 +201,7 @@ Automatic starts for one socket are serialized across processes. The first clien
 
 > **Windows**: On Windows, the daemon uses a localhost TCP connection on port 19222 instead of a Unix socket. This means any process on the same machine can connect. The Unix socket on macOS/Linux is restricted to the file owner (mode `0600`).
 
-## Available Functions
+## 7. Available Functions
 
 All functions from the MCP `execute_code` tool are available in `-c` mode:
 
@@ -207,7 +228,7 @@ Downloads default to `~/Downloads/openbrowser-daemon`; files survive `daemon sto
 
 Available only if installed: `matplotlib`/`plt`, `BeautifulSoup`, `PdfReader` (`openbrowser-ai[pdf]`), `tabulate`
 
-## Multi-Action Batching
+## 8. Multi-Action Batching
 
 Batch multiple actions in a single call for efficiency:
 
@@ -222,7 +243,7 @@ print(f'Results page: {state.title}')
 "
 ```
 
-## Architecture
+## 9. Architecture
 
 ```mermaid
 graph LR
@@ -245,7 +266,7 @@ graph LR
 - The **daemon** holds the browser session, CodeExecutor, and persistent namespace in memory
 - The **browser** connects via Chrome DevTools Protocol (CDP)
 
-## Configuration
+## 10. Configuration
 
 | Variable | Description | Default |
 |----------|-------------|---------|
@@ -260,7 +281,7 @@ graph LR
 | `OPENBROWSER_READ_TIMEOUT` | Client response bound, must exceed exec timeout | `140` |
 | `OPENBROWSER_SHUTDOWN_TIMEOUT` | Inner `BrowserSession` cleanup bound in seconds. The daemon reset/stop wrapper waits up to 5 seconds | `20` |
 
-## Comparison with MCP Server
+## 11. Comparison with MCP Server
 
 | Feature | CLI Daemon (`-c`) | MCP Server (`--mcp`) |
 |---------|-------------------|---------------------|
@@ -273,7 +294,7 @@ graph LR
 
 Both use the same `CodeExecutor` engine and browser automation functions.
 
-## Troubleshooting
+## 12. Troubleshooting
 
 **Config blocks the browser**
 - Run `uvx openbrowser-ai config status`. A legacy, invalid, or unreadable file stays on disk and blocks browser startup.

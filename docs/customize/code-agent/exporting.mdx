@@ -4,9 +4,19 @@ description: "Save and share your CodeAgent sessions as Jupyter notebooks or Pyt
 icon: "download"
 ---
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Quick Start](#1-quick-start)
+- [2. Export Formats](#2-export-formats)
+  - [2.1. Jupyter Notebook (.ipynb)](#21-jupyter-notebook-ipynb)
+  - [2.2. Python Script (.py)](#22-python-script-py)
+
+<!-- toc:end -->
+
 CodeAgent automatically saves all executed code and JavaScript blocks during your session. You can export your complete automation workflow in multiple formats for sharing, version control, or re-running later.
 
-## Quick Start
+## 1. Quick Start
 
 ```python
 import asyncio
@@ -35,9 +45,9 @@ if __name__ == '__main__':
     asyncio.run(main())
 ```
 
-## Export Formats
+## 2. Export Formats
 
-### Jupyter Notebook (.ipynb)
+### 2.1. Jupyter Notebook (.ipynb)
 
 **Contains:**
 - Setup cell with browser initialization and imports
@@ -75,7 +85,7 @@ products = await evaluate(extract_products)
 print(f"Found {len(products)} products")
 ```
 
-### Python Script (.py)
+### 2.2. Python Script (.py)
 
 **Best for:** Production deployment, version control, automation
 

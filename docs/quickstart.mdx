@@ -4,6 +4,18 @@ description: ""
 icon: "rocket"
 ---
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Installing OpenBrowser](#1-installing-openbrowser)
+- [2. Try it without an LLM](#2-try-it-without-an-llm)
+- [3. Choose your favorite LLM](#3-choose-your-favorite-llm)
+- [4. Run your first agent](#4-run-your-first-agent)
+- [5. Set up for your coding agent](#5-set-up-for-your-coding-agent)
+- [6. Going to Production](#6-going-to-production)
+
+<!-- toc:end -->
+
 To get started with OpenBrowser you need to install the package and set up an API key.
 
 ## 1. Installing OpenBrowser
@@ -80,6 +92,7 @@ To get started with OpenBrowser you need to install the package and set up an AP
     ```
 
     No virtual environment needed. Ideal for Claude Code, Cursor, and other MCP clients.
+    The default MCP transport is the lean stdio loop. Set `OPENBROWSER_MCP_TRANSPORT=sdk` to use the SDK transport. Invalid values exit with code 2.
   </Tab>
   <Tab title="pipx">
     ```bash
@@ -103,24 +116,26 @@ To get started with OpenBrowser you need to install the package and set up an AP
 **No separate browser install needed.** OpenBrowser auto-detects any installed Chromium-based browser (Chrome, Edge, Brave, Chromium) and uses it directly. If none is found and `uvx` is available, Chromium is installed automatically on first run. To pre-install manually (requires `uvx`): `openbrowser-ai install`
 </Info>
 
-## Try it without an LLM
+## 2. Try it without an LLM
 
 Search and scrape work immediately. Neither command needs an API key.
 
 ```bash
-# Search with DDGS. This does not start a browser.
+# Search with the package-native DDGS client. This does not start a browser.
 openbrowser-ai search "OpenBrowser MCP docs" --max-results 5
 
-# Scrape a static page over HTTP. This does not start a browser.
-openbrowser-ai scrape https://example.com --engine http --format markdown
+# OpenBrowser no-browser mode: no Chrome, Blink, or V8 process.
+openbrowser-ai scrape https://example.com --no-browser --format markdown
 
 # Batch scrape static pages with bounded concurrency.
-openbrowser-ai scrape https://a.example https://b.example --engine http --jsonl --concurrency 8
+openbrowser-ai scrape https://a.example https://b.example --no-browser --jsonl --concurrency 8
 ```
 
-Search snippets are not evidence. Scrape and read the source page before you cite it. Use the default `auto` engine when a page may need JavaScript.
+Search snippets are not evidence. Scrape and read the source page before you cite it.
 
-## 2. Choose your favorite LLM
+`--no-browser` starts no Chrome, Blink, or V8 process, never falls back to a browser, and cannot run JavaScript, take screenshots, or use browser cookies. The asset flags `--no-css`, `--no-images`, `--no-fonts`, `--no-media`, and `--render-mode` control the browser fallback, not the no-browser HTTP path. Use the default `auto` engine when a page may need JavaScript.
+
+## 3. Choose your favorite LLM
 Create a `.env` file and add your API key.
 
 ```bash .env
@@ -149,7 +164,7 @@ ANTHROPIC_API_KEY=
 
 See [Supported Models](/supported-models) for more.
 
-## 3. Run your first agent
+## 4. Run your first agent
 
 <CodeGroup>
 ```python Google
@@ -204,7 +219,7 @@ if __name__ == "__main__":
 
 <Note> Custom browsers can be configured in one line. Check out <a href = "customize/browser/basics">browsers</a> for more. </Note>
 
-## 4. Set up for your coding agent
+## 5. Set up for your coding agent
 
 The `setup` skill installs the CLI and Chromium, configures MCP and profiles, installs the plugin skills, and verifies a real browser session.
 
@@ -228,6 +243,10 @@ The portable MCP server command is:
 uvx openbrowser-ai --mcp
 ```
 
-## 5. Going to Production
+Modern `2026-07-28` clients see seven tools: `create_context`, `execute_code`, `get_status`, `reset_browser`, `close_context`, `search_web`, and `scrape_web`. The legacy handshakes `2024-11-05`, `2025-03-26`, `2025-06-18`, and `2025-11-25` see four tools: `execute_code`, `get_status`, `reset_browser`, and `search_web`. `scrape_web` is stateless and uses OpenBrowser no-browser mode: it starts no Chrome, Blink, or V8 process and cannot run JavaScript, take screenshots, or use browser cookies.
+
+This uses the lean stdio transport by default. Set `OPENBROWSER_MCP_TRANSPORT=sdk` to opt into the MCP SDK transport. Invalid values exit with code 2.
+
+## 6. Going to Production
 
 For production deployments, see [Going to Production](/production) for best practices on running OpenBrowser in production environments.

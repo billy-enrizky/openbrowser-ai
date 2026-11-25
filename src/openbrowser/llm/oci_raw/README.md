@@ -1,8 +1,41 @@
 # OCI Raw API Integration
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Features](#1-features)
+- [2. Installation](#2-installation)
+- [3. Usage](#3-usage)
+  - [3.1. Basic Usage](#31-basic-usage)
+  - [3.2. Provider-Specific Configuration Examples](#32-provider-specific-configuration-examples)
+    - [3.2.1. Meta Llama Model](#321-meta-llama-model)
+    - [3.2.2. Cohere Model](#322-cohere-model)
+    - [3.2.3. xAI Model](#323-xai-model)
+  - [3.3. Structured Output](#33-structured-output)
+- [4. Available Models](#4-available-models)
+  - [4.1. Tool Calling Support](#41-tool-calling-support)
+  - [4.2. Image Support Models](#42-image-support-models)
+    - [4.2.1. Vision-Enabled Chat Models](#421-vision-enabled-chat-models)
+    - [4.2.2. Image Embedding Models](#422-image-embedding-models)
+- [5. Configuration](#5-configuration)
+  - [5.1. Provider-Specific API Formats](#51-provider-specific-api-formats)
+    - [5.1.1. Meta and xAI Models](#511-meta-and-xai-models)
+    - [5.1.2. Cohere Models](#512-cohere-models)
+  - [5.2. Authentication Types](#52-authentication-types)
+  - [5.3. Model Parameters](#53-model-parameters)
+- [6. Error Handling](#6-error-handling)
+- [7. Comparison with Langchain Integration](#7-comparison-with-langchain-integration)
+- [8. Example Response Format](#8-example-response-format)
+- [9. Troubleshooting](#9-troubleshooting)
+  - [9.1. Common Issues](#91-common-issues)
+  - [9.2. Debug Mode](#92-debug-mode)
+- [10. Contributing](#10-contributing)
+
+<!-- toc:end -->
+
 This module provides direct integration with Oracle Cloud Infrastructure's Generative AI service using raw API calls, without Langchain dependencies.
 
-## Features
+## 1. Features
 
 - **Direct API Integration**: Uses OCI's native Python SDK for direct API calls
 - **Async Support**: Full async/await support for non-blocking operations
@@ -10,7 +43,7 @@ This module provides direct integration with Oracle Cloud Infrastructure's Gener
 - **Error Handling**: Comprehensive error handling with proper exception types
 - **Authentication**: Support for multiple OCI authentication methods
 
-## Installation
+## 2. Installation
 
 Make sure you have the required OCI dependencies installed:
 
@@ -18,9 +51,9 @@ Make sure you have the required OCI dependencies installed:
 pip install oci
 ```
 
-## Usage
+## 3. Usage
 
-### Basic Usage
+### 3.1. Basic Usage
 
 ```python
 from openbrowser import Agent
@@ -50,9 +83,9 @@ import asyncio
 history = asyncio.run(agent.run())
 ```
 
-### Provider-Specific Configuration Examples
+### 3.2. Provider-Specific Configuration Examples
 
-#### Meta Llama Model
+#### 3.2.1. Meta Llama Model
 ```python
 meta_model = ChatOCIRaw(
     model_id="ocid1.generativeaimodel.oc1.us-chicago-1.amaaaaaask7dceya...",
@@ -67,7 +100,7 @@ meta_model = ChatOCIRaw(
 )
 ```
 
-#### Cohere Model
+#### 3.2.2. Cohere Model
 ```python
 cohere_model = ChatOCIRaw(
     model_id="ocid1.generativeaimodel.oc1.us-chicago-1.amaaaaaask7dceya...",
@@ -82,7 +115,7 @@ cohere_model = ChatOCIRaw(
 )
 ```
 
-#### xAI Model
+#### 3.2.3. xAI Model
 ```python
 xai_model = ChatOCIRaw(
     model_id="ocid1.generativeaimodel.oc1.us-chicago-1.amaaaaaask7dceya...",
@@ -96,7 +129,7 @@ xai_model = ChatOCIRaw(
 )
 ```
 
-### Structured Output
+### 3.3. Structured Output
 
 ```python
 from pydantic import BaseModel
@@ -111,25 +144,25 @@ response = await model.ainvoke(messages, output_format=SearchResult)
 result = response.completion  # This is a SearchResult instance
 ```
 
-## Available Models
+## 4. Available Models
 
 For the complete list of available models in Oracle Cloud Infrastructure Generative AI, refer to the official documentation: [OCI Generative AI Pretrained Models](https://docs.oracle.com/en-us/iaas/Content/generative-ai/pretrained-models.htm)
 
-### Tool Calling Support
+### 4.1. Tool Calling Support
 
 **Important**: Only models that support tool calling/function calling are compatible with openbrowser. Tool calling is essential for openbrowser as the agent needs to call browser automation functions (click, type, scroll, etc.) to interact with web pages.
 
 According to Oracle's documentation, tool calling functionality is available exclusively through the API and is not supported for browser-based use. However, when using openbrowser with OCI models through this integration, the tool calling happens at the application level (not browser-based), making it compatible.
 
-### Image Support Models
+### 4.2. Image Support Models
 
 Several OCI models support image processing capabilities, which are useful when openbrowser needs to analyze webpage screenshots:
 
-#### Vision-Enabled Chat Models
+#### 4.2.1. Vision-Enabled Chat Models
 - **Meta Llama 3.2 90B Vision**: Supports both text and image inputs
 - **Meta Llama 3.2 11B Vision**: Supports both text and image inputs
 
-#### Image Embedding Models
+#### 4.2.2. Image Embedding Models
 - **Cohere Embed English Image 3**: Supports image inputs for semantic searches
 - **Cohere Embed Multilingual Image 3**: Supports multilingual image processing
 - **Cohere Embed English Light Image 3**: Lightweight version with image support
@@ -141,25 +174,25 @@ These vision-enabled models are particularly useful for openbrowser tasks that r
 - Understanding page layouts and visual context
 - Processing charts, graphs, and visual data
 
-## Configuration
+## 5. Configuration
 
-### Provider-Specific API Formats
+### 5.1. Provider-Specific API Formats
 
 Different model providers in OCI use different API request formats:
 
-#### Meta and xAI Models
+#### 5.1.1. Meta and xAI Models
 - Use `GenericChatRequest` with messages array
 - Support structured conversations with multiple message types
 - Parameters: `temperature`, `max_tokens`, `frequency_penalty`, `presence_penalty`, `top_p`
 
-#### Cohere Models  
+#### 5.1.2. Cohere Models
 - Use `CohereChatRequest` with single message string
 - Convert conversation history to a single formatted string
 - Parameters: `temperature`, `max_tokens`, `frequency_penalty`, `top_p`, `top_k`
 
 The integration automatically detects the correct format based on the `provider` parameter and handles the conversion transparently.
 
-### Authentication Types
+### 5.2. Authentication Types
 
 The integration supports multiple OCI authentication methods:
 
@@ -167,7 +200,7 @@ The integration supports multiple OCI authentication methods:
 - `INSTANCE_PRINCIPAL`: Uses instance principal authentication
 - `RESOURCE_PRINCIPAL`: Uses resource principal authentication
 
-### Model Parameters
+### 5.3. Model Parameters
 
 - `model_id`: The OCID of your OCI GenAI model
 - `service_endpoint`: The OCI service endpoint URL
@@ -180,14 +213,14 @@ The integration supports multiple OCI authentication methods:
 - `presence_penalty`: Presence penalty for repetition
 - `top_k`: Top-k sampling parameter (used by Cohere models)
 
-## Error Handling
+## 6. Error Handling
 
 The integration provides proper error handling with specific exception types:
 
 - `ModelRateLimitError`: For rate limiting (429 errors)
 - `ModelProviderError`: For other API errors (4xx, 5xx)
 
-## Comparison with Langchain Integration
+## 7. Comparison with Langchain Integration
 
 | Feature | OCI Raw API | Langchain Integration |
 |---------|-------------|----------------------|
@@ -197,7 +230,7 @@ The integration provides proper error handling with specific exception types:
 | Updates | Direct OCI SDK updates | Dependent on Langchain updates |
 | Complexity | Lower complexity | Higher complexity |
 
-## Example Response Format
+## 8. Example Response Format
 
 The OCI GenAI API returns responses in this format:
 
@@ -229,9 +262,9 @@ The OCI GenAI API returns responses in this format:
 }
 ```
 
-## Troubleshooting
+## 9. Troubleshooting
 
-### Common Issues
+### 9.1. Common Issues
 
 1. **Authentication Errors**: Ensure your OCI configuration is correct and you have the necessary permissions
 2. **Model Not Found**: Verify your model OCID and ensure it's available in your compartment
@@ -241,11 +274,11 @@ The OCI GenAI API returns responses in this format:
    - Use `provider="cohere"` for Cohere models  
    - Use `provider="xai"` for xAI models
 
-### Debug Mode
+### 9.2. Debug Mode
 
 Enable verbose logging by setting the `verbose` parameter to `True` (not implemented in this version but can be added).
 
-## Contributing
+## 10. Contributing
 
 When contributing to this module:
 

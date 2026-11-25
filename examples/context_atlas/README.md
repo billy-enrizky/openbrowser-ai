@@ -1,10 +1,21 @@
 # Context Atlas
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Two ways to search](#1-two-ways-to-search)
+- [2. Run the separate localhost page](#2-run-the-separate-localhost-page)
+- [3. Build the extension](#3-build-the-extension)
+- [4. Source-backed results](#4-source-backed-results)
+- [5. Build and packaging verification](#5-build-and-packaging-verification)
+
+<!-- toc:end -->
+
 Context Atlas helps people find the exact words that answer a question about
 the webpage they are reading. Every result stays connected to its source
 sentence, so the page can be checked immediately.
 
-## Two ways to search
+## 1. Two ways to search
 
 - **Local** keeps search in the browser. The model downloads once, on first
   use, and prefers WebGPU with a bundled WASM fallback. No model server is
@@ -20,7 +31,7 @@ does not store raw page text or URLs in the history records. A changed page or
 source invalidates an older result, and a storage failure does not block a new
 search.
 
-## Run the separate localhost page
+## 2. Run the separate localhost page
 
 The localhost page is a companion workspace, not the page being searched. The
 extension panel stays on the current webpage while the companion page remains
@@ -46,7 +57,7 @@ Open <http://127.0.0.1:8765/>. Then:
 The page source is captured automatically. If it is not ready, click
 **Refresh from current page** after opening the extension on the webpage.
 
-## Build the extension
+## 3. Build the extension
 
 ```bash
 npm --prefix examples/context_atlas/ui install
@@ -73,7 +84,7 @@ External access is optional: choosing Cloud requests access to the Cloud API,
 and starting Local search for the first time requests access to the pinned
 model-data hosts. No external host access is required at installation.
 
-## Source-backed results
+## 4. Source-backed results
 
 Search is bounded to 400 question characters, 160 passages, 2,200 characters
 per passage, and 60,000 total source characters. Longer pages are planned with
@@ -82,7 +93,7 @@ several results are similarly relevant, Context Atlas shows up to five close
 matches. Choosing one displays the exact source sentence, preserves provenance,
 and highlights that sentence on the webpage.
 
-## Build and packaging verification
+## 5. Build and packaging verification
 
 The extension ships source and build inputs without local test fixtures. Verify
 the delivered build and deterministic Chrome package with:

@@ -106,7 +106,7 @@ Add this entry to `opencode.json` in your project:
 
 If OpenCode cannot find `openbrowser-ai`, set `command` to `["uvx", "openbrowser-ai", "--mcp"]`.
 
-The OpenBrowser server uses MCP SDK 2.3 and negotiates protocol version `2026-07-28` with modern clients. Call `create_context` first, pass its returned `context_id` to stateful tools, and call `close_context` when finished. Older supported clients use the legacy four-tool catalog, which includes stateless `search_web`.
+The default OpenBrowser stdio transport is a lean JSON-RPC loop. It answers discovery and the tool catalog before it imports the MCP SDK. Set `OPENBROWSER_MCP_TRANSPORT=sdk` in the server environment to use the MCP SDK 2.3 escape hatch. Invalid values exit with code 2. Modern `2026-07-28` clients see seven tools: `create_context`, `execute_code`, `get_status`, `reset_browser`, `close_context`, `search_web`, and `scrape_web`. The legacy handshakes `2024-11-05`, `2025-03-26`, `2025-06-18`, and `2025-11-25` see four tools: `execute_code`, `get_status`, `reset_browser`, and `search_web`. Call `create_context` first, pass its returned `context_id` to stateful tools, and call `close_context` when finished. `scrape_web` is stateless and fetches one HTTP(S) page in OpenBrowser no-browser mode: it starts no Chrome, Blink, or V8 process and cannot run JavaScript, take screenshots, or use browser cookies.
 
 ## 6. Available Skills
 
@@ -146,11 +146,13 @@ openbrowser-ai -c "print(await evaluate('document.title'))"
 
 A warm `-c` call uses a standard-library thin client, so it does not import the full CLI or agent stack. A cold call falls back to the full client and starts the daemon.
 
-For static pages, scrape a batch without starting a browser:
+For static pages, use OpenBrowser no-browser mode:
 
 ```bash
-openbrowser-ai scrape https://a.example https://b.example --engine http --jsonl --concurrency 8
+openbrowser-ai scrape https://a.example https://b.example --no-browser --jsonl --concurrency 8
 ```
+
+`--no-browser` starts no Chrome, Blink, or V8 process and never falls back to a browser. It cannot run JavaScript, take screenshots, or use browser cookies. Use the default `auto` engine or `--engine browser` when a page needs JavaScript.
 
 ### 8.1. Tool Mapping
 

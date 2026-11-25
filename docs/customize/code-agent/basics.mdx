@@ -4,13 +4,28 @@ description: "Write Python code locally with browser automation"
 icon: "code"
 ---
 
+<!-- toc:start -->
+## Table of Contents
+
+- [1. Quick Start](#1-quick-start)
+- [2. When to Use](#2-when-to-use)
+- [3. Available Libraries](#3-available-libraries)
+- [4. Available Tools](#4-available-tools)
+- [5. Exporting Sessions](#5-exporting-sessions)
+  - [5.1. Quick Export](#51-quick-export)
+  - [5.2. Export Formats](#52-export-formats)
+- [6. Run lifecycle and cancellation](#6-run-lifecycle-and-cancellation)
+- [7. Files and downloads](#7-files-and-downloads)
+
+<!-- toc:end -->
+
 CodeAgent writes and executes Python code locally with browser automation capabilities. It's designed for repetitive data extraction tasks where the agent can write reusable functions.
 
 <Warning>
 CodeAgent executes Python code on your local machine like Claude Code.
 </Warning>
 
-## Quick Start
+## 1. Quick Start
 
 
 ```python
@@ -33,7 +48,7 @@ asyncio.run(main())
 GOOGLE_API_KEY=your-api-key
 ```
 
-## When to Use
+## 2. When to Use
 
 **Best for:**
 - Data extraction at scale (100s-1000s of items)
@@ -67,7 +82,7 @@ df = pd.DataFrame(products)
 df.to_csv('products.csv', index=False)
 ```
 
-## Available Libraries
+## 3. Available Libraries
 
 The agent can use common Python libraries:
 
@@ -79,7 +94,7 @@ The agent can use common Python libraries:
 - and all which you install ...
 
 
-## Available Tools
+## 4. Available Tools
 
 The agent has access to browser control functions:
 
@@ -116,11 +131,11 @@ CodeAgent excludes the Agent-only actions `extract`, `find_text`, `screenshot`, 
 
 Prefer indexed actions whenever an element index exists. The `*_xy` coordinates are CSS viewport pixels, not screenshot pixels. If a screenshot uses a `devicePixelRatio` other than 1, divide its coordinates by `window.devicePixelRatio` first.
 
-## Exporting Sessions
+## 5. Exporting Sessions
 
 CodeAgent automatically saves all executed code and JavaScript blocks during your session. You can export your complete automation workflow for sharing, version control, or re-running later.
 
-### Quick Export
+### 5.1. Quick Export
 
 ```python
 from openbrowser.code_use.notebook_export import export_to_ipynb, session_to_python_script
@@ -137,7 +152,7 @@ with open("my_automation.py", "w") as f:
     f.write(script)
 ```
 
-### Export Formats
+### 5.2. Export Formats
 
 - **Jupyter Notebook (.ipynb)**: Interactive development, sharing, documentation
 - **Python Script (.py)**: Production deployment, version control, automation
@@ -148,7 +163,7 @@ Both formats include:
 - All executed Python cells with outputs
 - Ready-to-run automation workflows
 
-## Run lifecycle and cancellation
+## 6. Run lifecycle and cancellation
 
 `agent.status` returns a `CodeAgentRunStatus`. Use it instead of inferring state from logs:
 
@@ -158,7 +173,7 @@ Both formats include:
 
 `agent.stop()` requests cooperative cancellation between `await` points. A cell that is already executing is not interrupted. Cancel the `run()` task if that cell must stop immediately. A stop request before `run()` is retained and cancels the next run without starting a browser. A caller cancellation does not prove that the worker stopped; inspect `status` and run required cleanup before starting another agent.
 
-## Files and downloads
+## 7. Files and downloads
 
 When you do not pass `file_system`, every CodeAgent uses a unique temporary agent directory. Pass `FileSystem(base_dir=...)` if a stable path is required.
 
