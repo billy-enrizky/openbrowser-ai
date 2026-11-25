@@ -1,7 +1,7 @@
-"""Plot the interactive resource pilot for documentation.
+"""Plot the interactive resource lane for documentation.
 
 Run with matplotlib installed outside the base package:
-    uv run --with matplotlib python benchmarks/interactive/plot_resource_pilot.py
+    uv run --with matplotlib python benchmarks/interactive/plot_interactive_resources.py
 """
 
 from __future__ import annotations
