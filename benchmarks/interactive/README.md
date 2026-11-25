@@ -7,7 +7,7 @@
 - [2. Current results, 2026-11-25, rotated N=5](#2-current-results-2026-11-25-rotated-n5)
   - [2.1. Cold interactive](#21-cold-interactive)
   - [2.2. Warm interactive](#22-warm-interactive)
-  - [2.3. Remaining measured gap](#23-remaining-measured-gap)
+  - [2.3. Timer and cleanup boundary](#23-timer-and-cleanup-boundary)
 - [3. Interactive resource pilot, 2026-11-25](#3-interactive-resource-pilot-2026-11-25)
 - [4. Arms](#4-arms)
 - [5. Tasks](#5-tasks)
@@ -58,7 +58,8 @@ server-side oracle, not by the adapter's self-report.
 - The host Playwright cache was exposed to every arm.
 - Lean MCP transport was the default.
 - No AWS or cloud browser was used.
-- Cold-lane host load was 6.486, 5.743, 5.360 before and 8.189, 6.929, 5.971 after on 18 logical CPUs. The brief does not report warm-lane host load.
+- Cold-lane host load was 4.282, 3.639, 3.877 before and 4.262, 3.914, 3.937 after on 18 logical CPUs. The brief does not report warm-lane host load.
+- Cold latency is time to result. The timer measures task completion and any in-task restart. Final adapter cleanup runs once after the timed interval for every arm and is not charged to the task.
 - A paired win means one arm was faster on an individual sample matched against the same task and fixture. It is not a significance test.
 
 ## 2. Current results, 2026-11-25, rotated N=5
@@ -71,21 +72,19 @@ Lower is better for latency ↓.
 
 | Task | OpenBrowser MCP p50 ms | OpenBrowser CLI p50 ms | chrome-devtools-mcp p50 ms | agent-browser p50 ms | browser-use p50 ms |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| wizard | 715 | 999 | 4335 | 1599 | 1277 |
-| modal | 811 | 1206 | 3639 | 2262 | 1571 |
-| download | 954 | 1344 | 1633 | 1554 | 1368 |
-| tabs | 658 | 1010 | 2426 | 1511 | 940 |
-| auth | 1390 | 1915 | 3707 | 2529 | 2585 |
+| wizard | 531 | 612 | 4244 | 1306 | 1031 |
+| modal | 706 | 772 | 3433 | 2151 | 1706 |
+| download | 857 | 908 | 1453 | 1329 | 1103 |
+| tabs | 560 | 632 | 2160 | 1271 | 697 |
+| auth | 1255 | 1454 | 3565 | 2205 | 2336 |
 
-OpenBrowser MCP has the lowest p50 on all five cold tasks against all three competitors and won every paired sample, 5 of 5, on every task against every competitor.
-
-OpenBrowser CLI won every cold task against every competitor except `tabs` against browser-use. CLI `tabs` p50 was 1010 ms against 940 ms. Do not claim that every arm wins every cold task.
+Both OpenBrowser arms have the lowest p50 on all five cold tasks against all three competitors. OpenBrowser MCP and OpenBrowser CLI each won every paired sample, 5 of 5, on every task against every competitor. The CLI `tabs` p50 is 632 ms against browser-use at 697 ms.
 
 Raw evidence:
 
-- [results-cold-five-arm-lean-2026-11-25-n5-final2.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-five-arm-lean-2026-11-25-n5-final2.jsonl)
-- [results-cold-five-arm-lean-2026-11-25-n5-final2.meta.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-five-arm-lean-2026-11-25-n5-final2.meta.json)
-- [results-cold-five-arm-lean-2026-11-25-n5-final2.summary.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-five-arm-lean-2026-11-25-n5-final2.summary.json)
+- [results-cold-five-arm-lean-2026-11-25-n5-final3.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-five-arm-lean-2026-11-25-n5-final3.jsonl)
+- [results-cold-five-arm-lean-2026-11-25-n5-final3.meta.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-five-arm-lean-2026-11-25-n5-final3.meta.json)
+- [results-cold-five-arm-lean-2026-11-25-n5-final3.summary.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-five-arm-lean-2026-11-25-n5-final3.summary.json)
 
 ### 2.2. Warm interactive
 
@@ -109,9 +108,11 @@ Raw evidence:
 - [results-warm-five-arm-lean-2026-11-25-n5-final2.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-five-arm-lean-2026-11-25-n5-final2.jsonl)
 - [results-warm-five-arm-lean-2026-11-25-n5-final2.summary.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-five-arm-lean-2026-11-25-n5-final2.summary.json)
 
-### 2.3. Remaining measured gap
+### 2.3. Timer and cleanup boundary
 
-OpenBrowser CLI is the only OpenBrowser arm with a measured cold p50 loss in this lane: `tabs` at 1010 ms against browser-use at 940 ms. OpenBrowser MCP has the lowest p50 on every cold task, and both OpenBrowser arms have the lowest warm p50 on every warm task. Do not generalize these results to unmeasured tasks, surfaces, or configurations.
+The timer runs from the start of `arm.run` to its return. Cleanup runs once after that interval in `run_one` for every arm. An earlier harness version also ran cleanup inside `arm.run`, so every arm paid teardown twice and the timed interval included that teardown. The current lane removes the duplicate and keeps one verified cleanup outside the timer.
+
+This is a harness change, not a product speedup. The cold table above is the current measurement. The earlier final2 table included teardown and is retained only as history.
 
 ## 3. Interactive resource pilot, 2026-11-25
 
