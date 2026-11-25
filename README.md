@@ -669,18 +669,22 @@ Memory depends on the surface. Values are process-tree RSS on a local fixture:
 
 The `scrape` browser fallback uses the Playwright headless shell by default. `OPENBROWSER_USE_HEADLESS_SHELL=0` restores full Chrome.
 
-Warm interactive, N=5, rotated arm order, lower is better:
+Warm interactive v2, N=5, rotated arm order. Latency (ms) ↓ **Lower is better**.
 
-| Task | OpenBrowser MCP p50 | OpenBrowser CLI p50 | chrome-devtools-mcp p50 | agent-browser p50 | browser-use p50 |
+Warm v2 uses `browser-use-native-readiness-v2` with OpenBrowser app `5a88fb97`. Each arm starts once and every task gets a fresh fixture server. All 100 observations passed the adapter, exact oracle, and keychain checks. Warm tables show milliseconds to three decimal places. The raw file keeps full precision.
+
+| Task | OpenBrowser MCP p50 ms | OpenBrowser CLI p50 ms | chrome-devtools-mcp p50 ms | agent-browser p50 ms | browser-use p50 ms |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `wizard` | **56 ms** | 120 ms | 3482 ms | 494 ms | 519 ms |
-| `modal` | **211 ms** | 268 ms | 2760 ms | 1147 ms | 811 ms |
-| `download` | **348 ms** | 395 ms | 772 ms | 438 ms | 573 ms |
-| `tabs` | **72 ms** | 131 ms | 1485 ms | 397 ms | 232 ms |
+| `wizard` | 43.555 | 88.456 | 3441.495 | 451.787 | 471.800 |
+| `modal` | 199.144 | 244.149 | 2716.979 | 1095.635 | 912.795 |
+| `download` | 332.502 | 384.810 | 767.921 | 414.847 | 558.928 |
+| `tabs` | 62.077 | 113.553 | 1453.474 | 359.101 | 194.579 |
 
-Both OpenBrowser arms have the lowest p50 on all four warm tasks, and both won 5 of 5 pairs on every task against every competitor. All 100 runs passed.
+Both OpenBrowser arms have the lowest warm p50 on all four tasks. Each arm won all 60 eligible pairs, for 120 of 120 total. The `auth` task is cold only because it restarts the browser.
 
-Cold interactive, N=5, rotated arm order, lower is better. The timer measures time to result. Final adapter cleanup runs once outside the timed interval for every arm.
+[Raw data](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-five-arm-readiness-v2-2026-11-25-n5.jsonl), [summary](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-five-arm-readiness-v2-2026-11-25-n5.summary.json), and [method provenance](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-five-arm-readiness-v2-2026-11-25-n5.provenance.json).
+
+Cold interactive release baseline, N=5, rotated arm order, lower is better. The timer measures time to result. Final adapter cleanup runs once outside the timed interval for every arm.
 
 | Task | OpenBrowser MCP p50 | OpenBrowser CLI p50 | chrome-devtools-mcp p50 | agent-browser p50 | browser-use p50 |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -690,7 +694,7 @@ Cold interactive, N=5, rotated arm order, lower is better. The timer measures ti
 | `tabs` | **593 ms** | 683 ms | 2220 ms | 1393 ms | 797 ms |
 | `auth` | **1305 ms** | 1604 ms | 3703 ms | 2506 ms | 2476 ms |
 
-Both OpenBrowser arms have the lowest p50 on all five cold tasks, and both won 5 of 5 pairs on every task against every competitor. Browser-use does not win download or tabs in the current lane. All 125 runs passed the exact oracle and keychain check.
+In the cold release baseline, both OpenBrowser arms have the lowest p50 on all five tasks and won 5 of 5 pairs against every competitor. All 125 runs passed the exact oracle and keychain check.
 
 Interactive resource lane, N=5: both OpenBrowser arms have the lowest median child footprint, process-tree RSS, and CPU on all five tasks. Both arms won all 150 eligible pairs per metric. Every cell is N=5 and all 125 observations passed. See [the charted comparison](https://docs.openbrowser.me/comparison).
 

@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import json
+import socket
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from benchmarks.interactive import warm_benchmark
+from benchmarks.interactive.adapters.base import ArmResult
 from benchmarks.interactive.adapters.openbrowser import OpenBrowserArm
 from benchmarks.interactive.run_benchmark import make_arm
 from benchmarks.interactive.tasks import oracle_tabs
@@ -172,3 +177,94 @@ def test_cold_p50_reads_openbrowser_records(tmp_path: Path):
 def test_redact_hides_home_and_worktrees():
     assert redact(str(Path.home() / "bin" / "openbrowser-ai")) == "$HOME/bin/openbrowser-ai"
     assert redact("/repo/.worktrees/example/.venv/bin/openbrowser-ai") == "working copy"
+
+
+def test_no_cold_reference_loads_no_samples():
+    assert cold_p50(None) == {}
+
+
+def test_summary_without_reference_has_no_cold_ratio_fields():
+    record = {"task": "wizard", "arm": "openbrowser-fast", "ok": True, "latency_ms": 250.0, "error": ""}
+    row = summarize([record], {})[0]
+    assert "cold_p50_ms" not in row
+    assert "speedup" not in row
+
+
+def _fake_warm_cli(tmp_path, monkeypatch, *, cold_file=None):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("fake warm CLI attempted a real process or socket")
+
+    monkeypatch.setattr(subprocess, "Popen", forbidden)
+    monkeypatch.setattr(socket, "socket", forbidden)
+    monkeypatch.setattr(socket, "create_connection", forbidden)
+    submission = {
+        "name": "Alice Bench",
+        "email": "alice@example.com",
+        "country": "CA",
+        "province": "ON",
+        "plan": "pro",
+        "seats": 5,
+        "terms": True,
+        "quote": "Q-1",
+    }
+    state = {"wizard_submissions": [submission], "wizard_step1": 1, "wizard_step2": 1, "wizard_submits": 1}
+    server = SimpleNamespace(base_url="http://fixture.invalid", state=SimpleNamespace(snapshot=lambda: state))
+
+    class FakeArm:
+        binary = ""
+
+        def warmup(self, ctx):
+            return {"ok": True, "browser_version": "fake"}, 0.0
+
+        def run(self, ctx, *, cleanup=True):
+            assert cleanup is False
+            return ArmResult(ok=True, reported={"quote": "Q-1"}, keychain_verified=True)
+
+        def cleanup(self, ctx):
+            assert ctx.root.is_relative_to(tmp_path)
+
+    clock = iter([1000.0, 1000.25])
+    monkeypatch.setattr(warm_benchmark, "time", SimpleNamespace(monotonic=lambda: next(clock), time_ns=lambda: 1))
+    monkeypatch.setattr(warm_benchmark, "platform", SimpleNamespace(platform=lambda: "fake", machine=lambda: "fake"))
+    monkeypatch.setattr(warm_benchmark, "_loads", lambda: (0, 0, 0))
+    monkeypatch.setattr(warm_benchmark, "make_arm", lambda name: FakeArm())
+    monkeypatch.setattr(warm_benchmark, "_write_config", lambda *args, **kwargs: None)
+    monkeypatch.setattr(warm_benchmark, "start_fixture", lambda: (server, None))
+    monkeypatch.setattr(warm_benchmark, "stop_fixture", lambda *args: None)
+    output = tmp_path / "warm.jsonl"
+    argv = [
+        "warm_benchmark",
+        "--arms",
+        "openbrowser-fast",
+        "--tasks",
+        "wizard",
+        "--samples",
+        "1",
+        "--workdir",
+        str(tmp_path / "runs"),
+        "--output",
+        str(output),
+    ]
+    if cold_file is not None:
+        argv.extend(["--cold-results", str(cold_file)])
+    monkeypatch.setattr(sys, "argv", argv)
+    assert warm_benchmark.main() == 0
+    return json.loads(output.with_suffix(".summary.json").read_text())
+
+
+def test_default_warm_cli_has_no_cold_reference_or_ratio(tmp_path, monkeypatch):
+    report = _fake_warm_cli(tmp_path, monkeypatch)
+    assert warm_benchmark.DEFAULT_COLD_RESULTS is None
+    assert report["environment"]["cold_results"] is None
+    assert "cold_p50_ms" not in report["rows"][0]
+    assert "speedup" not in report["rows"][0]
+
+
+def test_explicit_cold_reference_remains_opt_in(tmp_path, monkeypatch):
+    cold = tmp_path / "cold.jsonl"
+    cold.write_text(json.dumps({"task": "wizard", "arm": "openbrowser-fast", "ok": True, "latency_ms": 500.0}) + "\n")
+    report = _fake_warm_cli(tmp_path, monkeypatch, cold_file=cold)
+    assert report["environment"]["cold_results"] == str(cold)
+    assert report["rows"][0]["cold_p50_ms"] == 500.0
+    assert report["rows"][0]["warm_p50_ms"] == 250.0
+    assert report["rows"][0]["speedup"] == 2.0
