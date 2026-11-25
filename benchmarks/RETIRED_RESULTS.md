@@ -1,11 +1,14 @@
 # Retired Benchmark Results
 
+<!-- toc:start -->
 ## Contents
 
 - [1. Recovery](#1-recovery)
 - [2. Current evidence retained](#2-current-evidence-retained)
 - [3. Retired result files](#3-retired-result-files)
 - [4. Retired charts and scripts](#4-retired-charts-and-scripts)
+
+<!-- toc:end -->
 
 ## 1. Recovery
 

@@ -32,7 +32,7 @@ from .tasks import ORACLES, TASKS
 HERE = Path(__file__).resolve().parent
 DEFAULT_OUTPUT = HERE / "results" / "results-warm.jsonl"
 DEFAULT_WORKDIR = Path("/tmp/obib-warm-runs")
-DEFAULT_COLD_RESULTS = HERE / "results" / "results-2026-11-23-lean.jsonl"
+DEFAULT_COLD_RESULTS = HERE / "results" / "results-cold-five-arm-lean-2026-11-25-n5-final4.jsonl"
 WARM_TASKS = ("wizard", "modal", "download", "tabs")
 DEFAULT_ARMS = (
     "openbrowser",
