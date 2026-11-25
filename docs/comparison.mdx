@@ -34,23 +34,23 @@ icon: "scale-balanced"
 
 ## 1. Benchmark index
 
-The 2026-11-25 lanes are current. The 2026-11-24 scraping lanes are retained at their original date. The 2026-03-15 CLI benchmark and the 2026-02-21 MCP benchmark are historical.
+The 2026-11-25 lanes are the last clean tracked release baseline. A newer `ff6d0d8e` candidate refresh is not published here because its warm harness needs a fix. That candidate has three retained CLI cold tail losses, one browser-use warm adapter failure, and one fatal chrome-devtools capture failure. Retained scraping lanes keep their original dates: Firecrawl sequential and Lightpanda are 2026-11-25, while the batch and render policy lanes are 2026-11-24. The 2026-03-15 CLI benchmark and the 2026-02-21 MCP benchmark are retired historical evidence.
 
 | Run | Date | Scope | Status |
 | --- | --- | --- | --- |
-| [Cold interactive](#interactive-cold) | 2026-11-25 | Five tasks, five arms, N=5, rotated order | Current |
-| [Warm interactive](#interactive-warm) | 2026-11-25 | Four tasks, five arms, N=5, rotated order | Current |
-| [Interactive resource lane](#interactive-resources) | 2026-11-25 | Five tasks, five arms, N=5, memory and CPU | Current |
-| [OpenBrowser no-browser memory](#no-browser-memory) | 2026-11-25 | `scrape_web` RSS for one call and 25 concurrent calls | Current |
-| [Firecrawl Local sequential scraping](#scraping-latency) | 2026-11-24 | Five tasks, N=10, interleaved | Retained |
+| [Cold interactive](#interactive-cold) | 2026-11-25 | Five tasks, five arms, N=5, rotated order | Release baseline |
+| [Warm interactive](#interactive-warm) | 2026-11-25 | Four tasks, five arms, N=5, rotated order | Release baseline |
+| [Interactive resource lane](#interactive-resources) | 2026-11-25 | Five tasks, five arms, N=5, memory and CPU | Release baseline |
+| [OpenBrowser no-browser memory](#no-browser-memory) | 2026-11-25 | `scrape_web` RSS for one call and 25 concurrent calls | Release baseline |
+| [Firecrawl Local sequential scraping](#scraping-latency) | 2026-11-25 | Five tasks, N=10, interleaved | Retained |
 | [Firecrawl Local batch](#firecrawl-batch) | 2026-11-24 | Five-page batch, N=10 | Retained |
 | [Render asset policy](#render-policy) | 2026-11-24 | Requests, bytes, and scrape time by asset policy, N=10 | Retained |
-| [Lightpanda no-render latency](#lightpanda) | 2026-11-24 | Five tasks, N=10, interleaved | Retained |
+| [Lightpanda no-render latency](#lightpanda) | 2026-11-25 | Five tasks, N=10, interleaved | Retained |
 | [Historical results retired](#historical-results-retired) | 2026-02-21 to 2026-11-24 | Retired files, hashes, and sizes | Historical |
 
 ## 2. How to read this page
 
-A fixture is a local test page with a deterministic expected result. The current native lanes use fixtures. The historical MCP and CLI sections below use live websites and are labeled separately. A run passes only when the product returns the required result, so every latency number has a correctness check behind it.
+A fixture is a local test page with a deterministic expected result. The native lanes use fixtures. The retired MCP and CLI comparisons used live websites and are listed in the retirement manifest. A run passes only when the product returns the required result, so every latency number has a correctness check behind it.
 
 | Term | Meaning |
 | --- | --- |
@@ -374,8 +374,8 @@ These limits apply to the current native lanes. Retired historical results are l
 
 ## 9. Historical results retired
 
-Results from 2026-11-23, 2026-11-24, 2026-03-15, and 2026-02-21 are retired from this page as old-version evidence. The current native lanes measure different workloads and metrics, so model-driven token, cost, and Agent and CodeAgent metrics remain unmeasured here. Their paths, SHA256 digests, and sizes are recorded in [RETIRED_RESULTS.md](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/RETIRED_RESULTS.md), and the files remain available in git history before this cleanup commit.
+Results from 2026-11-23, 2026-11-24, 2026-03-15, and 2026-02-21 are retired from this page as old-version evidence. They were historical benchmarks, not current-version rankings. The current native lanes measure different workloads and metrics, so model-driven token, cost, and Agent and CodeAgent metrics remain unmeasured here. Their paths, SHA256 digests, and sizes are recorded in [RETIRED_RESULTS.md](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/RETIRED_RESULTS.md), and the files remain available in git history before this cleanup commit.
 
 The separate [CLI comparison](/cli-comparison) page is retained as historical material. It is not current-version evidence.
 
-No historical table on this page is current evidence.
+No historical table on this page is current evidence. This page does not declare a universal winner. No universal winner is claimed from the current lanes either; the lanes report observed samples and pair counts for the listed tasks and surfaces.
