@@ -16,6 +16,7 @@ icon: "scale-balanced"
   - [3.2. Warm interactive](#32-warm-interactive)
     - [3.2.1. Paired results, 5 of 5](#321-paired-results-5-of-5)
     - [3.2.2. Why the MCP surface](#322-why-the-mcp-surface)
+  - [3.3. Interactive resource pilot](#33-interactive-resource-pilot)
 - [4. OpenBrowser no-browser memory, 2026-11-25](#4-openbrowser-no-browser-memory-2026-11-25)
   - [4.1. Non-comparable context](#41-non-comparable-context)
 - [5. Other native local lanes, 2026-11-24](#5-other-native-local-lanes-2026-11-24)
@@ -76,6 +77,7 @@ The 2026-11-25 lanes are current. The 2026-11-24 scraping lanes are retained at 
 | --- | --- | --- | --- |
 | [Cold interactive](#interactive-cold) | 2026-11-25 | Five tasks, five arms, N=5, rotated order | Current |
 | [Warm interactive](#interactive-warm) | 2026-11-25 | Four tasks, five arms, N=5, rotated order | Current |
+| [Interactive resource pilot](#interactive-resources) | 2026-11-25 | Five tasks, five arms, N=1, memory and CPU | Pilot |
 | [OpenBrowser no-browser memory](#no-browser-memory) | 2026-11-25 | `scrape_web` RSS for one call and 25 concurrent calls | Current |
 | [Firecrawl Local sequential scraping](#scraping-latency) | 2026-11-24 | Five tasks, N=10, interleaved | Retained |
 | [Firecrawl Local batch](#firecrawl-batch) | 2026-11-24 | Five-page batch, N=10 | Retained |
@@ -176,6 +178,44 @@ Raw data: [results-warm-five-arm-lean-2026-11-25-n5-final2.jsonl](https://github
 #### 3.2.2. Why the MCP surface
 
 In both current lanes, OpenBrowser MCP has the lower p50 on every measured task. It keeps one server process and one context open across tasks, which matches the warm workflow. Use the CLI for a one-off command when you do not want to manage a server. This page does not claim that the CLI starts faster than a full server. The cold lane measures the whole task, not server startup alone.
+
+<a id="interactive-resources"></a>
+
+### 3.3. Interactive resource pilot
+
+Memory: **Lower is better** ↓.
+
+<img src="/images/native-interactive-resources-pilot.png" alt="Two panels of memory in MiB for OpenBrowser MCP and CLI, chrome-devtools-mcp, agent-browser, and browser-use across five tasks. Lower is better." />
+
+This pilot measures each arm on one sample per task. It is descriptive, not a significance claim. All 25 observations passed the exact oracle, the keychain check, the resource gate, and cleanup. The launcher binding was unchanged before and after each run.
+
+Browser child physical footprint (MiB) ↓ **Lower is better**.
+
+| Task | OpenBrowser MCP | OpenBrowser CLI | chrome-devtools-mcp | agent-browser | browser-use |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `wizard` | 136.2 | 146.5 | 480.5 | 494.2 | 554.7 |
+| `modal` | 133.5 | 149.6 | 473.2 | 480.3 | 550.4 |
+| `download` | 124.9 | 141.7 | 447.2 | 485.3 | 433.4 |
+| `tabs` | 132.0 | 144.2 | 461.7 | 472.9 | 438.7 |
+| `auth` | 132.8 | 144.6 | 455.1 | 475.0 | 547.1 |
+
+Process-tree RSS (MiB) ↓ **Lower is better**.
+
+| Task | OpenBrowser MCP | OpenBrowser CLI | chrome-devtools-mcp | agent-browser | browser-use |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `wizard` | 408.9 | 428.2 | 761.9 | 1205.7 | 1201.1 |
+| `modal` | 409.4 | 433.8 | 805.8 | 1204.4 | 1198.2 |
+| `download` | 390.9 | 418.6 | 762.0 | 1179.9 | 960.2 |
+| `tabs` | 408.2 | 431.3 | 763.2 | 1193.4 | 980.9 |
+| `auth` | 411.2 | 419.5 | 731.6 | 1188.3 | 1196.0 |
+
+Both OpenBrowser arms have the lowest child footprint and the lowest process-tree RSS on all five tasks. The child footprint is about 3.2 to 4.1 times lower than the next competitor.
+
+Observed process-tree CPU: OpenBrowser MCP is lowest on all five tasks, 1.1 to 1.5 seconds against 1.8 to 3.5 seconds for the competitors. OpenBrowser CLI is lowest on four tasks. The one descriptive CPU gap is cold `auth`: CLI 3.13 seconds against agent-browser 3.06 seconds. CPU is a sampled lower bound, and it includes native driver subprocesses.
+
+Limits: N=1 per arm and task. Physical footprint uses the macOS rusage-info ABI and is null on hosts that do not support it. The arms use different scripts and adapters, so this is a resource comparison of the configured surfaces, not an engine benchmark.
+
+Raw data: [results-interactive-resources-pilot-2026-11-25-n1.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-interactive-resources-pilot-2026-11-25-n1.jsonl).
 
 <a id="no-browser-memory"></a>
 
@@ -348,6 +388,7 @@ Task time and memory: **Lower is better** ↓. Pair counts: **Higher is better**
 | Cold interactive p50 | OpenBrowser MCP is lowest on all five tasks against all three competitors. It won 5 of 5 pairs on every task against every competitor. | OpenBrowser CLI has the only cold p50 loss, on `tabs` against browser-use, 1010 ms against 940 ms, and won 1 of 5 pairs. |
 | Warm interactive p50 | Both OpenBrowser arms are lowest on all four tasks against all three competitors. Both won 5 of 5 pairs on every task against every competitor. | `auth` is cold only because it restarts the browser. |
 | No-browser memory | One `scrape_web` call: 48.1 MiB median. 25 concurrent calls: 62.4 MiB median. Zero browser processes. | Process-tree RSS on one local fixture. Not comparable to Lightpanda PSS or the Firecrawl controller-inclusive figure. |
+| Interactive memory | Both OpenBrowser arms have the lowest child footprint and process-tree RSS on all five tasks in the N=1 resource pilot. | N=1 per arm and task. Descriptive, not a significance claim. |
 | Sequential scraping vs Firecrawl Local | 50 of 50 pairs. Lower p50 on all five tasks for both OpenBrowser arms. | Firecrawl Local only. Different output artifacts. |
 | Batch vs Firecrawl Local | 10 of 10 pairs. 2.834 ms against 13.448 ms p50. 4.75 times faster. | Firecrawl poll interval contributes. Different artifacts. |
 | Lightpanda no-render latency | OpenBrowser no-render has a lower p50 on all five tasks. | Lightpanda starts a process per sample. Not a matched startup or engine test. |
@@ -356,7 +397,7 @@ Task time and memory: **Lower is better** ↓. Pair counts: **Higher is better**
 
 These limits apply to the current native lanes. The historical sections state their own limits.
 
-- Interactive process-tree RSS, CPU, or physical footprint against each competitor. The no-browser memory lane measures only `scrape_web` on one static fixture.
+- Multi-sample interactive resource significance. The interactive resource pilot has N=1 per arm and task, so it is descriptive.
 - Model-driven Agent and CodeAgent comparisons in the current lanes. The current interactive lanes use fixed task adapters, not a model choosing actions.
 - Matched cold and warm Lightpanda lanes. The Lightpanda lane starts one process per sample, and OpenBrowser starts before timing. Use its ordering, not its absolute values.
 - Live-site anti-bot behavior, CAPTCHA, login providers, PDFs, uploads, iframes, screenshot fidelity, long sessions, and concurrent browser contexts.

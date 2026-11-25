@@ -8,37 +8,38 @@
   - [2.1. Cold interactive](#21-cold-interactive)
   - [2.2. Warm interactive](#22-warm-interactive)
   - [2.3. Remaining measured gap](#23-remaining-measured-gap)
-- [3. Arms](#3-arms)
-- [4. Tasks](#4-tasks)
-- [5. Fair-run procedure](#5-fair-run-procedure)
-- [6. Metrics](#6-metrics)
-- [7. OpenBrowser lean profile](#7-openbrowser-lean-profile)
-- [8. Limitations](#8-limitations)
-- [9. Setup](#9-setup)
-- [10. Run](#10-run)
-- [11. Files](#11-files)
-- [12. Safety and cleanup](#12-safety-and-cleanup)
-- [13. Historical results: 2026-11-23, lean profile](#13-historical-results-2026-11-23-lean-profile)
-- [14. Historical results: 2026-11-24, cold five-arm lane](#14-historical-results-2026-11-24-cold-five-arm-lane)
-- [15. Historical results: 2026-11-24, warm session lane](#15-historical-results-2026-11-24-warm-session-lane)
-- [16. Historical results: 2026-11-24, warm session lane after the popup fix](#16-historical-results-2026-11-24-warm-session-lane-after-the-popup-fix)
-- [17. Historical results: 2026-11-24, fast selector arm](#17-historical-results-2026-11-24-fast-selector-arm)
-- [18. Historical results: 2026-11-24, warm tabs direct CDP click](#18-historical-results-2026-11-24-warm-tabs-direct-cdp-click)
-- [19. Historical results: 2026-11-24, five-arm tabs-only warm lane](#19-historical-results-2026-11-24-five-arm-tabs-only-warm-lane)
-- [20. Historical results: 2026-11-24, download wait wakeup A/B](#20-historical-results-2026-11-24-download-wait-wakeup-ab)
-- [21. Historical results: 2026-11-24, warm CLI startup A/B](#21-historical-results-2026-11-24-warm-cli-startup-ab)
-- [22. Historical results: 2026-11-24, paired tabs and download comparisons](#22-historical-results-2026-11-24-paired-tabs-and-download-comparisons)
-- [23. Historical results: 2026-11-23, OpenBrowser extension A/B](#23-historical-results-2026-11-23-openbrowser-extension-ab)
-- [24. Historical analysis: 2026-11-23 results](#24-historical-analysis-2026-11-23-results)
-- [25. Historical results: 2026-11-24, final lanes (OpenBrowser 0.1.59.dev18)](#25-historical-results-2026-11-24-final-lanes-openbrowser-0159dev18)
-  - [25.1. Final lanes, 2026-11-24, dev18: Warm five-arm, N=5](#251-final-lanes-2026-11-24-dev18-warm-five-arm-n5)
-  - [25.2. Final lanes, 2026-11-24, dev18: Warm paired, N=10](#252-final-lanes-2026-11-24-dev18-warm-paired-n10)
-  - [25.3. Final lanes, 2026-11-24, dev18: Cold six-arm, N=3](#253-final-lanes-2026-11-24-dev18-cold-six-arm-n3)
-  - [25.4. Final lanes, 2026-11-24, dev18: MCP arm](#254-final-lanes-2026-11-24-dev18-mcp-arm)
-- [26. Historical results: 2026-11-24, second final lanes (OpenBrowser 0.1.59.dev28)](#26-historical-results-2026-11-24-second-final-lanes-openbrowser-0159dev28)
-  - [26.1. Second final lanes, 2026-11-24, dev28: Cold six-arm, N=3](#261-second-final-lanes-2026-11-24-dev28-cold-six-arm-n3)
-  - [26.2. Second final lanes, 2026-11-24, dev28: Warm five-arm, N=5](#262-second-final-lanes-2026-11-24-dev28-warm-five-arm-n5)
-  - [26.3. Second final lanes, 2026-11-24, dev28: Warm paired, N=10](#263-second-final-lanes-2026-11-24-dev28-warm-paired-n10)
+- [3. Interactive resource pilot, 2026-11-25](#3-interactive-resource-pilot-2026-11-25)
+- [4. Arms](#4-arms)
+- [5. Tasks](#5-tasks)
+- [6. Fair-run procedure](#6-fair-run-procedure)
+- [7. Metrics](#7-metrics)
+- [8. OpenBrowser lean profile](#8-openbrowser-lean-profile)
+- [9. Limitations](#9-limitations)
+- [10. Setup](#10-setup)
+- [11. Run](#11-run)
+- [12. Files](#12-files)
+- [13. Safety and cleanup](#13-safety-and-cleanup)
+- [14. Historical results: 2026-11-23, lean profile](#14-historical-results-2026-11-23-lean-profile)
+- [15. Historical results: 2026-11-24, cold five-arm lane](#15-historical-results-2026-11-24-cold-five-arm-lane)
+- [16. Historical results: 2026-11-24, warm session lane](#16-historical-results-2026-11-24-warm-session-lane)
+- [17. Historical results: 2026-11-24, warm session lane after the popup fix](#17-historical-results-2026-11-24-warm-session-lane-after-the-popup-fix)
+- [18. Historical results: 2026-11-24, fast selector arm](#18-historical-results-2026-11-24-fast-selector-arm)
+- [19. Historical results: 2026-11-24, warm tabs direct CDP click](#19-historical-results-2026-11-24-warm-tabs-direct-cdp-click)
+- [20. Historical results: 2026-11-24, five-arm tabs-only warm lane](#20-historical-results-2026-11-24-five-arm-tabs-only-warm-lane)
+- [21. Historical results: 2026-11-24, download wait wakeup A/B](#21-historical-results-2026-11-24-download-wait-wakeup-ab)
+- [22. Historical results: 2026-11-24, warm CLI startup A/B](#22-historical-results-2026-11-24-warm-cli-startup-ab)
+- [23. Historical results: 2026-11-24, paired tabs and download comparisons](#23-historical-results-2026-11-24-paired-tabs-and-download-comparisons)
+- [24. Historical results: 2026-11-23, OpenBrowser extension A/B](#24-historical-results-2026-11-23-openbrowser-extension-ab)
+- [25. Historical analysis: 2026-11-23 results](#25-historical-analysis-2026-11-23-results)
+- [26. Historical results: 2026-11-24, final lanes (OpenBrowser 0.1.59.dev18)](#26-historical-results-2026-11-24-final-lanes-openbrowser-0159dev18)
+  - [26.1. Final lanes, 2026-11-24, dev18: Warm five-arm, N=5](#261-final-lanes-2026-11-24-dev18-warm-five-arm-n5)
+  - [26.2. Final lanes, 2026-11-24, dev18: Warm paired, N=10](#262-final-lanes-2026-11-24-dev18-warm-paired-n10)
+  - [26.3. Final lanes, 2026-11-24, dev18: Cold six-arm, N=3](#263-final-lanes-2026-11-24-dev18-cold-six-arm-n3)
+  - [26.4. Final lanes, 2026-11-24, dev18: MCP arm](#264-final-lanes-2026-11-24-dev18-mcp-arm)
+- [27. Historical results: 2026-11-24, second final lanes (OpenBrowser 0.1.59.dev28)](#27-historical-results-2026-11-24-second-final-lanes-openbrowser-0159dev28)
+  - [27.1. Second final lanes, 2026-11-24, dev28: Cold six-arm, N=3](#271-second-final-lanes-2026-11-24-dev28-cold-six-arm-n3)
+  - [27.2. Second final lanes, 2026-11-24, dev28: Warm five-arm, N=5](#272-second-final-lanes-2026-11-24-dev28-warm-five-arm-n5)
+  - [27.3. Second final lanes, 2026-11-24, dev28: Warm paired, N=10](#273-second-final-lanes-2026-11-24-dev28-warm-paired-n10)
 
 <!-- toc:end -->
 
@@ -112,16 +113,42 @@ Raw evidence:
 
 OpenBrowser CLI is the only OpenBrowser arm with a measured cold p50 loss in this lane: `tabs` at 1010 ms against browser-use at 940 ms. OpenBrowser MCP has the lowest p50 on every cold task, and both OpenBrowser arms have the lowest warm p50 on every warm task. Do not generalize these results to unmeasured tasks, surfaces, or configurations.
 
-## 3. Arms
+## 3. Interactive resource pilot, 2026-11-25
+
+Memory: **Lower is better** ↓.
+
+This pilot measures one sample per arm and task. All 25 observations passed the exact oracle, keychain check, resource gate, and cleanup. It is descriptive, not a significance claim.
+
+| Task | OpenBrowser MCP footprint MiB | OpenBrowser CLI footprint MiB | chrome-devtools-mcp footprint MiB | agent-browser footprint MiB | browser-use footprint MiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| wizard | 136.2 | 146.5 | 480.5 | 494.2 | 554.7 |
+| modal | 133.5 | 149.6 | 473.2 | 480.3 | 550.4 |
+| download | 124.9 | 141.7 | 447.2 | 485.3 | 433.4 |
+| tabs | 132.0 | 144.2 | 461.7 | 472.9 | 438.7 |
+| auth | 132.8 | 144.6 | 455.1 | 475.0 | 547.1 |
+
+| Task | OpenBrowser MCP tree RSS MiB | OpenBrowser CLI tree RSS MiB | chrome-devtools-mcp tree RSS MiB | agent-browser tree RSS MiB | browser-use tree RSS MiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| wizard | 408.9 | 428.2 | 761.9 | 1205.7 | 1201.1 |
+| modal | 409.4 | 433.8 | 805.8 | 1204.4 | 1198.2 |
+| download | 390.9 | 418.6 | 762.0 | 1179.9 | 960.2 |
+| tabs | 408.2 | 431.3 | 763.2 | 1193.4 | 980.9 |
+| auth | 411.2 | 419.5 | 731.6 | 1188.3 | 1196.0 |
+
+Both OpenBrowser arms have the lowest child footprint and tree RSS on all five tasks. Observed CPU: OpenBrowser MCP is lowest on all five tasks. OpenBrowser CLI is lowest on four; the one gap is cold `auth` at 3.13 seconds against agent-browser at 3.06 seconds. CPU is a sampled lower bound and includes native driver subprocesses.
+
+Raw data: [results-interactive-resources-pilot-2026-11-25-n1.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-interactive-resources-pilot-2026-11-25-n1.jsonl).
+
+## 4. Arms
 
 | Arm | Version | Native scripted surface | Browser |
 | --- | --- | --- | --- |
-| `openbrowser` | OpenBrowser CLI `0.1.58.dev67+gfc17d3201.d20261124` | One `openbrowser-ai -c` Python cell per task | System Chrome 158.0.8127.36 through `channel=chrome` |
-| `openbrowser-fast` | OpenBrowser CLI `0.1.58.dev67+gfc17d3201.d20261124` | One `openbrowser-ai -c` Python cell with CSS helpers for fixture ids | System Chrome 158.0.8127.36 through `channel=chrome` |
-| `openbrowser-mcp` | OpenBrowser CLI `0.1.58.dev67+gfc17d3201.d20261124` | MCP stdio `2026-07-28`: `create_context`, `execute_code`, `close_context` | System Chrome 158.0.8127.36 through `channel=chrome` |
-| `openbrowser-mcp-fast` | OpenBrowser CLI `0.1.58.dev67+gfc17d3201.d20261124` | Same MCP surface with CSS helpers for fixture ids | System Chrome 158.0.8127.36 through `channel=chrome` |
-| `chrome-devtools-mcp` | `chrome-devtools-mcp` 1.13.0 | MCP stdio, 33 tools, `pageId` routing | System Chrome 158.0.8127.36 |
-| `agent-browser` | `agent-browser` 0.43.0 | CLI commands, one process per command | System Chrome 158.0.8127.36 |
+| `openbrowser` | OpenBrowser CLI `0.1.59.dev47+gbedbbee6b.d20261125` | One `openbrowser-ai -c` Python cell per task | System Chrome 158.0.8127.89 through `channel=chrome` |
+| `openbrowser-fast` | OpenBrowser CLI `0.1.59.dev47+gbedbbee6b.d20261125` | One `openbrowser-ai -c` Python cell with CSS helpers for fixture ids | System Chrome 158.0.8127.89 through `channel=chrome` |
+| `openbrowser-mcp` | OpenBrowser CLI `0.1.59.dev47+gbedbbee6b.d20261125` | MCP stdio `2026-07-28`: `create_context`, `execute_code`, `close_context` | System Chrome 158.0.8127.89 through `channel=chrome` |
+| `openbrowser-mcp-fast` | OpenBrowser CLI `0.1.59.dev47+gbedbbee6b.d20261125` | Same MCP surface with CSS helpers for fixture ids | System Chrome 158.0.8127.89 through `channel=chrome` |
+| `chrome-devtools-mcp` | `chrome-devtools-mcp` 1.13.0 | MCP stdio, 33 tools, `pageId` routing | System Chrome 158.0.8127.89 |
+| `agent-browser` | `agent-browser` 0.43.0 | CLI commands, one process per command | System Chrome 158.0.8127.89 |
 | `browser-use` | `browser-use` 1.0.8 (`browser-harness` 0.1.13) | Piped Python in one CLI process | Dedicated system Chrome 158.0.8127.36 |
 
 Cold runs use a fresh profile per run. Warm runs start each arm once and keep
@@ -139,7 +166,7 @@ above. Each historical results section is dated and names the build it used.
 The newest paired sections are historical. Use the 2026-11-25 current results
 above for current competitor claims.
 
-## 4. Tasks
+## 5. Tasks
 
 | Task | Route | Exact oracle |
 | --- | --- | --- |
@@ -165,7 +192,7 @@ killed by profile path. The OpenBrowser MCP arm speaks the stateless
 the same per-request path a coding agent uses. `browser-use` daemons and dedicated Chrome processes
 are killed after every run.
 
-## 5. Fair-run procedure
+## 6. Fair-run procedure
 
 1. Pin every version and record the browser executable. The historical
    2026-11-24 runs used Chrome `158.0.8127.36`. The current brief does not
@@ -185,7 +212,7 @@ are killed after every run.
    latency is recorded in the raw JSONL.
 6. Keep the raw JSONL. The README table is a summary, not the evidence.
 
-## 6. Metrics
+## 7. Metrics
 
 - `p50` and `p95`: nearest-rank over successful runs. The current cold and
   warm lanes use five samples per arm and task. These are descriptive values,
@@ -202,7 +229,7 @@ are killed after every run.
   output is larger by design.
 - `requests` and `request bytes`: fixture request count and response bytes.
 
-## 7. OpenBrowser lean profile
+## 8. OpenBrowser lean profile
 
 The OpenBrowser arm uses the lean automation profile:
 
@@ -225,7 +252,7 @@ environment as unknown. When the environment is readable and has no explicit
 `OPENBROWSER_SOCKET`, it derives the default socket from that daemon's own
 `HOME`. The caller's default socket is never reused for another process.
 
-## 8. Limitations
+## 9. Limitations
 
 - The current cold and warm lanes use five samples per arm and task. The p95
   values are indicative, not a significance test. Older sections state their
@@ -248,7 +275,7 @@ environment as unknown. When the environment is readable and has no explicit
 - The harness runs on macOS. Linux results can differ because browser launch
   and filesystem costs differ.
 
-## 9. Setup
+## 10. Setup
 
 Tools live outside the repository:
 
@@ -269,7 +296,7 @@ The local `chrome-devtools-mcp` binary is the same 1.13.0 package that
 `npx -y chrome-devtools-mcp@1.13.0` would download. The harness uses the local
 install to remove network and npx startup jitter from the measurement.
 
-## 10. Run
+## 11. Run
 
 ```sh
 uv run --no-project python -m benchmarks.interactive.run_benchmark \
@@ -297,7 +324,7 @@ Useful flags:
 The default temp root is `/tmp/obib-runs`. It is outside the repository so the
 OpenBrowser daemon socket path stays below the macOS `AF_UNIX` limit.
 
-## 11. Files
+## 12. Files
 
 | Path | Purpose |
 | --- | --- |
@@ -312,7 +339,7 @@ OpenBrowser daemon socket path stays below the macOS `AF_UNIX` limit.
 | `run_benchmark.py` | Runner, JSONL writer, summary table |
 | [results](https://github.com/billy-enrizky/openbrowser-ai/tree/main/benchmarks/interactive/results) | Raw JSONL and summary JSON |
 
-## 12. Safety and cleanup
+## 13. Safety and cleanup
 
 - Every browser launch includes `--use-mock-keychain`. The harness reads the
   actual Chrome command line and records `keychain_verified`.
@@ -322,7 +349,7 @@ OpenBrowser daemon socket path stays below the macOS `AF_UNIX` limit.
   contains the run's unique temp path.
 - No AWS, cloud browser, paid API, or model provider is called.
 
-## 13. Historical results: 2026-11-23, lean profile
+## 14. Historical results: 2026-11-23, lean profile
 
 *Historical run. It is retained for traceability. The 2026-11-25 results above supersede it for current claims.*
 
@@ -361,7 +388,7 @@ Raw evidence: [results-2026-11-23-lean.jsonl](https://github.com/billy-enrizky/o
 The original default-extension run remains at
 [results-2026-11-23.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-2026-11-23.jsonl).
 
-## 14. Historical results: 2026-11-24, cold five-arm lane
+## 15. Historical results: 2026-11-24, cold five-arm lane
 
 *Historical run. It is retained for traceability. The 2026-11-25 results above supersede it for current claims.*
 
@@ -396,7 +423,7 @@ Raw evidence:
 - [results-cold-current-five-arm-2026-11-24-n3.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-current-five-arm-2026-11-24-n3.jsonl)
 - [results-cold-current-five-arm-2026-11-24-n3.summary.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-current-five-arm-2026-11-24-n3.summary.json)
 
-## 15. Historical results: 2026-11-24, warm session lane
+## 16. Historical results: 2026-11-24, warm session lane
 
 *Historical run. It is retained for traceability. The 2026-11-25 results above supersede it for current claims.*
 
@@ -462,7 +489,7 @@ Raw evidence:
 - [results-warm-4arm-2026-11-24-n3.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-4arm-2026-11-24-n3.jsonl)
 - [results-warm-4arm-2026-11-24-n3.summary.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-4arm-2026-11-24-n3.summary.json)
 
-## 16. Historical results: 2026-11-24, warm session lane after the popup fix
+## 17. Historical results: 2026-11-24, warm session lane after the popup fix
 
 *Historical run. It is retained for traceability. The 2026-11-25 results above supersede it for current claims.*
 
@@ -506,7 +533,7 @@ Raw evidence:
 - [results-warm-4arm-2026-11-24-after-popup-n3.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-4arm-2026-11-24-after-popup-n3.jsonl)
 - [results-warm-4arm-2026-11-24-after-popup-n3.summary.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-4arm-2026-11-24-after-popup-n3.summary.json)
 
-## 17. Historical results: 2026-11-24, fast selector arm
+## 18. Historical results: 2026-11-24, fast selector arm
 
 *Historical run. It is retained for traceability. The 2026-11-25 results above supersede it for current claims.*
 
@@ -590,7 +617,7 @@ Raw evidence:
 - [results-warm-fast-selector-final-all-2026-11-24-n3.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-fast-selector-final-all-2026-11-24-n3.jsonl)
 - [results-warm-fast-selector-final-all-2026-11-24-n3.summary.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-fast-selector-final-all-2026-11-24-n3.summary.json)
 
-## 18. Historical results: 2026-11-24, warm tabs direct CDP click
+## 19. Historical results: 2026-11-24, warm tabs direct CDP click
 
 *Historical run. It is retained for traceability. The 2026-11-25 results above supersede it for current claims.*
 
@@ -650,7 +677,7 @@ Raw evidence:
 - [results-warm-tabs-direct-cdp-2026-11-24-n5-paired.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-tabs-direct-cdp-2026-11-24-n5-paired.jsonl)
 - [results-warm-tabs-direct-cdp-2026-11-24-n5-paired.summary.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-tabs-direct-cdp-2026-11-24-n5-paired.summary.json)
 
-## 19. Historical results: 2026-11-24, five-arm tabs-only warm lane
+## 20. Historical results: 2026-11-24, five-arm tabs-only warm lane
 
 *Historical run. It is retained for traceability. The 2026-11-25 results above supersede it for current claims.*
 
@@ -697,7 +724,7 @@ Raw evidence:
 - [results-warm-tabs-five-arm-direct-cdp-2026-11-24-n5.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-tabs-five-arm-direct-cdp-2026-11-24-n5.jsonl)
 - [results-warm-tabs-five-arm-direct-cdp-2026-11-24-n5.summary.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-tabs-five-arm-direct-cdp-2026-11-24-n5.summary.json)
 
-## 20. Historical results: 2026-11-24, download wait wakeup A/B
+## 21. Historical results: 2026-11-24, download wait wakeup A/B
 
 *Historical run. It is retained for traceability. The 2026-11-25 results above supersede it for current claims.*
 
@@ -745,7 +772,7 @@ uv run --locked python -m benchmarks.interactive.download_wait_ab \
 
 Raw evidence: [`A/B JSONL`](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-download-wakeup-ab-2026-11-24-n5.jsonl) and [`summary`](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-download-wakeup-ab-2026-11-24-n5.summary.json).
 
-## 21. Historical results: 2026-11-24, warm CLI startup A/B
+## 22. Historical results: 2026-11-24, warm CLI startup A/B
 
 *Historical run. It is retained for traceability. The 2026-11-25 results above supersede it for current claims.*
 
@@ -784,7 +811,7 @@ Raw evidence:
 - [results-cli-startup-ab-2026-11-24-n12.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cli-startup-ab-2026-11-24-n12.jsonl)
 - [results-cli-startup-ab-2026-11-24-n12.summary.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cli-startup-ab-2026-11-24-n12.summary.json)
 
-## 22. Historical results: 2026-11-24, paired tabs and download comparisons
+## 23. Historical results: 2026-11-24, paired tabs and download comparisons
 
 *Historical run. It is retained for traceability. The 2026-11-25 results above supersede it for current claims.*
 
@@ -831,7 +858,7 @@ Raw evidence:
 - [results-paired-download-2026-11-24-n10.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-download-2026-11-24-n10.jsonl)
 - [results-paired-download-2026-11-24-n10.summary.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-download-2026-11-24-n10.summary.json)
 
-## 23. Historical results: 2026-11-23, OpenBrowser extension A/B
+## 24. Historical results: 2026-11-23, OpenBrowser extension A/B
 
 *Historical run. It is retained for traceability. The 2026-11-25 results above supersede it for current claims.*
 
@@ -851,7 +878,7 @@ Lower is better for latency ↓.
 
 Raw evidence: [results-2026-11-23-extensions.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-2026-11-23-extensions.jsonl).
 
-## 24. Historical analysis: 2026-11-23 results
+## 25. Historical analysis: 2026-11-23 results
 
 *Historical analysis of the named run. It does not describe the 2026-11-25 results above.*
 
@@ -862,7 +889,7 @@ That run established two historical facts that remain useful for traceability:
 
 The 2026-11-25 results above supersede every ranking and latency claim from that run.
 
-## 25. Historical results: 2026-11-24, final lanes (OpenBrowser 0.1.59.dev18)
+## 26. Historical results: 2026-11-24, final lanes (OpenBrowser 0.1.59.dev18)
 
 *Historical run. It is retained for traceability. The 2026-11-25 results above supersede it for current claims.*
 
@@ -870,7 +897,7 @@ These were the runs behind the comparison page at the time. Every run used a
 fresh fixture server and an exact oracle check. All 75 cold runs, all 100 warm
 runs, and all 40 paired runs passed.
 
-### 25.1. Final lanes, 2026-11-24, dev18: Warm five-arm, N=5
+### 26.1. Final lanes, 2026-11-24, dev18: Warm five-arm, N=5
 
 Lower is better for latency ↓.
 
@@ -883,7 +910,7 @@ Lower is better for latency ↓.
 
 Raw evidence: [results-warm-five-arm-final-2026-11-24-n5.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-five-arm-final-2026-11-24-n5.jsonl).
 
-### 25.2. Final lanes, 2026-11-24, dev18: Warm paired, N=10
+### 26.2. Final lanes, 2026-11-24, dev18: Warm paired, N=10
 
 Lower is better for latency ↓.
 
@@ -901,7 +928,7 @@ Raw evidence:
 - [results-paired-tabs-mcp-vs-browseruse-final-2026-11-24-n10.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-tabs-mcp-vs-browseruse-final-2026-11-24-n10.json)
 - [results-paired-download-mcp-vs-agentbrowser-final-2026-11-24-n10.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-paired-download-mcp-vs-agentbrowser-final-2026-11-24-n10.json)
 
-### 25.3. Final lanes, 2026-11-24, dev18: Cold six-arm, N=3
+### 26.3. Final lanes, 2026-11-24, dev18: Cold six-arm, N=3
 
 Lower is better for latency ↓.
 
@@ -918,7 +945,7 @@ Raw evidence: [results-cold-six-arm-final-2026-11-24-n3.jsonl](https://github.co
 The cold lane is a historical startup lane with N=3. Do not treat it as a
 statistical claim. The 2026-11-25 cold results above supersede it.
 
-### 25.4. Final lanes, 2026-11-24, dev18: MCP arm
+### 26.4. Final lanes, 2026-11-24, dev18: MCP arm
 
 `openbrowser-mcp` and `openbrowser-mcp-fast` drive the package's own MCP server
 over the stateless `2026-07-28` protocol. The client in
@@ -927,7 +954,7 @@ request with the `_meta` envelope. The arm calls `create_context`,
 `execute_code`, and `close_context`. The warm lane keeps one context so one
 browser serves every task.
 
-## 26. Historical results: 2026-11-24, second final lanes (OpenBrowser 0.1.59.dev28)
+## 27. Historical results: 2026-11-24, second final lanes (OpenBrowser 0.1.59.dev28)
 
 *Historical run. It is retained for traceability. The 2026-11-25 results above supersede it for current claims.*
 
@@ -935,7 +962,7 @@ That historical rerun followed the lazy namespace imports, deferred recording
 watchdog, removed redirect sleep, and headless shell. All 75 cold, 100 warm,
 and 40 paired runs passed their exact oracles.
 
-### 26.1. Second final lanes, 2026-11-24, dev28: Cold six-arm, N=3
+### 27.1. Second final lanes, 2026-11-24, dev28: Cold six-arm, N=3
 
 Lower is better for latency ↓.
 
@@ -949,7 +976,7 @@ Lower is better for latency ↓.
 
 Raw evidence: [results-cold-six-arm-final3-2026-11-24-n3.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-six-arm-final3-2026-11-24-n3.jsonl).
 
-### 26.2. Second final lanes, 2026-11-24, dev28: Warm five-arm, N=5
+### 27.2. Second final lanes, 2026-11-24, dev28: Warm five-arm, N=5
 
 Lower is better for latency ↓.
 
@@ -962,7 +989,7 @@ Lower is better for latency ↓.
 
 Raw evidence: [results-warm-five-arm-final2-2026-11-24-n5.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-five-arm-final2-2026-11-24-n5.jsonl).
 
-### 26.3. Second final lanes, 2026-11-24, dev28: Warm paired, N=10
+### 27.3. Second final lanes, 2026-11-24, dev28: Warm paired, N=10
 
 Lower is better for latency ↓.
 
