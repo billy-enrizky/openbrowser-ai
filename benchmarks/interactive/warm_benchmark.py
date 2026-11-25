@@ -26,7 +26,7 @@ from pathlib import Path
 from .adapters.base import RunContext
 from .adapters.openbrowser import _write_config
 from .fixtures.server import FixtureServer
-from .run_benchmark import make_arm
+from .run_benchmark import _loads, make_arm
 from .tasks import ORACLES, TASKS
 
 HERE = Path(__file__).resolve().parent
@@ -184,6 +184,11 @@ def main() -> int:
     parser.add_argument("--workdir", type=Path, default=DEFAULT_WORKDIR)
     parser.add_argument("--cold-results", type=Path, default=DEFAULT_COLD_RESULTS)
     parser.add_argument("--keep-runs", action="store_true")
+    parser.add_argument(
+        "--rotate-arms",
+        action="store_true",
+        help="Rotate the arm order for each sample so host-load drift is balanced across arms.",
+    )
     args = parser.parse_args()
 
     unknown_tasks = [task for task in args.tasks if task not in ORACLES]
@@ -199,88 +204,99 @@ def main() -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     records: list[dict] = []
     environments: dict[str, dict] = {}
+    prepared: dict[str, tuple[RunContext, Any, dict, float]] = {}
     for arm_name in args.arms:
         root_ctx = make_context(args.workdir, arm_name)
         if arm_name in {"openbrowser", "openbrowser-fast", "openbrowser-mcp", "openbrowser-mcp-fast"}:
             _write_config(root_ctx, extensions=False)
         arm = make_arm(arm_name)
-        warmup_payload: dict = {}
-        warmup_ms = 0.0
         try:
             warmup_payload, warmup_ms = arm.warmup(root_ctx)
-            environments[arm_name] = {
-                "platform": platform.platform(),
-                "machine": platform.machine(),
-                "binary": redact(getattr(arm, "binary", "")),
-                "version": warmup_payload.get("browser_version")
-                or (_binary_version(getattr(arm, "binary", "")) if getattr(arm, "binary", "") else ""),
-                "warmup_ms": round(warmup_ms, 3),
-                "warmup_payload": warmup_payload,
-            }
-            print(
-                f"{arm_name:<20} warmup {warmup_ms:.0f} ms {json.dumps(warmup_payload, ensure_ascii=False)[:180]}",
-                flush=True,
-            )
-            for sample in range(args.samples):
-                for task in args.tasks:
-                    server, thread = start_fixture()
-                    ctx = replace(
-                        root_ctx,
-                        task=task,
-                        sample=sample,
-                        base_url=server.base_url,
-                    )
-                    if task == "download":
-                        clean_downloads(ctx.downloads)
-                    try:
-                        started = time.monotonic()
-                        result = arm.run(ctx, cleanup=False)
-                        latency_ms = (time.monotonic() - started) * 1000.0
-                        state = server.state.snapshot()
-                        oracle = ORACLES[task](state, result.reported, ctx.downloads)
-                    finally:
-                        stop_fixture(server, thread)
-                    record = {
-                        "run_id": f"warm-{arm_name}-{task}-s{sample}",
-                        "timestamp": datetime.now(UTC).isoformat(),
-                        "lane": "warm",
-                        "task": task,
-                        "arm": arm_name,
-                        "sample": sample,
-                        "ok": bool(result.ok and oracle.ok),
-                        "adapter_ok": result.ok,
-                        "oracle_ok": oracle.ok,
-                        "oracle_detail": oracle.detail,
-                        "error": result.error,
-                        "latency_ms": latency_ms,
-                        "warmup_ms": warmup_ms,
-                        "warmup_payload": warmup_payload,
-                        "tool_calls": result.tool_calls,
-                        "process_starts": result.process_starts,
-                        "output_bytes": len(result.stdout.encode()),
-                        "stderr_bytes": len(result.stderr.encode()),
-                        "browser_version": result.browser_version,
-                        "reported": result.reported,
-                        "requests": state.get("request_count", 0),
-                        "request_bytes": state.get("request_bytes", 0),
-                        "keychain_verified": result.keychain_verified,
-                    }
-                    records.append(record)
-                    status = "ok" if record["ok"] else "fail"
-                    print(
-                        f"{arm_name:<20} {task:<10} sample {sample} {status} {latency_ms:.0f} ms "
-                        f"calls={result.tool_calls} procs={result.process_starts}",
-                        flush=True,
-                    )
-                    if record["error"]:
-                        print(f"    error: {record['error'][:200]}", flush=True)
         except FileNotFoundError as error:
             print(f"{arm_name:<20} unavailable: {error}", flush=True)
             environments[arm_name] = {"unavailable": str(error)}
-        finally:
             arm.cleanup(root_ctx)
             if not args.keep_runs:
                 shutil.rmtree(root_ctx.root, ignore_errors=True)
+            continue
+        prepared[arm_name] = (root_ctx, arm, warmup_payload, warmup_ms)
+        environments[arm_name] = {
+            "platform": platform.platform(),
+            "machine": platform.machine(),
+            "binary": redact(getattr(arm, "binary", "")),
+            "version": warmup_payload.get("browser_version")
+            or (_binary_version(getattr(arm, "binary", "")) if getattr(arm, "binary", "") else ""),
+            "warmup_ms": round(warmup_ms, 3),
+            "warmup_payload": warmup_payload,
+        }
+        print(
+            f"{arm_name:<20} warmup {warmup_ms:.0f} ms {json.dumps(warmup_payload, ensure_ascii=False)[:180]}",
+            flush=True,
+        )
+
+    active_arms = [arm for arm in args.arms if arm in prepared]
+    load_before = _loads()
+    for sample in range(args.samples):
+        for task in args.tasks:
+            arm_order = list(active_arms)
+            if args.rotate_arms and arm_order:
+                shift = sample % len(arm_order)
+                arm_order = arm_order[shift:] + arm_order[:shift]
+            for order_index, arm_name in enumerate(arm_order):
+                root_ctx, arm, warmup_payload, warmup_ms = prepared[arm_name]
+                server, thread = start_fixture()
+                ctx = replace(root_ctx, task=task, sample=sample, base_url=server.base_url)
+                if task == "download":
+                    clean_downloads(ctx.downloads)
+                try:
+                    started = time.monotonic()
+                    result = arm.run(ctx, cleanup=False)
+                    latency_ms = (time.monotonic() - started) * 1000.0
+                    state = server.state.snapshot()
+                    oracle = ORACLES[task](state, result.reported, ctx.downloads)
+                finally:
+                    stop_fixture(server, thread)
+                record = {
+                    "run_id": f"warm-{arm_name}-{task}-s{sample}",
+                    "timestamp": datetime.now(UTC).isoformat(),
+                    "lane": "warm",
+                    "task": task,
+                    "arm": arm_name,
+                    "sample": sample,
+                    "arm_order": arm_order,
+                    "order": order_index,
+                    "ok": bool(result.ok and oracle.ok),
+                    "adapter_ok": result.ok,
+                    "oracle_ok": oracle.ok,
+                    "oracle_detail": oracle.detail,
+                    "error": result.error,
+                    "latency_ms": latency_ms,
+                    "warmup_ms": warmup_ms,
+                    "warmup_payload": warmup_payload,
+                    "tool_calls": result.tool_calls,
+                    "process_starts": result.process_starts,
+                    "output_bytes": len(result.stdout.encode()),
+                    "stderr_bytes": len(result.stderr.encode()),
+                    "browser_version": result.browser_version,
+                    "reported": result.reported,
+                    "requests": state.get("request_count", 0),
+                    "request_bytes": state.get("request_bytes", 0),
+                    "keychain_verified": result.keychain_verified,
+                }
+                records.append(record)
+                status = "ok" if record["ok"] else "fail"
+                print(
+                    f"{arm_name:<20} {task:<10} sample {sample} {status} {latency_ms:.0f} ms "
+                    f"calls={result.tool_calls} procs={result.process_starts}",
+                    flush=True,
+                )
+                if record["error"]:
+                    print(f"    error: {record['error'][:200]}", flush=True)
+
+    for arm_name, (root_ctx, arm, _payload, _ms) in prepared.items():
+        arm.cleanup(root_ctx)
+        if not args.keep_runs:
+            shutil.rmtree(root_ctx.root, ignore_errors=True)
 
     with args.output.open("w", encoding="utf-8") as handle:
         for record in records:
@@ -295,6 +311,9 @@ def main() -> int:
                     "cold_results": str(args.cold_results),
                     "tasks": args.tasks,
                     "samples": args.samples,
+                    "rotate_arms": args.rotate_arms,
+                    "load_before": load_before,
+                    "load_after": _loads(),
                     "arms": environments,
                 },
                 "rows": rows,

@@ -77,12 +77,12 @@ def main() -> int:
 
     ax.set_yticks(positions, [task.capitalize() for task in TASKS], fontsize=14)
     ax.invert_yaxis()
-    ax.set_xlabel('p50 wall-clock latency (ms)', fontsize=13)
+    ax.set_xlabel('p50 wall-clock latency (ms) \u2193 Lower is better', fontsize=13)
     ax.set_xlim(0, max(row['p50_ms'] for row in rows) * 1.18)
     ax.grid(axis='x', color=GRID, linewidth=1, zorder=0)
     ax.set_axisbelow(True)
     ax.legend(loc='lower right', frameon=False, fontsize=11)
-    ax.set_title('Interactive browsing, cold p50', fontsize=19, color=TEXT, loc='left', pad=40)
+    ax.set_title('Interactive browsing, cold p50 \u2193 Lower is better', fontsize=19, color=TEXT, loc='left', pad=40)
     ax.text(
         0,
         1.005,

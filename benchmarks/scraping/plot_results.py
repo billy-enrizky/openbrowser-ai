@@ -106,7 +106,7 @@ def _plot(
     ax.invert_yaxis()
     ax.set_xscale("log")
     ax.xaxis.set_major_formatter(FuncFormatter(lambda value, _: _ms(value)))
-    ax.set_xlabel("p50 wall-clock latency (ms, logarithmic scale)", labelpad=12)
+    ax.set_xlabel("p50 wall-clock latency (ms, logarithmic scale) \u2193 Lower is better", labelpad=12)
     ax.grid(axis="x", color=GRID, linewidth=1, zorder=0)
     ax.set_axisbelow(True)
     for side in ("top", "right", "left"):
@@ -147,7 +147,7 @@ def main() -> int:
             ("openbrowser-lightweight", "OpenBrowser lightweight", "#6db3ab"),
             ("firecrawl-local", "Firecrawl Local", "#c25b2a"),
         ),
-        title="Scraping p50 latency: OpenBrowser vs Firecrawl Local",
+        title="Scraping p50 latency: OpenBrowser vs Firecrawl Local \u2193 Lower is better",
         output=args.output_dir / "native-scraping-current-p50.png",
     )
 
@@ -159,7 +159,7 @@ def main() -> int:
             ("openbrowser-no-render", "OpenBrowser no-render", "#0f6270"),
             ("lightpanda", "Lightpanda", "#8871b4"),
         ),
-        title="No-render p50 latency: OpenBrowser vs Lightpanda",
+        title="No-render p50 latency: OpenBrowser vs Lightpanda \u2193 Lower is better",
         output=args.output_dir / "native-lightpanda-current-p50.png",
     )
     return 0

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 import time
 from pathlib import Path
 
@@ -509,11 +510,18 @@ class OpenBrowserArm:
 
 
 def _default_binary() -> str:
+    override = os.environ.get("OPENBROWSER_BIN")
+    if override:
+        return override
+    interpreter_name = "openbrowser-ai.exe" if os.name == "nt" else "openbrowser-ai"
+    interpreter_binary = Path(sys.executable).with_name(interpreter_name)
+    if interpreter_binary.is_file() and os.access(interpreter_binary, os.X_OK):
+        return str(interpreter_binary)
     candidates = [
         Path.home() / ".cache" / "openbrowser-interactive-bench" / "openbrowser-env" / "bin" / "openbrowser-ai",
     ]
     for candidate in candidates:
-        if candidate.exists():
+        if candidate.is_file() and os.access(candidate, os.X_OK):
             return str(candidate)
     found = shutil.which("openbrowser-ai")
     if found:
