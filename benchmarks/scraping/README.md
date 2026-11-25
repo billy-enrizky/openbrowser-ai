@@ -280,7 +280,7 @@ The oracle is exact for every task and runs before latency counts.
 
 | Task | Firecrawl markdown oracle | OpenBrowser oracle |
 | --- | --- | --- |
-| `static_article` | All `Item 0` to `Item 49` in order, page title present, script decoy absent | Same |
+| `static_article` | All `Item 0` to `Item 49` in order, script decoy absent | Same |
 | `js_list` | Exact ordered sequence of 30 rendered name plus price pairs, and exactly 30 `Product` matches. Markdown drops `data-sku`, so the card order and count are the proof | 30 `SKU-000` to `SKU-029` rows |
 | `pagination` | Complete ordered 100 row names across five pages | Complete ordered 100 row IDs across five pages |
 | `table` | Exact ordered 100 by 6 cell matrix | Exact ordered 100 by 6 cell matrix including every row ID |

@@ -197,3 +197,4 @@ The newer `ff6d0d8e` native refresh candidate is not committed here. It has thre
 | `docs/images/native-scraping-p50.png` | 112798 | `47ef0382906d9df35e16e449afa13e01fbca7c351518feba7dffdcadc1b41c71` | `a842591dce899155f2d39edb33d0f5e24f4265bd` |
 | `docs/images/native-scraping-batch-current.png` | 152311 | `02a781fe57ca6e800a6df11da64b29491c4287d4cd27d7e271d271a7daa0bf36` | `ebd89f84d556ee7c616ed4c99ec0bef521947670` |
 | `docs/images/native-scraping-resources.png` | 158601 | `655ebd90a6aca0d2a4cc01721a00bc3da552f48e60369c6d1a7f5b6e8ec2ccad` | `37d19a88d352d5fbd1740346db24a6f7f0a21999` |
+| `docs/images/native-mcp-http-memory.png` | 73994 | `f0755a7e385ebed61901558a79a978b24cfa540fc4114a8269bb239b2c7ba29c` | `1b12c84bf5e55f53948d4cec7cfdcb0bf755b91c` |
