@@ -677,3 +677,39 @@ def test_headless_shell_patterns_cover_each_platform_layout():
     assert "chrome-headless-shell-mac-x64/chrome-headless-shell" in source
     assert "chrome-linux64/headless_shell" in source
     assert "chrome-headless-shell-win64" in source
+
+
+@pytest.mark.asyncio
+async def test_wait_for_process_exit_returns_promptly_when_the_process_is_gone(monkeypatch):
+    import asyncio
+
+    from openbrowser.browser.watchdogs import local_browser_watchdog as module
+
+    class Gone:
+        def is_running(self):
+            raise module.psutil.NoSuchProcess(1234)
+
+    started = asyncio.get_running_loop().time()
+    assert await module.LocalBrowserWatchdog._wait_for_process_exit(Gone()) is True
+    assert asyncio.get_running_loop().time() - started < 0.05
+
+
+@pytest.mark.asyncio
+async def test_wait_for_process_exit_ramps_its_poll_interval(monkeypatch):
+    from openbrowser.browser.watchdogs import local_browser_watchdog as module
+
+    sleeps: list[float] = []
+    states = {"calls": 0}
+
+    class Exiting:
+        def is_running(self):
+            states["calls"] += 1
+            return states["calls"] < 4
+
+    async def record_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr(module.asyncio, "sleep", record_sleep)
+    assert await module.LocalBrowserWatchdog._wait_for_process_exit(Exiting()) is True
+    assert sleeps[:3] == [0.01, 0.02, 0.04]
+    assert all(delay <= 0.1 for delay in sleeps)

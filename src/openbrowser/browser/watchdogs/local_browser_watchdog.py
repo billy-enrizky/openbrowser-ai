@@ -939,14 +939,21 @@ class LocalBrowserWatchdog(BaseWatchdog):
 
 	@staticmethod
 	async def _wait_for_process_exit(process: psutil.Process, attempts: int = 50) -> bool:
-		"""Poll a process without blocking the event loop."""
+		"""Poll a process without blocking the event loop.
+
+		The delay starts at 10 ms and doubles to a 100 ms ceiling. Chrome usually
+		exits within about 40 ms of SIGTERM, and a flat 100 ms poll added up to
+		100 ms to every browser close. The ramp keeps the same total bound.
+		"""
+		delay = 0.01
 		for _ in range(attempts):
 			try:
 				if not process.is_running():
 					return True
 			except psutil.NoSuchProcess:
 				return True
-			await asyncio.sleep(0.1)
+			await asyncio.sleep(delay)
+			delay = min(delay * 2, 0.1)
 		try:
 			return not process.is_running()
 		except psutil.NoSuchProcess:
