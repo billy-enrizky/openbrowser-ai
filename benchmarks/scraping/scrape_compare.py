@@ -63,6 +63,18 @@ EXPECTED_TABLE_ROWS = [
 ]
 
 
+def exact_static(content: str) -> bool:
+    """Require every static item in order and no decoy text."""
+    items = [int(value) for value in re.findall(r"Item (\d+)", content)]
+    return items == list(range(STATIC_ROWS)) and "DO NOT INCLUDE" not in content
+
+
+def exact_assets(content: str) -> bool:
+    """Require every rendered headline exactly once in order."""
+    headlines = [int(value) for value in re.findall(r"Headline (\d+)", content)]
+    return headlines == list(range(1, ASSET_COUNT + 1))
+
+
 def exact_js_list(skus: list[str]) -> bool:
     """Require the complete ordered SKU sequence."""
     return skus == EXPECTED_JS_SKUS
@@ -347,7 +359,7 @@ class BrowserArm:
     async def run_static(self, base: str):
         result = await self.scrape(url=f"{base}/static", format="markdown")
         content = result.get("content") or ""
-        ok = "Static Bench" in content and "Item 49" in content and "DO NOT INCLUDE" not in content
+        ok = exact_static(content)
         return ok, content, ""
 
     async def run_js_list(self, base: str):
@@ -398,8 +410,7 @@ class BrowserArm:
             wait_for='#headlines[data-count="20"]',
         )
         content = result.get("content") or ""
-        headlines = re.findall(r"Headline \d+", content)
-        ok = len(headlines) == ASSET_COUNT
+        ok = exact_assets(content)
         return ok, content, ""
 
 
@@ -549,7 +560,7 @@ class FirecrawlArm:
     async def run_static(self, base: str):
         content, engine = self._scrape(f"{base}/static")
         self.last_engine = engine
-        ok = "Static Bench" in content and "Item 49" in content and "DO NOT INCLUDE" not in content
+        ok = exact_static(content)
         return ok, content, ""
 
     async def run_js_list(self, base: str):
@@ -600,8 +611,7 @@ class FirecrawlArm:
     async def run_assets(self, base: str):
         content, engine = self._scrape(f"{base}/assets", self.wait_overrides.get("asset_heavy"))
         self.last_engine = engine
-        headlines = [int(value) for value in re.findall(r"Headline (\d+)", content)]
-        ok = len(headlines) == ASSET_COUNT and sorted(set(headlines)) == list(range(1, ASSET_COUNT + 1))
+        ok = exact_assets(content)
         return ok, content, ""
 
 
@@ -666,7 +676,7 @@ class LightpandaArm:
 
     async def run_static(self, base: str):
         content = self._fetch(f"{base}/static", "markdown", wait_ms=100)
-        ok = "Static Bench" in content and "Item 49" in content and "DO NOT INCLUDE" not in content
+        ok = exact_static(content)
         return ok, content, ""
 
     async def run_js_list(self, base: str):
@@ -713,8 +723,7 @@ class LightpandaArm:
             "markdown",
             wait_script="document.querySelectorAll('#headlines h2').length === 20",
         )
-        headlines = [int(value) for value in re.findall(r"Headline (\d+)", content)]
-        ok = len(headlines) == ASSET_COUNT and sorted(set(headlines)) == list(range(1, ASSET_COUNT + 1))
+        ok = exact_assets(content)
         return ok, content, ""
 
 

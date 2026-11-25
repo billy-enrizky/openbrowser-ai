@@ -6,9 +6,9 @@
 - [1. How to read these numbers](#1-how-to-read-these-numbers)
 - [2. Current results, 2026-11-25, and reference lanes](#2-current-results-2026-11-25-and-reference-lanes)
   - [2.1. OpenBrowser no-browser MCP scrape_web memory lane, 2026-11-25](#21-openbrowser-no-browser-mcp-scrape_web-memory-lane-2026-11-25)
-  - [2.2. Firecrawl Local sequential, 2026-11-24, N=10](#22-firecrawl-local-sequential-2026-11-24-n10)
+  - [2.2. Firecrawl Local sequential, 2026-11-25, N=10](#22-firecrawl-local-sequential-2026-11-25-n10)
   - [2.3. Firecrawl Local batch, 2026-11-24, N=10](#23-firecrawl-local-batch-2026-11-24-n10)
-  - [2.4. Lightpanda no-render latency, 2026-11-24, N=10](#24-lightpanda-no-render-latency-2026-11-24-n10)
+  - [2.4. Lightpanda no-render latency, 2026-11-25, N=10](#24-lightpanda-no-render-latency-2026-11-25-n10)
 - [3. Arms](#3-arms)
 - [4. Tasks](#4-tasks)
 - [5. Run](#5-run)
@@ -103,23 +103,23 @@ Scope rules:
 
 ### 2.2. Firecrawl Local sequential, 2026-11-25, N=10
 
-OpenBrowser won 50 of 50 paired samples across five tasks. Each task used 10 pairs. All 150 measured runs passed the complete ordered oracle. HTTP-only tasks do not start a browser. Browser tasks start their browser before the timed sample. A zero-warmup run also passed all 150 correctness checks, but the first static sample per arm pays the HTTP client setup and can lose one pair. The published lane keeps one warmup so both arms compare steady-state task work.
+OpenBrowser lightweight won 50 of 50 paired samples across five tasks. The full arm won 49 of 50, with one static sample 0.13 ms slower. Each task used 10 pairs. All 150 measured runs passed the complete ordered oracle. HTTP-only tasks do not start a browser. Browser tasks start their browser before the timed sample. A zero-warmup run also passed all 150 correctness checks, but the first static sample per arm pays the HTTP client setup and can lose one pair. The published lane keeps one warmup so both arms compare steady-state task work.
 
 Lower is better for latency ↓.
 
 | Task | OpenBrowser full p50 ms | OpenBrowser lightweight p50 ms | Firecrawl Local p50 ms |
 | --- | ---: | ---: | ---: |
-| `static_article` | 0.7 | 0.7 | 1.2 |
-| `pagination` | 2.8 | 2.8 | 4.3 |
-| `table` | 1.1 | 1.1 | 2.9 |
-| `js_list` | 13.8 | 15.6 | 552.2 |
-| `asset_heavy` | 50.2 | 16.5 | 564.0 |
+| `static_article` | 0.8 | 0.7 | 1.2 |
+| `pagination` | 2.8 | 2.9 | 4.4 |
+| `table` | 1.0 | 1.1 | 2.9 |
+| `js_list` | 13.1 | 15.1 | 556.4 |
+| `asset_heavy` | 56.8 | 17.1 | 570.7 |
 
 Chart: [native-scraping-current-p50.png](https://github.com/billy-enrizky/openbrowser-ai/blob/main/docs/images/native-scraping-current-p50.png). The chart is labeled `Lower is better ↓` for latency.
 
 Raw evidence:
 
-- [results-firecrawl-final4-2026-11-25-n10-interleaved.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-firecrawl-final4-2026-11-25-n10-interleaved.json)
+- [results-firecrawl-final6-2026-11-25-n10-interleaved.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-firecrawl-final6-2026-11-25-n10-interleaved.json)
 
 ### 2.3. Firecrawl Local batch, 2026-11-24, N=10
 
@@ -140,11 +140,11 @@ Lower is better for latency ↓.
 
 | Task | OpenBrowser no-render p50 ms | Lightpanda p50 ms |
 | --- | ---: | ---: |
-| `static_article` | 1.6 | 269.8 |
-| `pagination` | 4.0 | 1378.6 |
-| `table` | 2.0 | 446.1 |
-| `js_list` | 15.9 | 272.9 |
-| `asset_heavy` | 16.3 | 236.7 |
+| `static_article` | 1.9 | 236.7 |
+| `pagination` | 4.9 | 1160.3 |
+| `table` | 3.3 | 228.5 |
+| `js_list` | 14.5 | 209.9 |
+| `asset_heavy` | 16.1 | 219.5 |
 
 All 100 runs passed.
 
@@ -154,7 +154,7 @@ Caveat: Lightpanda starts one process per sample, so its startup dominates stati
 
 Raw evidence:
 
-- [results-lightpanda-final4-2026-11-25-n10-interleaved.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-lightpanda-final4-2026-11-25-n10-interleaved.json)
+- [results-lightpanda-final6-2026-11-25-n10-interleaved.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-lightpanda-final6-2026-11-25-n10-interleaved.json)
 
 ## 3. Arms
 

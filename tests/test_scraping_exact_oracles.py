@@ -8,10 +8,12 @@ from benchmarks.scraping.scrape_compare import (
     EXPECTED_JS_SKUS,
     EXPECTED_PAGINATION_IDS,
     EXPECTED_TABLE_ROWS,
+    BrowserArm,
+    exact_assets,
     exact_js_list,
     exact_pagination,
+    exact_static,
     exact_table,
-    BrowserArm,
 )
 
 
@@ -97,3 +99,36 @@ async def test_prepare_does_not_start_for_an_auto_http_task(monkeypatch):
     monkeypatch.setattr(arm, "_ensure_started", fake_start)
     await arm.prepare("pagination")
     assert calls == []
+
+
+def test_static_accepts_all_ordered_items():
+    content = "\n".join(f"Item {index}\nValue {index * 7}" for index in range(50))
+    assert exact_static(content) is True
+
+
+def test_static_rejects_first_and_last_only():
+    assert exact_static("Static Bench\nItem 49") is False
+
+
+def test_static_rejects_a_missing_item():
+    content = "\n".join(f"Item {index}" for index in range(49))
+    assert exact_static(content) is False
+
+
+def test_static_rejects_the_decoy():
+    content = "\n".join(f"Item {index}" for index in range(50)) + "\nDO NOT INCLUDE"
+    assert exact_static(content) is False
+
+
+def test_assets_accepts_all_ordered_headlines():
+    content = "\n".join(f"Headline {index}" for index in range(1, 21))
+    assert exact_assets(content) is True
+
+
+def test_assets_rejects_twenty_copies_of_headline_one():
+    assert exact_assets("\n".join(["Headline 1"] * 20)) is False
+
+
+def test_assets_rejects_reordered_headlines():
+    content = "\n".join(f"Headline {index}" for index in reversed(range(1, 21)))
+    assert exact_assets(content) is False
