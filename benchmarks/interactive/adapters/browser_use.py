@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import tempfile
 import time
+from contextlib import suppress
 from pathlib import Path
 
 from ..fixtures.server import ACCOUNT_SECRET, BENCH_PASSWORD, BENCH_USER
@@ -26,6 +29,17 @@ BINARY = os.environ.get(
     "BROWSER_USE_BIN",
     str(Path.home() / ".cache" / "openbrowser-interactive-bench" / "browser-use-venv" / "bin" / "browser-use"),
 )
+
+ADAPTER_VERSION = "browser-use-native-readiness-v2"
+STDERR_TAIL_BYTES = 32768
+WARMUP_SENTINEL = "BROWSER_USE_NATIVE_READY_V2"
+WARMUP_CODE = f"""
+import json
+tabs = list_tabs()
+if not isinstance(tabs, list):
+    raise RuntimeError('native list_tabs did not return a list')
+print('BENCH_RESULT ' + json.dumps({{'execution_ready': True, 'sentinel': {WARMUP_SENTINEL!r}}}))
+"""
 
 HEADER = """
 import json as _json
@@ -56,6 +70,80 @@ def close_current():
     except Exception:
         pass
 """
+
+# The native wait_for_element uses a separate wall-clock timeout. An atomic
+# native-js read keeps visibility, geometry and context retries on one deadline.
+TABS_READINESS = """
+_readiness_checks = 0
+_readiness_retries = 0
+_last_readiness_error = ''
+_context_messages = {
+    'Execution context was destroyed.',
+    'Execution context was destroyed, most likely because of a navigation.',
+    'Cannot find context with specified id',
+}
+
+def ready_box(selector, target, timeout=20.0):
+    global _readiness_checks, _readiness_retries, _last_readiness_error
+    deadline = _time.monotonic() + timeout
+    box = None
+    expression = (
+        '(()=>{const e=document.querySelector(' + _json.dumps(selector) + ');'
+        'if(!e)return null;'
+        'const s=getComputedStyle(e);'
+        'if(s.display===\"none\"||s.visibility===\"hidden\"||s.opacity===\"0\")return null;'
+        'if(e.checkVisibility&&!e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}))return null;'
+        'const r=e.getBoundingClientRect();'
+        'return r.width>0&&r.height>0?[r.x+r.width/2,r.y+r.height/2]:null;})()'
+    )
+    while _time.monotonic() < deadline:
+        try:
+            _readiness_checks += 1
+            box = js(expression, target_id=target)
+            if box is not None and _time.monotonic() < deadline:
+                return box
+        except RuntimeError as error:
+            value = error.args[0] if error.args else ''
+            if isinstance(value, dict):
+                if value.get('code') != -32000:
+                    raise
+                value = value.get('message')
+            if not isinstance(value, str) or value not in _context_messages:
+                raise
+            _last_readiness_error = str(error)
+        _readiness_retries += 1
+        remaining = deadline - _time.monotonic()
+        if remaining > 0:
+            _time.sleep(min(0.1, remaining))
+    raise RuntimeError(
+        'timeout waiting for ' + selector + ' target=' + str(target)
+        + ' retries=' + str(_readiness_retries) + ' last_predicate=' + repr(box)
+        + ' last_error=' + _last_readiness_error
+    )
+"""
+
+
+def _stderr_tail(stderr: str, ctx: RunContext) -> tuple[str, bool]:
+    """Redact complete paths before keeping a UTF-8 bounded diagnostic tail."""
+    paths = {
+        str(Path.home()),
+        str(ctx.root),
+        str(ctx.home),
+        str(ctx.tmp),
+        tempfile.gettempdir(),
+        "/tmp",
+        "/private/tmp",
+    }
+    # Redact an entire working-copy path, even when it belongs to another home.
+    stderr = re.sub(r"/[^\s'\"<>]*?/\.worktrees/[^\s'\"<>]*", "<working-copy-path>", stderr)
+    for path in sorted(paths, key=len, reverse=True):
+        stderr = re.sub(re.escape(path) + r"(?=/|\b)[^\s'\"<>]*", "<path>", stderr)
+    data = stderr.encode("utf-8")
+    if len(data) <= STDERR_TAIL_BYTES:
+        return stderr, False
+    marker = b"[stderr tail truncated]\n"
+    tail = data[-(STDERR_TAIL_BYTES - len(marker)) :].decode("utf-8", errors="ignore")
+    return marker.decode() + tail, True
 
 
 def _wizard(url: str) -> str:
@@ -123,17 +211,17 @@ emit({{'status': status}})
 def _tabs(url: str) -> str:
     return (
         HEADER
+        + TABS_READINESS
         + f"""
-_tick(); new_tab({url!r})
-_tick(); original = current_tab()['targetId']
-_tick(); box = js(
-    "(()=>{{const r=document.querySelector('#compare').getBoundingClientRect(); "
-    "return [r.x+r.width/2, r.y+r.height/2];}})()"
-)
+_tick(); original = new_tab({url!r})
+if not isinstance(original, str) or not original:
+    raise RuntimeError('new_tab did not return a target ID')
+_tick(); switch_tab(original)
+box = ready_box('#compare', original)
 _tick(); click_at_xy(box[0], box[1])
-_tick(); deadline = _time.time() + 20
+_tick(); deadline = _time.monotonic() + 20
 detail = ''
-while _time.time() < deadline:
+while _time.monotonic() < deadline:
     tabs = list_tabs()
     others = [tab for tab in tabs if tab['targetId'] != original and '/detail' in str(tab.get('url', ''))]
     if others:
@@ -143,7 +231,8 @@ while _time.time() < deadline:
 if not detail:
     raise RuntimeError('detail tab did not open')
 _tick(); switch_tab(detail)
-_tick(); js("document.querySelector('#approve').click()")
+ready_box('#approve', detail)
+_tick(); js("document.querySelector('#approve').click()", target_id=detail)
 wait_js("document.getElementById('approved').textContent === 'approved'")
 _tick(); switch_tab(original)
 wait_js("document.getElementById('status').textContent === 'approved:42'")
@@ -151,7 +240,9 @@ _tick(); title = js("document.title")
 _tick(); close_tab(detail)
 status = js("document.getElementById('status').textContent")
 _tick(); close_current()
-emit({{'status': status, 'original_title': title}})
+emit({{'status': status, 'original_title': title,
+       'readiness_checks': _readiness_checks, 'readiness_retries': _readiness_retries,
+       'last_readiness_error': _last_readiness_error}})
 """
     )
 
@@ -227,7 +318,16 @@ class BrowserUseArm:
         )
         self._result.process_starts += 1
         self._result.stdout += stdout
-        self._result.stderr += stderr
+        total_bytes = self._result.reported.get("stderr_total_bytes", 0) + len(stderr.encode("utf-8"))
+        tail, truncated = _stderr_tail(self._result.stderr + stderr, ctx)
+        truncated = truncated or self._result.reported.get("stderr_truncated", False)
+        self._result.stderr = tail
+        diagnostics = {
+            "adapter_version": ADAPTER_VERSION,
+            "stderr_total_bytes": total_bytes,
+            "stderr_truncated": truncated,
+        }
+        self._result.reported.update(diagnostics)
         reported: dict = {}
         for line in stdout.splitlines():
             if line.startswith("BENCH_RESULT "):
@@ -237,20 +337,34 @@ class BrowserUseArm:
                     reported = {}
         self._result.tool_calls += int(reported.pop("tool_calls", 0))
         if returncode != 0:
-            raise RuntimeError(f"browser-use exited {returncode}: {stderr.strip()[:2000]}")
+            raise RuntimeError(
+                f"browser-use exited {returncode}: stderr_total_bytes={total_bytes} "
+                f"stderr_truncated={truncated}\n{tail}"
+            )
+        reported.update(diagnostics)
         return reported
 
     def warmup(self, ctx: RunContext) -> tuple[dict, float]:
-        """Start the dedicated Chrome once for a warm browser-use session."""
+        """Prepare Chrome and the native execution interface without a task."""
         started = time.monotonic()
         self._result = ArmResult(ok=False)
-        self._start_chrome(ctx)
+        try:
+            self._start_chrome(ctx)
+            ready = self._script(ctx, WARMUP_CODE, 30)
+            if ready.get("execution_ready") is not True or ready.get("sentinel") != WARMUP_SENTINEL:
+                raise RuntimeError("browser-use warmup did not return the native readiness sentinel")
+        except Exception:
+            with suppress(Exception):
+                self.cleanup(ctx)
+            raise
         elapsed_ms = (time.monotonic() - started) * 1000.0
         assert self._chrome is not None
         payload = {
             "ok": True,
             "cdp_url": self._chrome.cdp_url,
             "keychain_verified": self._warm_keychain_verified,
+            "execution_ready": True,
+            "adapter_version": ADAPTER_VERSION,
         }
         self._result = ArmResult(ok=False)
         return payload, elapsed_ms
