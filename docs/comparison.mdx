@@ -114,7 +114,7 @@ These lanes use five arms: OpenBrowser MCP, OpenBrowser CLI, chrome-devtools-mcp
 
 ### 3.1. Cold interactive
 
-The cold lane starts a fresh process tree, daemon or server, and browser for every task. 125 of 125 runs passed the exact oracle and the mock-keychain check. Host load was 6.486, 5.743, 5.360 before and 8.189, 6.929, 5.971 after on 18 logical CPUs. The MCP transport was the lean variant. The host Playwright cache was exposed to every arm.
+The cold lane starts a fresh process tree, daemon or server, and browser for every task. 125 of 125 runs passed the exact oracle and the mock-keychain check. Host load was 4.282, 3.639, 3.877 before and 4.262, 3.914, 3.937 after on 18 logical CPUs. The MCP transport was the lean variant. The host Playwright cache was exposed to every arm.
 
 <img src="/images/native-interactive-cold-p50.png" alt="Cold interactive p50 latency for OpenBrowser MCP and CLI, chrome-devtools-mcp, agent-browser, and browser-use across five tasks. Lower is better." />
 
@@ -122,17 +122,17 @@ Task time (ms) ↓ **Lower is better**.
 
 | Task | OpenBrowser MCP p50 ms | OpenBrowser CLI p50 ms | chrome-devtools-mcp p50 ms | agent-browser p50 ms | browser-use p50 ms |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `wizard` | 715 | 999 | 4335 | 1599 | 1277 |
-| `modal` | 811 | 1206 | 3639 | 2262 | 1571 |
-| `download` | 954 | 1344 | 1633 | 1554 | 1368 |
-| `tabs` | 658 | 1010 | 2426 | 1511 | 940 |
-| `auth` | 1390 | 1915 | 3707 | 2529 | 2585 |
+| `wizard` | 531 | 612 | 4244 | 1306 | 1031 |
+| `modal` | 706 | 772 | 3433 | 2151 | 1706 |
+| `download` | 857 | 908 | 1453 | 1329 | 1103 |
+| `tabs` | 560 | 632 | 2160 | 1271 | 697 |
+| `auth` | 1255 | 1454 | 3565 | 2205 | 2336 |
 
-OpenBrowser MCP has the lowest p50 on all five cold tasks against all three competitors. It won every pair, 5 of 5, on every task against every competitor.
+Both OpenBrowser arms have the lowest p50 on all five cold tasks against all three competitors. OpenBrowser MCP and OpenBrowser CLI each won every pair, 5 of 5, on every task against every competitor. CLI `tabs` is 632 ms against browser-use at 697 ms.
 
-OpenBrowser CLI has a lower p50 on every cold task against every competitor except `tabs` against browser-use. CLI `tabs` p50 was 1010 ms against 940 ms, and the CLI won 1 of 5 pairs there. The other CLI cold results are p50 wins, not a claim that every CLI pair was a win. The cold lane is not an every-arm win.
+Cold latency is time to result. The timer measures task completion and any in-task restart. Final adapter cleanup runs once after the timed interval for every arm and is not charged to the task. An earlier harness version ran cleanup inside the timed interval and then again after it, so every arm paid that teardown twice. The current lane removes the duplicate. This is a harness correction, not a product speedup.
 
-Raw data: [results-cold-five-arm-lean-2026-11-25-n5-final2.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-five-arm-lean-2026-11-25-n5-final2.jsonl).
+Raw data: [results-cold-five-arm-lean-2026-11-25-n5-final3.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-five-arm-lean-2026-11-25-n5-final3.jsonl).
 
 <a id="interactive-warm"></a>
 
@@ -385,7 +385,7 @@ Task time and memory: **Lower is better** ↓. Pair counts: **Higher is better**
 
 | Question | Result | Limit |
 | --- | --- | --- |
-| Cold interactive p50 | OpenBrowser MCP is lowest on all five tasks against all three competitors. It won 5 of 5 pairs on every task against every competitor. | OpenBrowser CLI has the only cold p50 loss, on `tabs` against browser-use, 1010 ms against 940 ms, and won 1 of 5 pairs. |
+| Cold interactive p50 | Both OpenBrowser arms are lowest on all five tasks against all three competitors. Both won 5 of 5 pairs on every task against every competitor. | Cleanup runs once after the timed interval for every arm. The timer excludes harness teardown. |
 | Warm interactive p50 | Both OpenBrowser arms are lowest on all four tasks against all three competitors. Both won 5 of 5 pairs on every task against every competitor. | `auth` is cold only because it restarts the browser. |
 | No-browser memory | One `scrape_web` call: 48.1 MiB median. 25 concurrent calls: 62.4 MiB median. Zero browser processes. | Process-tree RSS on one local fixture. Not comparable to Lightpanda PSS or the Firecrawl controller-inclusive figure. |
 | Interactive memory | Both OpenBrowser arms have the lowest child footprint and process-tree RSS on all five tasks in the N=1 resource pilot. | N=1 per arm and task. Descriptive, not a significance claim. |

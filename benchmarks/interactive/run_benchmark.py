@@ -145,7 +145,7 @@ def run_one(
     started = time.monotonic()
     try:
         arm = make_arm(arm_name, openbrowser_extensions=openbrowser_extensions)
-        result = arm.run(ctx)
+        result = arm.run(ctx, cleanup=False)
     except FileNotFoundError as exc:
         result = None
         error = f"unavailable: {exc}"
