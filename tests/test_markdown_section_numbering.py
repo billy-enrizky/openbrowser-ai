@@ -75,6 +75,25 @@ def test_numbering_is_idempotent(tmp_path):
     assert _run("--check", *copies).returncode == 0
 
 
+def test_mdx_docs_use_mdx_comments():
+    for doc in _tracked_docs():
+        if not doc.endswith(".mdx"):
+            continue
+        text = (ROOT / doc).read_text(encoding="utf-8")
+        assert "<!-- toc:start -->" not in text, doc
+        assert "{/* toc:start */}" in text, doc
+
+
+def test_mdx_generator_writes_mdx_comments(tmp_path):
+    source = tmp_path / "page.mdx"
+    source.write_text("---\ntitle: Page\n---\n\n# Page\n\n## Section\n", encoding="utf-8")
+    completed = _run("--write", str(source))
+    assert completed.returncode == 0
+    text = source.read_text(encoding="utf-8")
+    assert "{/* toc:start */}" in text
+    assert "<!-- toc:start -->" not in text
+
+
 def test_h3_first_document_numbers_from_one(tmp_path):
     source = tmp_path / "h3-first.md"
     source.write_text(
