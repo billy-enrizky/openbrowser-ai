@@ -24,11 +24,12 @@ def _local_links(text):
     for match in pattern.finditer(text):
         target = next((group for group in match.groups() if group), '')
         target = target.split('#')[0]
-        if not target or target.startswith(('http://', 'https://', 'mailto:')):
-            continue
         if target.startswith('https://github.com/billy-enrizky/openbrowser-ai/blob/main/'):
             yield ROOT / target.split('/blob/main/', 1)[1]
-        elif target.startswith('/images/'):
+            continue
+        if not target or target.startswith(('http://', 'https://', 'mailto:')):
+            continue
+        if target.startswith('/images/'):
             yield ROOT / 'docs' / 'images' / target.removeprefix('/images/')
         elif target.startswith('benchmarks/'):
             yield ROOT / target
@@ -65,6 +66,11 @@ def test_benchmarks_article_is_a_current_guide():
         '5. Test Tasks',
         '6. Source Code',
     ]
+
+
+def test_github_main_links_are_checked():
+    text = '[source](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/run_benchmark.py)'
+    assert list(_local_links(text)) == [ROOT / 'benchmarks' / 'interactive' / 'run_benchmark.py']
 
 
 def test_comparison_page_links_resolve():
