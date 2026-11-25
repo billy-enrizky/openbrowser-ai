@@ -1,0 +1,32 @@
+{
+  "generated_at": "2026-11-25T15:33:52.058014+00:00",
+  "arms": [
+    "openbrowser-fast",
+    "openbrowser-mcp-fast",
+    "chrome-devtools-mcp",
+    "agent-browser",
+    "browser-use"
+  ],
+  "tasks": [
+    "wizard",
+    "modal",
+    "download",
+    "tabs",
+    "auth"
+  ],
+  "samples": 5,
+  "warmups": 0,
+  "rotate_arms": true,
+  "load_before": [
+    6.57,
+    4.896,
+    4.404
+  ],
+  "load_after": [
+    6.729,
+    6.016,
+    4.994
+  ],
+  "mcp_transport": "lean",
+  "playwright_browsers_path_available": true
+}

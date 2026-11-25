@@ -677,10 +677,10 @@ Warm interactive, N=5, rotated arm order, lower is better:
 
 | Task | OpenBrowser MCP p50 | OpenBrowser CLI p50 | chrome-devtools-mcp p50 | agent-browser p50 | browser-use p50 |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `wizard` | **57 ms** | 122 ms | 3481 ms | 524 ms | 486 ms |
-| `modal` | **218 ms** | 282 ms | 2734 ms | 1126 ms | 625 ms |
-| `download` | **350 ms** | 398 ms | 777 ms | 440 ms | 578 ms |
-| `tabs` | **72 ms** | 130 ms | 1485 ms | 382 ms | 184 ms |
+| `wizard` | **56 ms** | 120 ms | 3482 ms | 494 ms | 519 ms |
+| `modal` | **211 ms** | 268 ms | 2760 ms | 1147 ms | 811 ms |
+| `download` | **348 ms** | 395 ms | 772 ms | 438 ms | 573 ms |
+| `tabs` | **72 ms** | 131 ms | 1485 ms | 397 ms | 232 ms |
 
 Both OpenBrowser arms have the lowest p50 on all four warm tasks, and both won 5 of 5 pairs on every task against every competitor. All 100 runs passed.
 
@@ -688,11 +688,11 @@ Cold interactive, N=5, rotated arm order, lower is better. The timer measures ti
 
 | Task | OpenBrowser MCP p50 | OpenBrowser CLI p50 | chrome-devtools-mcp p50 | agent-browser p50 | browser-use p50 |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `wizard` | **531 ms** | 612 ms | 4244 ms | 1306 ms | 1031 ms |
-| `modal` | **706 ms** | 772 ms | 3433 ms | 2151 ms | 1706 ms |
-| `download` | **857 ms** | 908 ms | 1453 ms | 1329 ms | 1103 ms |
-| `tabs` | **560 ms** | 632 ms | 2160 ms | 1271 ms | 697 ms |
-| `auth` | **1255 ms** | 1454 ms | 3565 ms | 2205 ms | 2336 ms |
+| `wizard` | **569 ms** | 677 ms | 4312 ms | 1573 ms | 1111 ms |
+| `modal` | **725 ms** | 841 ms | 3471 ms | 2304 ms | 1744 ms |
+| `download` | **860 ms** | 963 ms | 1513 ms | 1484 ms | 1126 ms |
+| `tabs` | **593 ms** | 683 ms | 2220 ms | 1393 ms | 797 ms |
+| `auth` | **1305 ms** | 1604 ms | 3703 ms | 2506 ms | 2476 ms |
 
 Both OpenBrowser arms have the lowest p50 on all five cold tasks, and both won 5 of 5 pairs on every task against every competitor. Browser-use does not win download or tabs in the current lane. All 125 runs passed the exact oracle and keychain check.
 

@@ -58,7 +58,7 @@ server-side oracle, not by the adapter's self-report.
 - The host Playwright cache was exposed to every arm.
 - Lean MCP transport was the default.
 - No AWS or cloud browser was used.
-- Cold-lane host load was 4.282, 3.639, 3.877 before and 4.262, 3.914, 3.937 after on 18 logical CPUs. The brief does not report warm-lane host load.
+- Cold-lane host load was 6.570, 4.896, 4.404 before and 6.729, 6.016, 4.994 after on 18 logical CPUs. The brief does not report warm-lane host load.
 - Cold latency is time to result. The timer measures task completion and any in-task restart. Final adapter cleanup runs once after the timed interval for every arm and is not charged to the task.
 - A paired win means one arm was faster on an individual sample matched against the same task and fixture. It is not a significance test.
 
@@ -72,19 +72,19 @@ Lower is better for latency ↓.
 
 | Task | OpenBrowser MCP p50 ms | OpenBrowser CLI p50 ms | chrome-devtools-mcp p50 ms | agent-browser p50 ms | browser-use p50 ms |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| wizard | 531 | 612 | 4244 | 1306 | 1031 |
-| modal | 706 | 772 | 3433 | 2151 | 1706 |
-| download | 857 | 908 | 1453 | 1329 | 1103 |
-| tabs | 560 | 632 | 2160 | 1271 | 697 |
-| auth | 1255 | 1454 | 3565 | 2205 | 2336 |
+| wizard | 569 | 677 | 4312 | 1573 | 1111 |
+| modal | 725 | 841 | 3471 | 2304 | 1744 |
+| download | 860 | 963 | 1513 | 1484 | 1126 |
+| tabs | 593 | 683 | 2220 | 1393 | 797 |
+| auth | 1305 | 1604 | 3703 | 2506 | 2476 |
 
-Both OpenBrowser arms have the lowest p50 on all five cold tasks against all three competitors. OpenBrowser MCP and OpenBrowser CLI each won every paired sample, 5 of 5, on every task against every competitor. The CLI `tabs` p50 is 632 ms against browser-use at 697 ms.
+Both OpenBrowser arms have the lowest p50 on all five cold tasks against all three competitors. OpenBrowser MCP and OpenBrowser CLI each won every paired sample, 5 of 5, on every task against every competitor. The CLI `tabs` p50 is 683 ms against browser-use at 797 ms.
 
 Raw evidence:
 
-- [results-cold-five-arm-lean-2026-11-25-n5-final3.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-five-arm-lean-2026-11-25-n5-final3.jsonl)
-- [results-cold-five-arm-lean-2026-11-25-n5-final3.meta.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-five-arm-lean-2026-11-25-n5-final3.meta.json)
-- [results-cold-five-arm-lean-2026-11-25-n5-final3.summary.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-five-arm-lean-2026-11-25-n5-final3.summary.json)
+- [results-cold-five-arm-lean-2026-11-25-n5-final4.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-five-arm-lean-2026-11-25-n5-final4.jsonl)
+- [results-cold-five-arm-lean-2026-11-25-n5-final4.meta.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-five-arm-lean-2026-11-25-n5-final4.meta.json)
+- [results-cold-five-arm-lean-2026-11-25-n5-final4.summary.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-five-arm-lean-2026-11-25-n5-final4.summary.json)
 
 ### 2.2. Warm interactive
 
@@ -94,10 +94,10 @@ Lower is better for latency ↓.
 
 | Task | OpenBrowser MCP p50 ms | OpenBrowser CLI p50 ms | chrome-devtools-mcp p50 ms | agent-browser p50 ms | browser-use p50 ms |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| wizard | 57 | 122 | 3481 | 524 | 486 |
-| modal | 218 | 282 | 2734 | 1126 | 625 |
-| download | 350 | 398 | 777 | 440 | 578 |
-| tabs | 72 | 130 | 1485 | 382 | 184 |
+| wizard | 56 | 120 | 3482 | 494 | 519 |
+| modal | 211 | 268 | 2760 | 1147 | 811 |
+| download | 348 | 395 | 772 | 438 | 573 |
+| tabs | 72 | 131 | 1485 | 397 | 232 |
 
 Both OpenBrowser arms have the lowest warm p50 on all four tasks against all three competitors. OpenBrowser MCP won every paired sample, 5 of 5, on every task against every competitor. OpenBrowser CLI also won every paired sample, 5 of 5, on every task against every competitor.
 
@@ -105,8 +105,8 @@ The `auth` task is cold only because it restarts the browser.
 
 Raw evidence:
 
-- [results-warm-five-arm-lean-2026-11-25-n5-final2.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-five-arm-lean-2026-11-25-n5-final2.jsonl)
-- [results-warm-five-arm-lean-2026-11-25-n5-final2.summary.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-five-arm-lean-2026-11-25-n5-final2.summary.json)
+- [results-warm-five-arm-lean-2026-11-25-n5-final4.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-five-arm-lean-2026-11-25-n5-final4.jsonl)
+- [results-warm-five-arm-lean-2026-11-25-n5-final4.summary.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-five-arm-lean-2026-11-25-n5-final4.summary.json)
 
 ### 2.3. Timer and cleanup boundary
 
