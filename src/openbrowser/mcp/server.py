@@ -40,9 +40,10 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from jsonschema import Draft202012Validator
+if TYPE_CHECKING:
+	from openbrowser.mcp.schema import CompiledSchema
 
 # Configure logging for MCP mode - redirect to stderr but preserve critical diagnostics
 logging.basicConfig(
@@ -599,6 +600,19 @@ from openbrowser.code_use.namespace_transfer import (
 	transfer_namespace,
 )
 from openbrowser.mcp.catalog import load_tool_definitions
+
+
+def _compile_tool_definitions(definitions: dict[str, dict[str, Any]]) -> dict[str, CompiledSchema]:
+	"""Compile every input schema and validate every output schema once."""
+	from openbrowser.mcp.schema import compile_schema
+
+	compiled: dict[str, CompiledSchema] = {}
+	for name, tool in definitions.items():
+		compiled[name] = compile_schema(tool['inputSchema'])
+		output_schema = tool.get('outputSchema')
+		if output_schema is not None:
+			compile_schema(output_schema, allow_null=True)
+	return compiled
 
 
 class _BrowserOwner:
@@ -1970,23 +1984,14 @@ class OpenBrowserServer(_BrowserOwner):
 		self._modern_defs_by_name = {
 			tool['name']: tool for tool in load_tool_definitions(modern=True, compact=compact)
 		}
-		self._legacy_validators = {
-			name: Draft202012Validator(tool['inputSchema']) for name, tool in self._legacy_defs_by_name.items()
-		}
-		self._modern_validators = {
-			name: Draft202012Validator(tool['inputSchema']) for name, tool in self._modern_defs_by_name.items()
-		}
+		self._legacy_validators = _compile_tool_definitions(self._legacy_defs_by_name)
+		self._modern_validators = _compile_tool_definitions(self._modern_defs_by_name)
 		for defs, validators in (
 			(self._legacy_defs_by_name, self._legacy_validators),
 			(self._modern_defs_by_name, self._modern_validators),
 		):
 			defs['search_web'] = defs['web_search']
 			validators['search_web'] = validators['web_search']
-		for tool in (*self._legacy_defs_by_name.values(), *self._modern_defs_by_name.values()):
-			Draft202012Validator.check_schema(tool['inputSchema'])
-			output_schema = tool.get('outputSchema')
-			if output_schema is not None:
-				Draft202012Validator.check_schema(output_schema)
 		self.server: Any = None
 		if install_sdk:
 			self._setup_handlers()
@@ -2103,7 +2108,9 @@ class OpenBrowserServer(_BrowserOwner):
 				raise ProtocolRpcError(code=-32602, message=f'Unknown tool: {name}')
 			telemetry_tool_name = name
 			call_arguments = dict(arguments or {})
-			validation_error = next(validators[name].iter_errors(call_arguments), None)
+			from openbrowser.mcp.schema import iter_errors
+
+			validation_error = next(iter_errors(call_arguments, validators[name]), None)
 			if validation_error is not None:
 				location = (
 					f' at {validation_error.json_path}'
