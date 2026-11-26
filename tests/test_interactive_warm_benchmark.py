@@ -11,19 +11,27 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from benchmarks.interactive import warm_benchmark
-from benchmarks.interactive.adapters.base import ArmResult
+from benchmarks.interactive.adapters.base import ArmResult, RunContext
 from benchmarks.interactive.adapters.openbrowser import OpenBrowserArm
 from benchmarks.interactive.run_benchmark import make_arm
 from benchmarks.interactive.tasks import oracle_tabs
 from benchmarks.interactive.warm_benchmark import DEFAULT_ARMS, SUPPORTED_ARMS, WARM_TASKS, cold_p50, redact, summarize
 
 
-def _ctx() -> SimpleNamespace:
-    return SimpleNamespace(
+def _ctx() -> RunContext:
+    root = Path("/tmp/warm-test")
+    return RunContext(
         task="wizard",
+        arm="openbrowser-fast",
+        sample=0,
         base_url="http://127.0.0.1:1",
-        root=Path("/tmp/warm-test"),
-        config=Path("/tmp/warm-test/config"),
+        root=root,
+        downloads=root / "downloads",
+        profile=root / "profile",
+        home=root / "home",
+        tmp=root / "tmp",
+        config=root / "config",
+        session="bench",
     )
 
 
@@ -98,6 +106,7 @@ def test_openbrowser_warmup_parses_json():
     arm = OpenBrowserArm(binary="/bin/true")
     payload = {"ok": True, "elapsed_ms": 12.5, "url": "about:blank"}
     with (
+        patch("benchmarks.interactive.adapters.openbrowser._write_config"),
         patch("benchmarks.interactive.adapters.openbrowser._env", return_value={}),
         patch(
             "benchmarks.interactive.adapters.openbrowser.run_process",
@@ -269,3 +278,23 @@ def test_explicit_cold_reference_remains_opt_in(tmp_path, monkeypatch):
     assert report["rows"][0]["cold_p50_ms"] == 500.0
     assert report["rows"][0]["warm_p50_ms"] == 250.0
     assert report["rows"][0]["speedup"] == 2.0
+
+
+def test_cli_warmup_writes_profile_before_starting_native_daemon(tmp_path, monkeypatch):
+    from benchmarks.interactive.adapters import openbrowser
+
+    ctx = warm_benchmark.make_context(tmp_path, "openbrowser-fast")
+    arm = OpenBrowserArm(binary="/fake/openbrowser", fast_selectors=True)
+    calls = []
+
+    def run(command, **kwargs):
+        profile = json.loads((ctx.config / "config.json").read_text())["browser_profile"]["bench"]
+        assert profile["downloads_path"] == str(ctx.downloads)
+        assert profile["args"] == ["--use-mock-keychain"]
+        calls.append(command)
+        return 0, '{"ok":true}', "", 1.0
+
+    monkeypatch.setattr(openbrowser, "run_process", run)
+    payload, _ = arm.warmup(ctx)
+    assert payload["ok"] is True
+    assert calls == [["/fake/openbrowser", "warm"]]

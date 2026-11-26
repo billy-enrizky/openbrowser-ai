@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -193,7 +194,10 @@ await wait_for_selector('#modal[hidden]')
 await click_selector('#open-modal')
 await fill_selector('#project-search', 'Atlas')
 await wait_js("[...document.querySelectorAll('#project-list [role=option]')].filter(o => !o.hidden).length === 1")
-option_id = await evaluate("Array.from(document.querySelectorAll('#project-list [role=option]')).find(o => !o.hidden && o.textContent.trim() === 'Project Atlas')?.id")
+option_id = await evaluate(
+    "Array.from(document.querySelectorAll('#project-list [role=option]'))"
+    ".find(o => !o.hidden && o.textContent.trim() === 'Project Atlas')?.id"
+)
 if not option_id:
     raise RuntimeError('Project Atlas option has no stable fixture id')
 await click_selector('#' + option_id)
@@ -462,6 +466,7 @@ class OpenBrowserArm:
 
     def warmup(self, ctx: RunContext) -> tuple[dict, float]:
         """Start the daemon and browser once and return its JSON plus wall time."""
+        _write_config(ctx, extensions=self.extensions)
         started = time.monotonic()
         returncode, stdout, stderr, _elapsed = run_process(
             [self.binary, "warm"],
@@ -480,10 +485,8 @@ class OpenBrowserArm:
     def _stop_daemon(self, ctx: RunContext) -> None:
         pid_file = ctx.home / ".openbrowser" / "daemon.pid"
         socket_file = ctx.home / ".openbrowser" / "daemon.sock"
-        try:
+        with contextlib.suppress(Exception):
             run_process([self.binary, "daemon", "stop"], env=_env(ctx), timeout=60)
-        except Exception:
-            pass
         profile_marker = str(ctx.config / "profiles" / "daemon")
         deadline = time.monotonic() + 25
         while time.monotonic() < deadline:
@@ -491,19 +494,15 @@ class OpenBrowserArm:
             if not pid_file.exists() and not socket_file.exists() and not chrome_alive:
                 return
             time.sleep(0.2)
-        try:
+        with contextlib.suppress(Exception):
             run_process([self.binary, "daemon", "force-stop"], env=_env(ctx), timeout=30)
-        except Exception:
-            pass
         kill_pidfile(pid_file)
         terminate_matching(profile_marker)
         time.sleep(0.5)
 
     def cleanup(self, ctx: RunContext) -> None:
-        try:
+        with contextlib.suppress(Exception):
             run_process([self.binary, "daemon", "force-stop"], env=_env(ctx), timeout=30)
-        except Exception:
-            pass
         kill_pidfile(ctx.home / ".openbrowser" / "daemon.pid")
         terminate_matching(str(ctx.profile))
         terminate_matching(str(ctx.root))
