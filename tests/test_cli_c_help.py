@@ -32,15 +32,21 @@ def _run_cli(*args: str, env: dict | None = None) -> subprocess.CompletedProcess
     )
 
 
-@pytest.fixture()
-def short_socket_env():
+@pytest.fixture(autouse=True)
+def short_socket_env(monkeypatch):
     root = '/tmp' if os.name != 'nt' else None
     with tempfile.TemporaryDirectory(prefix='ob_', dir=root) as tmp:
         env = {'OPENBROWSER_SOCKET': str(Path(tmp) / 'd.sock')}
+        monkeypatch.setenv('OPENBROWSER_SOCKET', env['OPENBROWSER_SOCKET'])
         try:
             yield env
         finally:
             _run_cli('daemon', 'force-stop', env=env)
+
+
+def test_cli_process_environment_uses_owned_socket(short_socket_env):
+    actual_socket = os.environ.get('OPENBROWSER_SOCKET')
+    assert actual_socket == short_socket_env['OPENBROWSER_SOCKET']
 
 
 class TestCliCHelp:
