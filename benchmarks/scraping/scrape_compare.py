@@ -748,6 +748,7 @@ async def _measure(arm, task_name: str, method: str, base: str, state: FixtureSt
     error = ""
     try:
         ok, output, detail = await getattr(arm, method)(base)
+        error = detail if not ok else ""
     except Exception as exc:
         ok, output, detail = False, "", f"{type(exc).__name__}: {exc}"
         error = detail
@@ -843,6 +844,37 @@ def _environment(
     return environment
 
 
+def make_scrape_arm(
+    name: str,
+    *,
+    chrome_path: str | None = None,
+    firecrawl_server: FirecrawlServer | None = None,
+    firecrawl_waits: dict[str, dict[str, int]] | None = None,
+    lightpanda_bin: str | None = None,
+):
+    """Construct the requested native scraping surface without starting it."""
+    modes = {"openbrowser-full": "full", "openbrowser-lightweight": "lightweight", "openbrowser-no-render": "no-render"}
+    if name in modes:
+        return BrowserArm(name, modes[name], chrome_path=chrome_path)
+    if name in {"playwright-mcp", "playwright-cli"}:
+        from benchmarks.interactive.adapters.playwright_scrape_bridge import build_scrape_arm
+
+        return build_scrape_arm(name)
+    if name in {"firecrawl-local", "firecrawl-local-auto"}:
+        if firecrawl_server is None:
+            raise ValueError("Firecrawl scraping needs a configured service")
+        waits = {"asset_heavy": FIRECRAWL_ASSET_WAIT_MS} if name == "firecrawl-local" else {}
+        if firecrawl_waits is not None:
+            firecrawl_waits[name] = waits
+        return FirecrawlArm(name, firecrawl_server, waits)
+    if name == "lightpanda":
+        binary = lightpanda_bin or os.environ.get("LIGHTPANDA_BIN") or shutil.which("lightpanda")
+        if not binary:
+            raise SystemExit("Lightpanda arm needs a binary. Pass --lightpanda-bin or set LIGHTPANDA_BIN.")
+        return LightpandaArm(binary)
+    raise SystemExit(f"unknown arm: {name}")
+
+
 async def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--samples", type=int, default=3)
@@ -904,25 +936,8 @@ async def main() -> int:
             print(f"firecrawl-local {firecrawl_server.version} at {firecrawl_server.url}")
 
         for name in args.arms:
-            if name == "openbrowser-full":
-                arms.append(BrowserArm(name, "full", chrome_path=args.chrome))
-            elif name == "openbrowser-lightweight":
-                arms.append(BrowserArm(name, "lightweight", chrome_path=args.chrome))
-            elif name == "openbrowser-no-render":
-                arms.append(BrowserArm(name, "no-render", chrome_path=args.chrome))
-            elif name == "firecrawl-local":
-                firecrawl_waits[name] = {"asset_heavy": FIRECRAWL_ASSET_WAIT_MS}
-                arms.append(FirecrawlArm(name, firecrawl_server, firecrawl_waits[name]))
-            elif name == "firecrawl-local-auto":
-                firecrawl_waits[name] = {}
-                arms.append(FirecrawlArm(name, firecrawl_server, firecrawl_waits[name]))
-            elif name == "lightpanda":
-                binary = args.lightpanda_bin or os.environ.get("LIGHTPANDA_BIN") or shutil.which("lightpanda")
-                if not binary:
-                    raise SystemExit("Lightpanda arm needs a binary. Pass --lightpanda-bin or set LIGHTPANDA_BIN.")
-                arms.append(LightpandaArm(binary))
-            else:
-                raise SystemExit(f"unknown arm: {name}")
+            arms.append(make_scrape_arm(name, chrome_path=args.chrome, firecrawl_server=firecrawl_server,
+                                       firecrawl_waits=firecrawl_waits, lightpanda_bin=args.lightpanda_bin))
 
         lightpanda_arm = next((arm for arm in arms if isinstance(arm, LightpandaArm)), None)
         environment = _environment(firecrawl_server, firecrawl_waits, args.chrome, lightpanda_arm)
@@ -1011,9 +1026,11 @@ async def main() -> int:
         }
         report["groups"].append(entry)
         engine = ",".join(entry["engines"])
+        p50 = f"{summary['p50_ms']:8.1f}" if summary.get("p50_ms") is not None else f"{'n/a':>8}"
+        p95 = f"{summary['p95_ms']:8.1f}" if summary.get("p95_ms") is not None else f"{'n/a':>8}"
         print(
             f"{task:18} {arm_name:24} {ok_count}/{len(group):<2} "
-            f"{summary.get('p50_ms', 0):8.1f} {summary.get('p95_ms', 0):8.1f} "
+            f"{p50} {p95} "
             f"{entry['mean_output_bytes']:8.0f} {entry['mean_requests']:4.1f} {engine:<12}"
         )
 
@@ -1034,7 +1051,8 @@ async def main() -> int:
         lines = [json.dumps(record, separators=(",", ":"), sort_keys=True) for record in [raw_run, *raw_samples]]
         args.raw_jsonl.write_text("\n".join(lines) + "\n", encoding="utf-8")
         print(f"Wrote {args.raw_jsonl}")
-    return 0
+    expected = len(args.arms) * len(args.tasks) * args.samples
+    return 0 if results and len(results) == expected and all(item.ok for item in results) else 1
 
 
 if __name__ == "__main__":

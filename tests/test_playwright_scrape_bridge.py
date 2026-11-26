@@ -179,3 +179,8 @@ async def test_password_leak_is_rejected(tmp_path):
 def test_unknown_factory_name_is_rejected(tmp_path):
     with pytest.raises(ValueError):
         build_scrape_arm("not-a-playwright-arm", workdir=tmp_path)
+
+
+def test_native_bridge_declares_the_observed_browser_engine():
+    arm, _ = make_arm({"content": STATIC_CONTENT})
+    assert arm.last_engine == "browser"

@@ -42,6 +42,8 @@ class PlaywrightScrapeArm:
     a ready session. ``stop`` closes the owned session exactly once.
     """
 
+    last_engine = "browser"
+
     def __init__(
         self,
         name: str,
