@@ -7,6 +7,7 @@ import logging
 import os
 import shutil
 import ssl
+import stat
 import tempfile
 import uuid
 from pathlib import Path
@@ -196,6 +197,47 @@ class LocalBrowserWatchdog(BaseWatchdog):
 					if inspect.isawaitable(result):
 						await result
 
+	def _should_start_on_blank_page(self, user_data_dir: str | Path | None, launch_args: list[str]) -> bool:
+		"""Keep the synchronous final profile fence adjacent to process creation."""
+		lease = self._profile_lease
+		if (
+			lease is None
+			or not lease.acquired
+			or getattr(lease, "profile_pristine", False) is not True
+			or user_data_dir is None
+			or any(
+				not arg.startswith("--")
+				or arg.split("=", 1)[0] in (
+					"--app", "--app-id", "--restore-last-session", "--no-startup-window", "--kiosk"
+				)
+				for arg in launch_args
+			)
+		):
+			return False
+		try:
+			if lease.profile_dir != Path(user_data_dir).expanduser().resolve() or lease.profile_dir.is_symlink():
+				return False
+			before = lease.profile_dir.stat(follow_symlinks=False)
+			if not stat.S_ISDIR(before.st_mode):
+				return False
+			with os.scandir(lease.profile_dir) as entries:
+				observed = tuple(entries)
+				if {entry.name for entry in observed} != {ProfileLease.LOCK_FILENAME, ProfileLease.METADATA_FILENAME}:
+					return False
+				if not all(entry.is_file(follow_symlinks=False) for entry in observed):
+					return False
+			closing = lease.profile_dir.stat(follow_symlinks=False)
+			return (before.st_dev, before.st_ino, before.st_mode, before.st_mtime_ns, before.st_ctime_ns) == (
+				closing.st_dev,
+				closing.st_ino,
+				closing.st_mode,
+				closing.st_mtime_ns,
+				closing.st_ctime_ns,
+			)
+		except (OSError, RuntimeError):
+			return False
+
+
 	@observe_debug(ignore_input=True, ignore_output=True, name='launch_browser_process')
 	async def _launch_browser(self, max_retries: int = 3) -> tuple[psutil.Process, str]:
 		"""Launch browser process and return (process, cdp_url).
@@ -273,6 +315,9 @@ class LocalBrowserWatchdog(BaseWatchdog):
 				)
 				if not browser_path:
 					raise RuntimeError('No local Chrome/Chromium install found, and failed to install with playwright')
+
+				if self._should_start_on_blank_page(profile.user_data_dir, launch_args):
+					launch_args.append('about:blank')
 
 				# Launch browser subprocess directly
 				self.logger.debug(
