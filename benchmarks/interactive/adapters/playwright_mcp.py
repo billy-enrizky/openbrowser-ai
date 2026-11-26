@@ -119,6 +119,9 @@ class PlaywrightMcpArm:
         if self._client is not None:
             self._archive_stderr(self._client)
             with contextlib.suppress(Exception):
+                self._client.call_tool("browser_close", {}, timeout=30)
+            self._archive_stderr(self._client)
+            with contextlib.suppress(Exception):
                 self._client.close()
             self._archive_stderr(self._client)
             self._client = None

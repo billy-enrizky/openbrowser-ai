@@ -77,9 +77,8 @@ class PlaywrightCliArm:
         )
         self._result.stdout += stdout
         self._result.stderr += stderr
-        if args[0] == "open":
-            self._result.process_starts += 1
-        elif args[0] != "close":
+        self._result.process_starts += 1
+        if args[0] not in {"open", "close"}:
             self._result.tool_calls += 1
         if returncode != 0:
             detail = (stderr.strip() or stdout.strip())[-800:]

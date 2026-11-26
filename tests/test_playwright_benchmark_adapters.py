@@ -133,6 +133,7 @@ class FakeMcpClient:
         self.env = dict(env or {})
         self.timeout = timeout
         self.calls: list[tuple[str, dict]] = []
+        self.sequence: list[tuple[str, str]] = []
         self.stderr_lines: list[str] = []
         self.closed = False
         FakeMcpClient.instances.append(self)
@@ -143,6 +144,7 @@ class FakeMcpClient:
 
     def call_tool(self, name, arguments, *, timeout=None):
         self.calls.append((name, dict(arguments)))
+        self.sequence.append(("tool", name))
         if name == "browser_run_code_unsafe":
             code = arguments.get("code", "")
             if "navigator.userAgent" in code:
@@ -156,6 +158,7 @@ class FakeMcpClient:
 
     def close(self):
         self.closed = True
+        self.sequence.append(("close", ""))
 
 
 def test_mcp_server_command_and_execute_program(tmp_path, monkeypatch):
@@ -473,3 +476,30 @@ def test_chrome_version_uses_injected_metadata_and_caches(monkeypatch):
     assert playwright_common.chrome_version() == "Google Chrome 999.0.0.0"
     assert playwright_common.chrome_version() == "Google Chrome 999.0.0.0"
     assert len(calls) == 1
+
+
+def test_cli_process_starts_counts_every_native_invocation(tmp_path, monkeypatch):
+    ctx = make_context(tmp_path)
+    FakeProcess.commands.clear()
+    monkeypatch.setattr(playwright_cli, "run_process", FakeProcess.run)
+    arm = playwright_cli.PlaywrightCliArm(binary="/bin/playwright-cli")
+    arm._open(ctx)
+    assert arm._result.process_starts == 1
+    arm._code(ctx, "async (page) => { return {ok: true}; }")
+    assert arm._result.process_starts == 2
+    arm._run(ctx, "close")
+    assert arm._result.process_starts == 3
+
+
+def test_mcp_restart_closes_browser_before_transport(tmp_path, monkeypatch):
+    ctx = make_context(tmp_path, task="auth")
+    FakeMcpClient.instances.clear()
+    monkeypatch.setattr(playwright_mcp, "StdioMcpClient", FakeMcpClient)
+    monkeypatch.setattr(playwright_mcp, "keychain", lambda ctx: True)
+    arm = playwright_mcp.PlaywrightMcpArm(binary="/bin/playwright-mcp")
+    arm._start(ctx)
+    arm._restart(ctx)
+    first = FakeMcpClient.instances[0]
+    assert ("tool", "browser_close") in first.sequence
+    assert first.sequence.index(("tool", "browser_close")) < first.sequence.index(("close", ""))
+    assert len(FakeMcpClient.instances) == 2
