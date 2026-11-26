@@ -3,9 +3,9 @@
 import asyncio
 import json
 import sys
+from pathlib import Path
 
 import pytest
-from pathlib import Path
 
 from benchmarks.scraping import scrape_compare
 
@@ -106,12 +106,12 @@ async def test_browser_arm_rejects_use_before_start():
 
 
 @pytest.mark.asyncio
-async def test_browser_arm_propagates_cleanup_failure():
+async def test_browser_arm_propagates_cleanup_failure(monkeypatch):
     class Session:
         async def kill(self):
             raise OSError("cleanup failed")
 
     arm = scrape_compare.BrowserArm("openbrowser-full", "full")
-    arm.session = Session()
+    monkeypatch.setattr(arm, "session", Session())
     with pytest.raises(OSError, match="cleanup failed"):
         await arm.stop()
