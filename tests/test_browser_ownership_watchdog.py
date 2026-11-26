@@ -154,13 +154,17 @@ async def test_posix_cleanup_reports_failure_after_post_kill_recheck(monkeypatch
 	process.pid = 123
 	process.create_time.return_value = 20.0
 	process.is_running.return_value = True
+	process.children.return_value = []
 	record = _browser_record(Path('/tmp/profile'), pid=123, start_time=20.0)
 
 	monkeypatch.setattr(
 		'openbrowser.browser.watchdogs.local_browser_watchdog.IS_WINDOWS',
 		False,
 	)
-	with patch('asyncio.sleep', new_callable=AsyncMock):
+	with (
+		patch('asyncio.sleep', new_callable=AsyncMock),
+		patch('psutil.process_iter', return_value=[]),
+	):
 		result = await LocalBrowserWatchdog._cleanup_process(process, browser_record=record)
 
 	assert result is False
