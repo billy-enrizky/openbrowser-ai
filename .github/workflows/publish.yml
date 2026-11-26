@@ -67,6 +67,7 @@ jobs:
           import email.parser
           import hashlib
           import logging
+          import os
           import tarfile
           import zipfile
           from pathlib import Path, PurePosixPath
@@ -95,6 +96,8 @@ jobs:
               versions.add(version)
           require(len(versions) == 1)
           version, = versions
+          if os.environ.get("GITHUB_EVENT_NAME") == "release":
+              require(os.environ.get("GITHUB_REF_NAME") == f"v{version}")
           sdist, = sdists
           require(sdist.name == f"openbrowser_ai-{version}.tar.gz" and not sdist.is_symlink())
           with tarfile.open(sdist) as archive:
@@ -325,7 +328,7 @@ jobs:
 
   upload-install-script:
     name: Upload Installer Scripts
-    needs: build
+    needs: assemble
     runs-on: ubuntu-latest
     if: github.event_name == 'release'
     permissions:

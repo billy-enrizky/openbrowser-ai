@@ -113,3 +113,29 @@ def test_pure_build_uses_same_pinned_metadata_backend_and_disables_native_flag()
     build = next(step for step in steps if step.get("name") == "Build package")
     assert build["env"]["OPENBROWSER_BUILD_NATIVE"] == "0"
     assert build["run"] == "python -m build --no-isolation"
+
+
+def test_release_installer_assets_wait_for_verified_assembly():
+    assert workflow()["jobs"]["upload-install-script"]["needs"] == "assemble"
+
+
+@pytest.mark.parametrize(
+    "event,tag,valid",
+    [
+        ("release", "v0.1.61", True),
+        ("release", "v0.1.60", False),
+        ("release", "", False),
+        ("workflow_dispatch", "feature-branch", True),
+    ],
+)
+def test_release_artifacts_match_release_tag(tmp_path, monkeypatch, event, tag, valid):
+    program = assembly_program()
+    make_distributions(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITHUB_EVENT_NAME", event)
+    monkeypatch.setenv("GITHUB_REF_NAME", tag)
+    if valid:
+        exec(compile(program, "<release assembly>", "exec", optimize=2), {})
+    else:
+        with pytest.raises(ValueError, match="incomplete_or_inconsistent_release_distributions"):
+            exec(compile(program, "<release assembly>", "exec", optimize=2), {})
