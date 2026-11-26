@@ -147,3 +147,8 @@ def test_current_docs_do_not_cite_removed_benchmark_scripts():
         assert 'cdp_benchmark.py' not in text
     assert '## 13. Benchmark: Native Local Lanes' in readme
     assert '## 4. Benchmark: Native Local Lanes' in plugin
+
+
+def test_public_methodology_label_describes_the_session_lifecycle():
+    for name in ('README.md', 'benchmarks/interactive/README.md', 'docs/comparison.mdx'):
+        assert 'Warm-session readiness' in (ROOT / name).read_text()

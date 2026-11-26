@@ -67,7 +67,7 @@ Raw evidence:
 
 ### 2.2. Warm interactive
 
-Warm v2 uses `browser-use-native-readiness-v2` with OpenBrowser app `5a88fb97`. Each arm starts once and every task gets a fresh fixture server. All 100 observations passed the adapter, exact oracle, and keychain checks.
+Warm-session readiness uses the native session workflow with OpenBrowser app `5a88fb97`. Each arm starts once and every task gets a fresh fixture server. All 100 observations passed the adapter, exact oracle, and keychain checks.
 
 Latency (ms) ↓ **Lower is better**. Warm tables show milliseconds to three decimal places. The raw file keeps full precision.
 

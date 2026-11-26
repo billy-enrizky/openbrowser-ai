@@ -34,7 +34,7 @@ icon: "scale-balanced"
 
 ## 1. Benchmark index
 
-Cold interactive and resource tables use the release baseline. Warm interactive uses method `browser-use-native-readiness-v2` and OpenBrowser app `5a88fb97`. These method scopes are separate. Compare cold results with cold results and warm results with warm results. Scraping dates remain specific to each lane.
+Cold interactive and resource tables use the release baseline. Warm interactive uses Warm-session readiness and OpenBrowser app `5a88fb97`. These method scopes are separate. Compare cold results with cold results and warm results with warm results. Scraping dates remain specific to each lane.
 
 | Run | Date | Scope | Status |
 | --- | --- | --- | --- |
@@ -97,7 +97,7 @@ Raw data: [results-cold-five-arm-lean-2026-11-25-n5-final4.jsonl](https://github
 
 ### 3.2. Warm interactive
 
-Warm v2 uses `browser-use-native-readiness-v2` with OpenBrowser app `5a88fb97`. Each arm starts once and every task gets a fresh fixture server. All 100 observations passed the adapter, exact oracle, and keychain checks.
+Warm-session readiness uses the native session workflow with OpenBrowser app `5a88fb97`. Each arm starts once and every task gets a fresh fixture server. All 100 observations passed the adapter, exact oracle, and keychain checks.
 
 <img src="/images/native-interactive-warm-current-p50.png" alt="Warm v2 p50 latency in milliseconds for OpenBrowser MCP and CLI, chrome-devtools-mcp, agent-browser, and browser-use across four tasks. Lower is better." />
 
