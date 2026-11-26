@@ -100,6 +100,7 @@ class FakeProcess:
         *,
         created_at=1000.0,
         created_sequence=None,
+        exe_sequence=None,
         running=True,
         status=psutil.STATUS_RUNNING,
         exe_error=None,
@@ -107,6 +108,7 @@ class FakeProcess:
         self._exe = exe
         self._created_at = created_at
         self._created_sequence = list(created_sequence or [])
+        self._exe_sequence = list(exe_sequence or [])
         self._running = running
         self._status = status
         self._exe_error = exe_error
@@ -119,6 +121,8 @@ class FakeProcess:
     def exe(self):
         if self._exe_error is not None:
             raise self._exe_error
+        if self._exe_sequence:
+            return self._exe_sequence.pop(0)
         return self._exe
 
     def is_running(self):
@@ -153,6 +157,7 @@ def test_shell_pin_public_proof_hides_paths_and_env_round_trips(tmp_path):
     assert proof["launcher_kind"] == "headless-shell"
     assert proof["engine_image_kind"] == "headless-shell"
     assert proof["version"] == "159.0.8154.6"
+    assert "ctime_ns" in proof["launcher_stat"]
 
     env_value = pin.to_env()
     assert str(pin.launcher) in env_value
@@ -286,11 +291,12 @@ def test_capture_rejects_malformed_or_unavailable_stat(tmp_path):
 
 
 class SimpleStat:
-    def __init__(self, *, device=1, inode=2, size=3, mtime_ns=4):
+    def __init__(self, *, device=1, inode=2, size=3, mtime_ns=4, ctime_ns=5):
         self.st_dev = device
         self.st_ino = inode
         self.st_size = size
         self.st_mtime_ns = mtime_ns
+        self.st_ctime_ns = ctime_ns
 
 
 def test_pin_fence_detects_launcher_and_engine_image_change(tmp_path):
@@ -309,18 +315,72 @@ def test_pin_fence_detects_launcher_and_engine_image_change(tmp_path):
         second.fence()
 
 
-def test_refresh_detects_content_change_with_unchanged_stat(tmp_path):
+def test_fence_detects_same_size_mtime_restored_edit_via_ctime(tmp_path):
     root = shell_cache(tmp_path / "cache", b"aaaa")
     pin = capture_shell(root)
     launcher = root / SHELL_RELATIVE
     original = launcher.stat()
     launcher.write_bytes(b"bbbb")
     os.utime(launcher, ns=(original.st_atime_ns, original.st_mtime_ns))
-    assert launcher.stat().st_size == original.st_size
-    assert launcher.stat().st_mtime_ns == original.st_mtime_ns
+    current = launcher.stat()
+    assert current.st_size == original.st_size
+    assert current.st_mtime_ns == original.st_mtime_ns
+    assert current.st_ctime_ns != original.st_ctime_ns
     with raises_reason("pin_changed"):
-        pin.refresh()
-    assert pin.refresh(sha256_reader=lambda path: pin.launcher_sha256) is pin
+        pin.fence()
+
+
+def test_refresh_detects_hash_change_when_stat_is_hidden(tmp_path):
+    root = shell_cache(tmp_path / "cache", b"aaaa")
+    pin = capture_shell(root)
+    launcher = root / SHELL_RELATIVE
+    original = pin.launcher_stat
+    launcher.write_bytes(b"bbbb")
+
+    def frozen(path):
+        return SimpleStat(
+            device=original.device,
+            inode=original.inode,
+            size=original.size,
+            mtime_ns=original.mtime_ns,
+            ctime_ns=original.ctime_ns,
+        )
+
+    with raises_reason("pin_changed"):
+        pin.refresh(stat_reader=frozen)
+    assert pin.refresh(stat_reader=frozen, sha256_reader=lambda path: pin.launcher_sha256) is pin
+
+
+def test_capture_closing_fence_detects_version_runner_mutation(tmp_path):
+    root = shell_cache(tmp_path / "cache", b"aaaa")
+
+    def mutate(path):
+        Path(path).write_bytes(b"bbbb")
+        return VERSION_OUTPUT
+
+    with raises_reason("pin_changed"):
+        capture_shell(root, version_runner=mutate)
+
+    full_root = full_cache(tmp_path / "full-cache", launcher_data=b"launcher", image_data=b"image")
+
+    def mutate_image(path):
+        (full_root / FULL_IMAGE_RELATIVE).write_bytes(b"other!")
+        return VERSION_OUTPUT
+
+    with raises_reason("pin_changed"):
+        capture_full(full_root, version_runner=mutate_image)
+
+
+def test_refresh_closing_fence_detects_sha_reader_mutation(tmp_path):
+    root = shell_cache(tmp_path / "cache", b"aaaa")
+    pin = capture_shell(root)
+
+    def mutate(path):
+        Path(path).write_bytes(b"bbbb")
+        return pin.launcher_sha256
+
+    with raises_reason("pin_changed"):
+        pin.refresh(sha256_reader=mutate)
 
 
 def test_env_round_trip_and_strict_malformed_rejection(tmp_path):
@@ -358,6 +418,11 @@ def test_env_round_trip_and_strict_malformed_rejection(tmp_path):
     extra_stat["unexpected"] = 1
     mutations.append({**payload, "launcher_stat": extra_stat})
     mutations.append({**payload, "launcher_stat": {**payload["launcher_stat"], "device": -1}})
+    missing_ctime = dict(payload["launcher_stat"])
+    missing_ctime.pop("ctime_ns")
+    mutations.append({**payload, "launcher_stat": missing_ctime})
+    mutations.append({**payload, "launcher_stat": {**payload["launcher_stat"], "ctime_ns": True}})
+    mutations.append({**payload, "launcher_stat": {**payload["launcher_stat"], "ctime_ns": -1}})
     for mutated in mutations:
         with raises_reason("malformed_pin"):
             engine.EnginePin.from_env(json.dumps(mutated))
@@ -487,6 +552,38 @@ def test_verify_detects_missing_denied_and_binding_mismatch(tmp_path):
     assert engine.verify_process_binding(mismatched, pin, process_factory=factory_for(process)) == "binding_mismatch"
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("schema", None),
+        ("lane", None),
+        ("revision", None),
+        ("version", None),
+        ("platform", None),
+        ("machine", None),
+        ("launcher", None),
+        ("engine_image", None),
+        ("launcher_sha256", None),
+        ("engine_image_sha256", None),
+        ("launcher_stat", None),
+        ("engine_image_stat", None),
+        ("launcher_kind", None),
+        ("engine_image_kind", None),
+        ("launcher_sha256", 1),
+        ("lane", 1),
+    ],
+)
+def test_malformed_pin_field_matrix_fails_closed(tmp_path, field, value):
+    engine = engine_module()
+    pin = capture_shell(shell_cache(tmp_path / "cache"))
+    process = FakeProcess(str(pin.launcher))
+    binding = engine.capture_process_binding(pin, 4242, process_factory=factory_for(process))
+    bad = replace(pin, **{field: value})
+    with raises_reason("malformed_pin"):
+        engine.capture_process_binding(bad, 4242, process_factory=factory_for(process))
+    assert engine.verify_process_binding(binding, bad, process_factory=factory_for(process)) == "malformed_binding"
+
+
 def test_malformed_pin_fails_closed_in_capture_and_verify(tmp_path):
     engine = engine_module()
     pin = capture_shell(shell_cache(tmp_path / "cache"))
@@ -496,6 +593,20 @@ def test_malformed_pin_fails_closed_in_capture_and_verify(tmp_path):
     with raises_reason("malformed_pin"):
         engine.capture_process_binding(bad, 4242, process_factory=factory_for(process))
     assert engine.verify_process_binding(binding, bad, process_factory=factory_for(process)) == "malformed_binding"
+
+
+def test_process_binding_detects_exec_change_within_read(tmp_path):
+    engine = engine_module()
+    pin = capture_shell(shell_cache(tmp_path / "cache"))
+    changing = FakeProcess(str(pin.launcher), exe_sequence=[str(pin.launcher), "/usr/bin/true"])
+    with raises_reason("executable_changed"):
+        engine.capture_process_binding(pin, 4242, process_factory=factory_for(changing))
+
+    stable = FakeProcess(str(pin.launcher))
+    binding = engine.capture_process_binding(pin, 4242, process_factory=factory_for(stable))
+    changing_again = FakeProcess(str(pin.launcher), exe_sequence=[str(pin.launcher), "/usr/bin/true"])
+    status = engine.verify_process_binding(binding, pin, process_factory=factory_for(changing_again))
+    assert status == "executable_changed"
 
 
 def test_verify_does_not_recache_or_mutate_binding(tmp_path):

@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 ENGINE_PIN_ENV = "OPENBROWSER_BENCH_ENGINE_PIN"
-PIN_SCHEMA = "openbrowser-engine-pin-v1"
+PIN_SCHEMA = "openbrowser-engine-pin-v2"
 
 LANE_MATCHED_SHELL_1255 = "matched-shell-1255"
 LANE_MATCHED_FULL_1255 = "matched-full-1255"
@@ -61,7 +61,7 @@ _PIN_KEYS = frozenset(
         "engine_image_kind",
     }
 )
-_STAT_KEYS = frozenset({"device", "inode", "size", "mtime_ns"})
+_STAT_KEYS = frozenset({"device", "inode", "size", "mtime_ns", "ctime_ns"})
 _SHA_RE = re.compile(r"[0-9a-f]{64}")
 _VERSION_RE = re.compile(r"Google Chrome for Testing ([0-9]{1,5}(?:\.[0-9]{1,5}){3})")
 _FULL_LAUNCHER_KIND = "chrome-for-testing"
@@ -88,19 +88,21 @@ class FileStat:
     inode: int
     size: int
     mtime_ns: int
+    ctime_ns: int
 
     def public(self) -> dict[str, int]:
         return asdict(self)
 
     @classmethod
     def from_result(cls, result: Any) -> FileStat:
-        if not all(hasattr(result, name) for name in ("st_dev", "st_ino", "st_size", "st_mtime_ns")):
+        if not all(hasattr(result, name) for name in ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")):
             raise EngineBindingError("malformed_stat")
         return cls._validated(
             result.st_dev,
             result.st_ino,
             result.st_size,
             result.st_mtime_ns,
+            result.st_ctime_ns,
         )
 
     @classmethod
@@ -108,18 +110,37 @@ class FileStat:
         if not isinstance(value, dict) or set(value) != _STAT_KEYS:
             raise EngineBindingError("malformed_pin")
         try:
-            return cls._validated(value["device"], value["inode"], value["size"], value["mtime_ns"])
+            return cls._validated(
+                value["device"],
+                value["inode"],
+                value["size"],
+                value["mtime_ns"],
+                value["ctime_ns"],
+            )
         except EngineBindingError as error:
             raise EngineBindingError("malformed_pin") from error
 
     @classmethod
-    def _validated(cls, device: Any, inode: Any, size: Any, mtime_ns: Any) -> FileStat:
-        values = (device, inode, size, mtime_ns)
+    def _validated(
+        cls,
+        device: Any,
+        inode: Any,
+        size: Any,
+        mtime_ns: Any,
+        ctime_ns: Any,
+    ) -> FileStat:
+        values = (device, inode, size, mtime_ns, ctime_ns)
         if any(type(item) is not int for item in values):
             raise EngineBindingError("malformed_stat")
-        if device < 0 or inode < 0 or size <= 0 or mtime_ns < 0:
+        if device < 0 or inode < 0 or size <= 0 or mtime_ns < 0 or ctime_ns < 0:
             raise EngineBindingError("malformed_stat")
-        return cls(device=device, inode=inode, size=size, mtime_ns=mtime_ns)
+        return cls(
+            device=device,
+            inode=inode,
+            size=size,
+            mtime_ns=mtime_ns,
+            ctime_ns=ctime_ns,
+        )
 
 
 @dataclass(frozen=True)
@@ -241,6 +262,7 @@ class EnginePin:
             raise EngineBindingError("pin_changed")
         if _read_sha(self.engine_image, reader) != self.engine_image_sha256:
             raise EngineBindingError("pin_changed")
+        self.fence(stat_reader=stat_reader)
         return self
 
 
@@ -338,7 +360,7 @@ def capture_engine_pin(
     launcher_sha = _read_sha(launcher, sha_reader)
     image_sha = _read_sha(engine_image, sha_reader)
     version = _read_version(version_runner or _default_version_runner, launcher)
-    return EnginePin(
+    pin = EnginePin(
         schema=PIN_SCHEMA,
         lane=paths.lane,
         revision=REVISION,
@@ -354,6 +376,8 @@ def capture_engine_pin(
         launcher_kind=paths.launcher_kind,
         engine_image_kind=paths.engine_image_kind,
     )
+    pin.fence(stat_reader=stat_reader)
+    return pin
 
 
 def capture_process_binding(
@@ -525,21 +549,16 @@ def _read_process_identity(
             raise EngineBindingError("process_gone")
         status = process.status()
         _require_alive_status(status)
-        executable = process.exe()
-        if not isinstance(executable, (str, Path)):
-            raise EngineBindingError("executable_missing")
-        text = str(executable)
-        if not text or not Path(text).is_absolute():
-            raise EngineBindingError("executable_missing")
+        first_executable = _canonical_executable(process.exe())
         if _require_created(process.create_time()) != created:
             raise EngineBindingError("process_replaced")
         if not process.is_running():
             raise EngineBindingError("process_gone")
         _require_alive_status(process.status())
-        canonical = Path(text).resolve(strict=False)
-        if not canonical.is_absolute():
-            raise EngineBindingError("executable_missing")
-        return created, canonical
+        second_executable = _canonical_executable(process.exe())
+        if second_executable != first_executable:
+            raise EngineBindingError("executable_changed")
+        return created, second_executable
     except EngineBindingError:
         raise
     except Exception as error:
@@ -564,8 +583,24 @@ def _process_failure_status(reason: str) -> str:
         "process_denied": STATUS_PROCESS_DENIED,
         "process_replaced": STATUS_PROCESS_REPLACED,
         "executable_missing": STATUS_EXECUTABLE_CHANGED,
+        "executable_changed": STATUS_EXECUTABLE_CHANGED,
         "malformed_pid": STATUS_MALFORMED_BINDING,
     }.get(reason, STATUS_PROCESS_UNKNOWN)
+
+
+def _canonical_executable(value: Any) -> Path:
+    if not isinstance(value, (str, Path)):
+        raise EngineBindingError("executable_missing")
+    text = str(value)
+    if not text or not Path(text).is_absolute():
+        raise EngineBindingError("executable_missing")
+    try:
+        canonical = Path(text).resolve(strict=False)
+    except OSError as error:
+        raise EngineBindingError("process_unknown") from error
+    if not canonical.is_absolute():
+        raise EngineBindingError("executable_missing")
+    return canonical
 
 
 def _require_alive_status(status: Any) -> None:
@@ -609,15 +644,23 @@ def _valid_pin(pin: EnginePin) -> bool:
         return False
     if ".." in pin.launcher.parts or ".." in pin.engine_image.parts:
         return False
-    if pin.schema != PIN_SCHEMA or pin.lane not in SUPPORTED_LANES:
+    if not isinstance(pin.schema, str) or pin.schema != PIN_SCHEMA:
         return False
-    if pin.revision != REVISION or pin.version != EXPECTED_VERSION:
+    if not isinstance(pin.lane, str) or pin.lane not in SUPPORTED_LANES:
         return False
-    if pin.platform not in ("darwin",) and not pin.platform.startswith("linux"):
+    if not isinstance(pin.revision, str) or pin.revision != REVISION:
+        return False
+    if not isinstance(pin.version, str) or pin.version != EXPECTED_VERSION:
+        return False
+    if not isinstance(pin.platform, str):
+        return False
+    if pin.platform != "darwin" and not pin.platform.startswith("linux"):
         return False
     if not isinstance(pin.machine, str) or not pin.machine:
         return False
-    if not _SHA_RE.fullmatch(pin.launcher_sha256) or not _SHA_RE.fullmatch(pin.engine_image_sha256):
+    if not _valid_sha(pin.launcher_sha256) or not _valid_sha(pin.engine_image_sha256):
+        return False
+    if not isinstance(pin.launcher_kind, str) or not isinstance(pin.engine_image_kind, str):
         return False
     if not isinstance(pin.launcher_stat, FileStat) or not isinstance(pin.engine_image_stat, FileStat):
         return False
@@ -766,8 +809,12 @@ def _require_choice(value: Any, allowed: tuple[str, ...]) -> str:
     return value
 
 
+def _valid_sha(value: Any) -> bool:
+    return isinstance(value, str) and bool(_SHA_RE.fullmatch(value))
+
+
 def _require_sha(value: Any) -> str:
-    if not isinstance(value, str) or not _SHA_RE.fullmatch(value):
+    if not _valid_sha(value):
         raise EngineBindingError("malformed_pin")
     return value
 
