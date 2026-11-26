@@ -11,6 +11,8 @@ import pytest
 
 from benchmarks.interactive import engine_session
 from benchmarks.interactive.adapters.base import RunContext
+from benchmarks.interactive.engine_binding import EngineBindingError
+from benchmarks.interactive.measurement import browser_launch_checkpoint
 
 
 @pytest.fixture
@@ -149,6 +151,7 @@ def test_valid_engine_stamp_preserves_tool_version_and_requires_both_sides(harne
         "warmup": harness.valid.public_proof(),
         "before": harness.valid.public_proof(),
         "after": harness.valid.public_proof(),
+        "launches": [],
     }
 
 
@@ -213,3 +216,45 @@ def test_warm_stamp_requires_the_original_warmup_identity(harness, side, field):
     session.stamp(row, alien if side == "after" else harness.valid, before=alien if side == "before" else harness.valid)
     assert row["ok"] is False
     assert row["engine"]["verified"] is False
+
+
+def test_auth_stamp_requires_both_the_login_and_restarted_browser(harness):
+    session = engine_session.EngineSession(harness.pin)
+    with session.task_scope():
+        browser_launch_checkpoint(harness.marker)
+    after = deepcopy(harness.valid)
+    after.proof.binding.pid = 456
+    row = {"task": "auth", "ok": True, "error": "", "browser_version": "old"}
+    session.stamp(row, after)
+    assert row["ok"] is True
+    assert row["engine"]["launches"] == [harness.valid.public_proof()]
+    assert harness.observations == [(harness.pin, harness.marker)]
+
+
+def test_auth_missing_initial_browser_proof_stays_ineligible(harness):
+    session = engine_session.EngineSession(harness.pin)
+    row = {"task": "auth", "ok": True, "error": "", "browser_version": "old"}
+    session.stamp(row, harness.valid)
+    assert row["ok"] is False
+    assert "auth_launch_proof_missing" in row["error"]
+
+
+def test_auth_without_a_browser_identity_change_stays_ineligible(harness):
+    session = engine_session.EngineSession(harness.pin)
+    with session.task_scope():
+        browser_launch_checkpoint(harness.marker)
+    row = {"task": "auth", "ok": True, "error": "", "browser_version": "old"}
+    session.stamp(row, harness.valid)
+    assert row["ok"] is False
+    assert "auth_browser_not_replaced" in row["error"]
+
+
+def test_initial_browser_unknown_is_retained_and_cannot_be_repaired(harness, monkeypatch):
+    session = engine_session.EngineSession(harness.pin)
+    monkeypatch.setattr(engine_session, "observe_session", lambda *a: harness.failed)
+    with pytest.raises(EngineBindingError), session.task_scope():
+        browser_launch_checkpoint(harness.marker)
+    row = {"task": "auth", "ok": True, "error": "", "browser_version": "old"}
+    session.stamp(row, harness.valid)
+    assert row["ok"] is False
+    assert row["engine"]["launches"] == [harness.failed.public_proof()]

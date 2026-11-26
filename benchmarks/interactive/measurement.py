@@ -9,7 +9,8 @@ retained so the measurement boundary can be audited from raw rows.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from functools import wraps
 
@@ -69,6 +70,7 @@ class TaskTimer:
 
 
 _CURRENT: ContextVar[TaskTimer | None] = ContextVar("native_task_timer", default=None)
+_LAUNCH_OBSERVER: ContextVar[Callable[[str], None] | None] = ContextVar("native_launch_observer", default=None)
 
 
 def validation_only[**P, R](callback: Callable[P, R]) -> Callable[P, R]:
@@ -82,3 +84,25 @@ def validation_only[**P, R](callback: Callable[P, R]) -> Callable[P, R]:
         return timer.validation(callback, *args, **kwargs)
 
     return measured
+
+
+@contextmanager
+def browser_launch_observer(callback: Callable[[str], None]) -> Iterator[None]:
+    """Own the launch-proof checkpoints for one synchronous native task."""
+    token = _LAUNCH_OBSERVER.set(callback)
+    try:
+        yield
+    finally:
+        _LAUNCH_OBSERVER.reset(token)
+
+
+@validation_only
+def _observe_browser_launch(callback: Callable[[str], None], marker: str) -> None:
+    callback(marker)
+
+
+def browser_launch_checkpoint(marker: str) -> None:
+    """Observe a browser before an auth restart, preserving native batching."""
+    observer = _LAUNCH_OBSERVER.get()
+    if observer is not None:
+        _observe_browser_launch(observer, marker)

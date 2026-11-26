@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from .adapters.base import RunContext
 from .adapters.launch_proof import canonical_profile_marker
-from .engine_binding import EnginePin
+from .engine_binding import EngineBindingError, EnginePin
+from .measurement import browser_launch_observer
 from .session_guard import SessionObservation, observe_session, verify_session
 
 
@@ -34,6 +37,25 @@ class EngineSession:
         self.initial: SessionObservation | None = None
         self.failure: SessionObservation | None = None
         self._captured = False
+        self.launches: list[SessionObservation] = []
+
+    @contextmanager
+    def task_scope(self) -> Iterator[None]:
+        if self.pin is None:
+            yield
+        else:
+            with browser_launch_observer(self._capture_checkpoint):
+                yield
+
+    def _capture_checkpoint(self, marker: str) -> None:
+        assert self.pin is not None
+        try:
+            observation = observe_session(self.pin, marker)
+        except Exception:
+            observation = SessionObservation("unknown")
+        self.launches.append(observation)
+        if not self._matches_pin(observation):
+            raise EngineBindingError("initial_browser_unverified")
 
     def observe(self, arm: Any, ctx: RunContext) -> SessionObservation | None:
         if self.pin is None:
@@ -102,6 +124,14 @@ class EngineSession:
             return
         after = after or SessionObservation("unknown")
         valid = self._matches_pin(after) and (before is None or self._matches_pin(before))
+        valid = valid and all(self._matches_pin(observation) for observation in self.launches)
+        auth_failure = None
+        if record.get("task") == "auth" and not self._captured:
+            if len(self.launches) != 1:
+                auth_failure = "auth_launch_proof_missing"
+            elif self._identity(self.launches[0]) == self._identity(after):
+                auth_failure = "auth_browser_not_replaced"
+            valid = valid and auth_failure is None
         if self._captured:
             valid = (
                 valid
@@ -117,12 +147,16 @@ class EngineSession:
             "warmup": self.initial.public_proof() if self.initial is not None else None,
             "before": before.public_proof() if before is not None else None,
             "after": after.public_proof(),
+            "launches": [observation.public_proof() for observation in self.launches],
         }
         record["reported_browser_version"] = record.get("browser_version")
         record["browser_version"] = self.pin.version if valid else None
         record["ok"] = record.get("ok") is True and valid
-        failure = before if before is not None and not before.eligible else after
-        code = failure.status if not failure.eligible else "proof_mismatch"
+        failure = next(
+            (item for item in (before, *self.launches, after) if item is not None and not self._matches_pin(item)),
+            after,
+        )
+        code = auth_failure or (failure.status if not failure.eligible else "proof_mismatch")
         record["keychain_verified"] = (
             after.keychain_verified if valid else (failure.keychain_verified if not failure.eligible else None)
         )

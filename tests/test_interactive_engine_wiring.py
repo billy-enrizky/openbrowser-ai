@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import sys
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
@@ -21,6 +22,9 @@ def probe(monkeypatch):
     class Session:
         def __init__(self, pin):
             assert pin == "configured-pin"
+
+        def task_scope(self):
+            return nullcontext()
 
         def observe(self, arm, ctx):
             events.append("observe")

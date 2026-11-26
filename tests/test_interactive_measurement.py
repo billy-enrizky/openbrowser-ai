@@ -310,3 +310,43 @@ def test_warm_runner_uses_the_identical_measurement_boundary(monkeypatch, tmp_pa
         "task_ns": 30_000_000,
         "validation_calls": 1,
     }
+
+
+def test_auth_checkpoint_separates_proof_and_keeps_all_native_phases_timed():
+    clock = Clock()
+    calls = []
+
+    def proof(marker):
+        calls.append(marker)
+        clock.advance(40_000_000)
+
+    with measurement.browser_launch_observer(proof), measurement.TaskTimer(clock=clock) as timer:
+        clock.advance(10_000_000)
+        measurement.browser_launch_checkpoint("/initial-browser-profile")
+        clock.advance(20_000_000)
+        clock.advance(30_000_000)
+    assert calls == ["/initial-browser-profile"]
+    assert timer.public()["validation_ns"] == 40_000_000
+    assert timer.public()["task_ns"] == 60_000_000
+
+
+def test_checkpoint_observer_is_scoped_and_never_replays_after_failure():
+    calls = []
+
+    def fail(marker):
+        calls.append(marker)
+        raise LookupError("expected proof failure")
+
+    with pytest.raises(LookupError), measurement.browser_launch_observer(fail):
+        measurement.browser_launch_checkpoint("/profile")
+    measurement.browser_launch_checkpoint("/later-unobserved-profile")
+    assert calls == ["/profile"]
+
+
+def test_nested_checkpoint_observers_restore_the_outer_owner():
+    calls = []
+    with measurement.browser_launch_observer(lambda marker: calls.append(("outer", marker))):
+        with measurement.browser_launch_observer(lambda marker: calls.append(("inner", marker))):
+            measurement.browser_launch_checkpoint("/inner")
+        measurement.browser_launch_checkpoint("/outer")
+    assert calls == [("inner", "/inner"), ("outer", "/outer")]

@@ -167,7 +167,7 @@ def run_one(
         finally:
             setup_ns = time.perf_counter_ns() - setup_started
         timer = TaskTimer()
-        with timer:
+        with engine_session.task_scope(), timer:
             result = arm.run(ctx, cleanup=False)
     except FileNotFoundError as exc:
         result = None
