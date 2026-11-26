@@ -6,7 +6,9 @@ import json
 import queue
 import socket
 import subprocess
+import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import ClassVar
 
 import pytest
@@ -134,6 +136,7 @@ class FakeSession:
         wrong_record_path: bool = False,
     ) -> None:
         self.arm = arm
+        self.workdir = Path(workdir)
         self.pid = 5000 + len(FakeSession.instances)
         self.inbox: queue.Queue[dict] = queue.Queue()
         self.sent: list[dict] = []
@@ -264,6 +267,8 @@ def run_lane(
     sampler_factory=None,
     cleanup=None,
     fixture_factory=None,
+    fixture_stop=None,
+    worker_timeout=5.0,
 ):
     output = tmp_path / "warm-resource.jsonl"
     sessions: list[FakeSession] = []
@@ -289,10 +294,10 @@ def run_lane(
         output,
         workdir=tmp_path,
         interval=0.01,
-        worker_timeout=5.0,
+        worker_timeout=worker_timeout,
         session_factory=session_factory or factory,
         fixture_factory=fixture_factory or (lambda: (FakeServer(), None)),
-        fixture_stop=lambda server, thread: None,
+        fixture_stop=fixture_stop or (lambda server, thread: None),
         sampler_factory=sampler_factory or sampler,
         cleanup=cleanup or (lambda sampler, **kwargs: {"verified": True, "remaining": [], "errors": []}),
     )
@@ -434,6 +439,9 @@ def test_main_returns_nonzero_for_invalid_lane(tmp_path, monkeypatch):
     output = tmp_path / "warm-resource.jsonl"
     sample = {
         "record_type": "sample",
+        "task": "wizard",
+        "arm": "a",
+        "sample": 0,
         "ok": True,
         "adapter_ok": True,
         "oracle_ok": True,
@@ -444,6 +452,7 @@ def test_main_returns_nonzero_for_invalid_lane(tmp_path, monkeypatch):
         "record_type": "end",
         "valid": True,
         "failures": 0,
+        "observations": 1,
         "expected_observations": 1,
         "provenance_verified": True,
         "cleanup_verified": True,
@@ -588,17 +597,187 @@ def test_terminal_counts_keychain_failure(tmp_path):
 
 
 def test_lane_valid_requires_every_gate():
-    records = [{"ok": True, "adapter_ok": True, "oracle_ok": True, "keychain_verified": True, "resource_ok": True}]
+    records = [
+        {
+            "task": "wizard",
+            "arm": "a",
+            "sample": 0,
+            "ok": True,
+            "adapter_ok": True,
+            "oracle_ok": True,
+            "keychain_verified": True,
+            "resource_ok": True,
+        }
+    ]
     terminal = {
+        "terminal": True,
         "valid": True,
         "failures": 0,
+        "observations": 1,
         "expected_observations": 1,
         "provenance_verified": True,
         "cleanup_verified": True,
     }
     assert warm.lane_valid(records, terminal) is True
     assert warm.lane_valid(records, {**terminal, "valid": False}) is False
+    assert warm.lane_valid(records, {**terminal, "terminal": False}) is False
     assert warm.lane_valid(records, {**terminal, "failures": 1}) is False
+    assert warm.lane_valid(records, {**terminal, "observations": 0}) is False
     assert warm.lane_valid(records, {**terminal, "provenance_verified": False}) is False
     assert warm.lane_valid(records, {**terminal, "cleanup_verified": False}) is False
+    assert warm.lane_valid(records, {**terminal, "setup_error": "boom"}) is False
+    assert warm.lane_valid(records, {**terminal, "fixture_errors": [{"phase": "stop"}]}) is False
     assert warm.lane_valid([], terminal) is False
+    assert warm.lane_valid("not-a-list", terminal) is False  # pyright: ignore[reportArgumentType]
+    assert warm.lane_valid([{**records[0], "arm": ""}], terminal) is False
+    duplicate_terminal = {**terminal, "observations": 2, "expected_observations": 2}
+    assert warm.lane_valid([*records, *records], duplicate_terminal) is False
+
+
+class ExitedPopen:
+    def __init__(self):
+        self.pid = 123456
+        self.stdin = __import__("io").StringIO()
+        self.stdout = iter([])
+        self.stderr = None
+
+    def poll(self):
+        return 0
+
+    def terminate(self):
+        return None
+
+    def wait(self, timeout=None):
+        return 0
+
+    def kill(self):
+        return None
+
+
+def test_process_session_fails_fast_when_worker_exited(tmp_path, monkeypatch):
+    fake = ExitedPopen()
+    monkeypatch.setattr(warm.subprocess, "Popen", lambda *args, **kwargs: fake)
+    session = warm.ProcessSession(
+        ["python", "-c", "pass"],
+        cwd=tmp_path,
+        stderr_path=tmp_path / "worker.stderr.log",
+        env={},
+    )
+    started = time.monotonic()
+    with pytest.raises(RuntimeError, match="exited"):
+        session.receive(1.0)
+    assert time.monotonic() - started < 0.5
+
+
+def test_ready_failure_cleans_preallocated_owned_sampler(tmp_path):
+    sessions = []
+    samplers = []
+    cleanups = []
+
+    def factory(arm, workdir, diagnostics):
+        session = FakeSession(arm, Path(workdir), ready_timeout=True)
+        sessions.append(session)
+        return session
+
+    def sampler_factory(pid, marker):
+        sampler = FakeSampler([{"cpu": 1.0, "rss": 1, "footprint": 1}])
+        samplers.append((marker, sampler))
+        return sampler
+
+    def cleanup(sampler, **kwargs):
+        cleanups.append(sampler)
+        return {"verified": True, "errors": []}
+
+    output, records, _ = run_lane(
+        tmp_path,
+        arms=("a",),
+        session_factory=factory,
+        sampler_factory=sampler_factory,
+        cleanup=cleanup,
+        worker_timeout=0.05,
+    )
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    assert records == []
+    assert len(samplers) == 1
+    marker, sampler = samplers[0]
+    assert marker == str(sessions[0].workdir.resolve())
+    assert sessions[0].workdir.name.startswith("warm-")
+    assert cleanups == [sampler]
+    assert terminal["cleanup_verified"] is True
+    assert terminal["setup_error"] is not None
+    assert terminal["valid"] is False
+
+
+def test_worker_warmup_failure_emits_fatal_and_cleans(tmp_path, monkeypatch):
+    messages = []
+    cleaned = []
+
+    class Arm:
+        def warmup(self, ctx):
+            raise RuntimeError("warmup exploded")
+
+        def cleanup(self, ctx):
+            cleaned.append(True)
+
+    monkeypatch.setattr(warm, "make_arm", lambda name: Arm())
+    monkeypatch.setattr(
+        warm,
+        "make_context",
+        lambda workdir, name: SimpleNamespace(root=Path(workdir) / "root", downloads=Path(workdir) / "downloads"),
+    )
+    monkeypatch.setattr(warm, "_emit", messages.append)
+    assert warm.run_worker("a", tmp_path) == 2
+    assert len(messages) == 1
+    assert messages[0]["type"] == "fatal"
+    assert "warmup failed" in messages[0]["error"]
+    assert "warmup exploded" in messages[0]["error"]
+    assert cleaned == [True]
+
+
+def test_fixture_start_failure_is_recorded_and_workers_closed(tmp_path):
+    def broken_fixture():
+        raise RuntimeError("fixture start failed")
+
+    output, records, sessions = run_lane(tmp_path, fixture_factory=broken_fixture)
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    assert records == []
+    assert terminal["fixture_errors"][0]["phase"] == "start"
+    assert terminal["valid"] is False
+    assert all(session.closed for session in sessions)
+
+
+def test_fixture_stop_failure_invalidates_lane(tmp_path):
+    def broken_stop(server, thread):
+        raise RuntimeError("fixture stop failed")
+
+    output, records, _ = run_lane(tmp_path, fixture_stop=broken_stop)
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    assert len(records) == 2
+    assert all(item["phase"] == "stop" for item in terminal["fixture_errors"])
+    assert terminal["valid"] is False
+
+
+def test_fixture_setup_error_stops_fixture(tmp_path):
+    stops = []
+    calls = []
+
+    def sampler_factory(pid, marker):
+        calls.append(marker)
+        if len(calls) > 1:
+            raise RuntimeError("sampler setup failed")
+        return FakeSampler([{"cpu": 1.0, "rss": 100, "footprint": 50}])
+
+    def stop(server, thread):
+        stops.append(True)
+
+    output, records, _ = run_lane(
+        tmp_path,
+        arms=("a",),
+        sampler_factory=sampler_factory,
+        fixture_stop=stop,
+    )
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    assert records == []
+    assert stops == [True]
+    assert terminal["fixture_errors"][0]["phase"] == "setup"
+    assert terminal["valid"] is False
