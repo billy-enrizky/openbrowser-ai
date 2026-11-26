@@ -131,6 +131,7 @@ class FakeSession:
         bad_nonce: bool = False,
         bad_record: bool = False,
         bad_root: bool = False,
+        wrong_record_path: bool = False,
     ) -> None:
         self.arm = arm
         self.pid = 5000 + len(FakeSession.instances)
@@ -145,6 +146,7 @@ class FakeSession:
         self.ready_timeout = ready_timeout
         self.bad_nonce = bad_nonce
         self.bad_record = bad_record
+        self.wrong_record_path = wrong_record_path
         self.root = Path("/tmp/not-owned") if bad_root else (workdir / f"fake-{arm}").resolve()
         self.downloads = self.root / "downloads"
         if not bad_root:
@@ -182,6 +184,7 @@ class FakeSession:
                 return
             path = Path(message["record"])
             path.parent.mkdir(parents=True, exist_ok=True)
+            emitted = path.with_name(path.stem + "-foreign.json") if self.wrong_record_path else path
             record = {
                 "task": message["task"],
                 "arm": "stale" if self.bad_record else self.arm,
@@ -193,7 +196,7 @@ class FakeSession:
                 "reported": REPORTED[message["task"]],
                 **self.record_override,
             }
-            path.write_text(json.dumps(record))
+            emitted.write_text(json.dumps(record))
             if message["task"] == "download":
                 (Path(message["downloads"]) / "report.csv").write_bytes(REPORT_BYTES)
             self.inbox.put(
@@ -203,7 +206,7 @@ class FakeSession:
                     "task": message["task"],
                     "sample": message["sample"],
                     "nonce": message_nonce,
-                    "record": str(path),
+                    "record": str(emitted),
                 }
             )
         elif message.get("type") == "finish":
@@ -410,6 +413,56 @@ def test_wrong_nonce_and_stale_record_are_rejected(tmp_path):
     assert all(record["ok"] is False for record in records)
     _output, records, _ = run_lane(tmp_path / "stale", session_options={"bad_record": True})
     assert all(record["ok"] is False for record in records)
+
+
+def test_foreign_record_path_is_rejected(tmp_path):
+    _output, records, _ = run_lane(tmp_path, session_options={"wrong_record_path": True})
+    assert all(record["ok"] is False for record in records)
+    assert all("record path" in (record["error"] or "") for record in records)
+
+
+def test_task_downloads_must_match_warmed_context(tmp_path):
+    ctx = warm.make_context(tmp_path, "a")
+    assert warm._task_downloads({"downloads": str(ctx.downloads)}, ctx) == ctx.downloads
+    with pytest.raises(ValueError):
+        warm._task_downloads({"downloads": str(tmp_path / "other")}, ctx)
+    with pytest.raises(ValueError):
+        warm._task_downloads({}, ctx)
+
+
+def test_main_returns_nonzero_for_invalid_lane(tmp_path, monkeypatch):
+    output = tmp_path / "warm-resource.jsonl"
+    sample = {
+        "record_type": "sample",
+        "ok": True,
+        "adapter_ok": True,
+        "oracle_ok": True,
+        "keychain_verified": True,
+        "resource_ok": True,
+    }
+    terminal = {
+        "record_type": "end",
+        "valid": True,
+        "failures": 0,
+        "expected_observations": 1,
+        "provenance_verified": True,
+        "cleanup_verified": True,
+        "terminal": True,
+    }
+
+    def write_lane(records, end):
+        def fake_run(arms, tasks, samples, path, **kwargs):
+            path.write_text("\n".join(json.dumps(item) for item in [{"record_type": "run"}, *records, end]) + "\n")
+            return records
+
+        return fake_run
+
+    monkeypatch.setattr(warm, "run_warm_lane", write_lane([sample], terminal))
+    assert warm.main(["--arms", "a", "--tasks", "wizard", "--samples", "1", "--output", str(output)]) == 0
+
+    invalid = {**terminal, "valid": False, "failures": 1}
+    monkeypatch.setattr(warm, "run_warm_lane", write_lane([{**sample, "resource_ok": False}], invalid))
+    assert warm.main(["--arms", "a", "--tasks", "wizard", "--samples", "1", "--output", str(output)]) == 1
 
 
 def test_existing_output_is_rejected(tmp_path):
