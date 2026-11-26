@@ -21,7 +21,7 @@ import sys
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -46,6 +46,8 @@ from .warm_benchmark import (
 
 LOGGER = logging.getLogger(__name__)
 METHOD = "warm-session-resources-v1"
+FINISH_GRACE_SECONDS = 5.0
+FINISH_WAIT_SECONDS = 5.0
 HERE = Path(__file__).resolve().parent
 
 
@@ -218,13 +220,13 @@ def run_worker(arm_name: str, workdir: Path) -> int:
         arm = make_arm(arm_name)
         root_ctx = make_owned_context(workdir, arm_name)
     except Exception as error:
-        _emit({"type": "fatal", "error": f"worker setup failed: {type(error).__name__}: {error}"})
+        _emit({"type": "fatal", "error": f"worker setup failed: {type(error).__name__}"})
         return 2
     try:
         try:
             payload, warmup_ms = arm.warmup(root_ctx)
         except Exception as error:
-            _emit({"type": "fatal", "error": f"warmup failed: {type(error).__name__}: {error}"})
+            _emit({"type": "fatal", "error": f"warmup failed: {type(error).__name__}"})
             return 2
         _emit(
             {
@@ -322,6 +324,16 @@ def _default_sampler(pid: int, marker: str) -> ProcessTreeSampler:
     return ProcessTreeSampler(pid, ownership_marker=marker)
 
 
+def _make_owned_sampler(pid: int, marker: str, factory: Callable[[int, str], Any]):
+    try:
+        return factory(pid, marker)
+    except Exception:
+        if factory is not _default_sampler:
+            raise
+        LOGGER.warning("sampler construction failed; retrying the default sampler once")
+        return factory(pid, marker)
+
+
 def _sample_tree(sampler) -> None:
     discover = getattr(sampler, "discover_orphans", None)
     if discover is not None:
@@ -344,7 +356,7 @@ def _receive_until_done(session, sampler, *, interval: float, deadline: float) -
     raise TimeoutError("warm task exceeded its deadline")
 
 
-def _validated_root(value, workdir: Path) -> str:
+def _validated_root(value, workdir: Path, *, expected: Path | None = None) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError("ready root is missing")
     root = Path(value)
@@ -352,6 +364,8 @@ def _validated_root(value, workdir: Path) -> str:
     resolved = root.resolve()
     if not root.is_absolute() or resolved == work or not resolved.is_relative_to(work):
         raise ValueError("ready root is outside the private workdir")
+    if expected is not None and resolved != expected.resolve():
+        raise ValueError("ready root does not match the preallocated arm scope")
     return str(resolved)
 
 
@@ -446,15 +460,17 @@ def run_warm_lane(
                     owned.mkdir(parents=True, exist_ok=True)
                     session = session_factory(arm, owned, diagnostics)
                     sessions[arm] = session
-                    lane_samplers[arm] = sampler_factory(session.pid, str(owned))
+                    lane_samplers[arm] = _make_owned_sampler(session.pid, str(owned), sampler_factory)
                     _sample_tree(lane_samplers[arm])
                     ready = session.receive(worker_timeout)
                     if ready.get("type") == "fatal":
                         raise RuntimeError(f"{arm} warmup failed: {ready.get('error')}")
                     if ready.get("type") != "ready":
                         raise RuntimeError(f"{arm} did not become ready")
-                    root = _validated_root(ready.get("root"), workdir)
+                    root = _validated_root(ready.get("root"), workdir, expected=owned)
                     downloads = _validated_downloads(ready.get("downloads"), root)
+                    if Path(downloads).resolve() != (owned / "downloads").resolve():
+                        raise ValueError("ready downloads does not match the preallocated arm scope")
                     warmups[arm] = {
                         "payload": ready.get("payload", {}),
                         "warmup_ms": ready.get("warmup_ms"),
@@ -463,7 +479,7 @@ def run_warm_lane(
                         "marker": str(owned),
                     }
             except Exception as error:
-                setup_error = f"{type(error).__name__}: {error}"
+                setup_error = type(error).__name__
                 LOGGER.error("warm lane setup failed: %s", setup_error)
             if setup_error is None:
                 for entry in warm_plan(arms, tasks, samples):
@@ -651,9 +667,9 @@ def run_warm_lane(
             for arm, session in sessions.items():
                 with contextlib.suppress(Exception):
                     session.send({"type": "finish"})
-                    session.receive(worker_timeout)
+                    session.receive(min(worker_timeout, FINISH_GRACE_SECONDS))
                 with contextlib.suppress(Exception):
-                    session.wait(10)
+                    session.wait(FINISH_WAIT_SECONDS)
                 with contextlib.suppress(Exception):
                     session.close()
                 sampler = lane_samplers.get(arm)
@@ -729,7 +745,14 @@ def run_warm_lane(
     return records
 
 
-def lane_valid(records: list[dict], terminal: dict) -> bool:
+def lane_valid(
+    records: list[dict],
+    terminal: dict,
+    *,
+    arms: Sequence[str] | None = None,
+    tasks: Sequence[str] | None = None,
+    samples: int | None = None,
+) -> bool:
     """Strict gate: types, terminal fields, complete unique cohort, provenance and cleanup."""
     if not isinstance(records, list) or not isinstance(terminal, dict):
         return False
@@ -771,6 +794,19 @@ def lane_valid(records: list[dict], terminal: dict) -> bool:
         if key in seen:
             return False
         seen.add(key)
+    plan_values = (arms, tasks, samples)
+    if any(value is not None for value in plan_values):
+        if arms is None or tasks is None or samples is None:
+            return False
+        if not all(isinstance(value, str) and value for value in (*arms, *tasks)):
+            return False
+        if isinstance(samples, bool) or not isinstance(samples, int) or samples < 1:
+            return False
+        planned = {(task, arm, sample) for task in tasks for arm in arms for sample in range(samples)}
+        if planned != seen:
+            return False
+        if len(planned) != expected or len(planned) != len(records):
+            return False
     return True
 
 
@@ -806,7 +842,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     lines = [json.loads(line) for line in args.output.read_text().splitlines() if line.strip()]
     terminal = lines[-1]
-    return 0 if lane_valid(records, terminal) else 1
+    return 0 if lane_valid(records, terminal, arms=args.arms, tasks=args.tasks, samples=args.samples) else 1
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ import pytest
 
 from benchmarks.interactive import resource_compare
 from benchmarks.interactive import warm_resource_compare as warm
-from benchmarks.interactive.fixtures.server import REPORT_BYTES
+from benchmarks.interactive.fixtures.server import BENCH_PASSWORD, REPORT_BYTES
 from benchmarks.interactive.resource_compare import ProcessTreeSampler, cleanup_owned
 
 COMBINED_STATE = {
@@ -136,6 +136,8 @@ class FakeSession:
         bad_record: bool = False,
         bad_root: bool = False,
         wrong_record_path: bool = False,
+        sibling_root: bool = False,
+        wrong_downloads: bool = False,
     ) -> None:
         self.arm = arm
         self.workdir = Path(workdir)
@@ -144,6 +146,7 @@ class FakeSession:
         self.sent: list[dict] = []
         self.received: list[dict] = []
         self.closed = False
+        self.receive_timeouts: list[float] = []
         self.task_downloads: list[Path] = []
         self.marker_seen_at_task: list[bool] = []
         self.record_override = record_override or {}
@@ -152,8 +155,13 @@ class FakeSession:
         self.bad_nonce = bad_nonce
         self.bad_record = bad_record
         self.wrong_record_path = wrong_record_path
-        self.root = Path("/tmp/not-owned") if bad_root else (workdir / f"fake-{arm}").resolve()
-        self.downloads = self.root / "downloads"
+        if bad_root:
+            self.root = Path("/tmp/not-owned")
+        elif sibling_root:
+            self.root = (Path(workdir).parent / "warm-sibling").resolve()
+        else:
+            self.root = Path(workdir).resolve()
+        self.downloads = self.root / ("other-downloads" if wrong_downloads else "downloads")
         if not bad_root:
             self.downloads.mkdir(parents=True, exist_ok=True)
         if not ready_timeout:
@@ -218,6 +226,9 @@ class FakeSession:
             self.inbox.put({"type": "finished"})
 
     def receive(self, timeout: float) -> dict:
+        self.receive_timeouts.append(timeout)
+        if self.ready_timeout:
+            raise TimeoutError("fake session timeout")
         try:
             message = self.inbox.get(timeout=timeout)
         except queue.Empty as error:
@@ -413,6 +424,32 @@ def test_root_outside_workdir_is_rejected(tmp_path):
     terminal = json.loads(output.read_text().splitlines()[-1])
     assert terminal["valid"] is False
     assert "setup_error" in terminal
+
+
+def test_sibling_ready_root_is_rejected(tmp_path):
+    output, records, sessions = run_lane(
+        tmp_path,
+        arms=("a",),
+        session_options={"sibling_root": True},
+        worker_timeout=0.05,
+    )
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    assert records == []
+    assert terminal["setup_error"] == "ValueError"
+    assert all(session.closed for session in sessions)
+
+
+def test_wrong_ready_downloads_is_rejected(tmp_path):
+    output, records, sessions = run_lane(
+        tmp_path,
+        arms=("a",),
+        session_options={"wrong_downloads": True},
+        worker_timeout=0.05,
+    )
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    assert records == []
+    assert terminal["setup_error"] == "ValueError"
+    assert all(session.closed for session in sessions)
 
 
 def test_wrong_nonce_and_stale_record_are_rejected(tmp_path):
@@ -634,6 +671,10 @@ def test_lane_valid_requires_every_gate():
     assert warm.lane_valid([{**records[0], "arm": ""}], terminal) is False
     duplicate_terminal = {**terminal, "observations": 2, "expected_observations": 2}
     assert warm.lane_valid([*records, *records], duplicate_terminal) is False
+    assert warm.lane_valid(records, terminal, arms=("a",), tasks=("wizard",), samples=1) is True
+    assert warm.lane_valid(records, terminal, arms=("b",), tasks=("wizard",), samples=1) is False
+    assert warm.lane_valid(records, terminal, arms=("a",), tasks=("modal",), samples=1) is False
+    assert warm.lane_valid(records, terminal, arms=("a",), tasks=("wizard",), samples=2) is False
 
 
 class ExitedPopen:
@@ -807,7 +848,7 @@ def test_worker_warmup_failure_emits_fatal_and_cleans(tmp_path, monkeypatch):
 
     class Arm:
         def warmup(self, ctx):
-            raise RuntimeError("warmup exploded")
+            raise RuntimeError(f"warmup exploded {BENCH_PASSWORD}")
 
         def cleanup(self, ctx):
             cleaned.append(True)
@@ -817,8 +858,8 @@ def test_worker_warmup_failure_emits_fatal_and_cleans(tmp_path, monkeypatch):
     assert warm.run_worker("a", tmp_path) == 2
     assert len(messages) == 1
     assert messages[0]["type"] == "fatal"
-    assert "warmup failed" in messages[0]["error"]
-    assert "warmup exploded" in messages[0]["error"]
+    assert messages[0]["error"] == "warmup failed: RuntimeError"
+    assert BENCH_PASSWORD not in messages[0]["error"]
     assert cleaned == [True]
 
 
@@ -869,3 +910,66 @@ def test_fixture_setup_error_stops_fixture(tmp_path):
     assert stops == [True]
     assert terminal["fixture_errors"][0]["phase"] == "setup"
     assert terminal["valid"] is False
+
+
+class SecretErrorSession(FakeSession):
+    def receive(self, timeout: float) -> dict:
+        self.receive_timeouts.append(timeout)
+        raise RuntimeError(f"secret {BENCH_PASSWORD}")
+
+
+def test_setup_error_is_type_only(tmp_path):
+    def factory(arm, workdir, diagnostics):
+        return SecretErrorSession(arm, Path(workdir))
+
+    output, records, _ = run_lane(
+        tmp_path,
+        arms=("a",),
+        session_factory=factory,
+        worker_timeout=0.05,
+    )
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    assert records == []
+    assert terminal["setup_error"] == "RuntimeError"
+    assert BENCH_PASSWORD not in json.dumps(terminal)
+
+
+def test_finish_receive_is_bounded(tmp_path):
+    output, records, sessions = run_lane(
+        tmp_path,
+        arms=("a",),
+        session_options={"ready_timeout": True},
+        worker_timeout=180.0,
+    )
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    assert records == []
+    assert sessions[0].receive_timeouts
+    assert sessions[0].receive_timeouts[-1] <= warm.FINISH_GRACE_SECONDS
+    assert terminal["valid"] is False
+
+
+def test_default_sampler_retries_once(monkeypatch):
+    calls = []
+
+    def flaky(pid, marker):
+        calls.append((pid, marker))
+        if len(calls) == 1:
+            raise RuntimeError("transient sampler failure")
+        return FakeSampler([{"cpu": 1.0, "rss": 1, "footprint": 1}])
+
+    monkeypatch.setattr(warm, "_default_sampler", flaky)
+    sampler = warm._make_owned_sampler(123, "/tmp/owned-marker", warm._default_sampler)
+    assert len(calls) == 2
+    assert isinstance(sampler, FakeSampler)
+
+
+def test_non_default_sampler_failure_does_not_retry():
+    calls = []
+
+    def broken(pid, marker):
+        calls.append((pid, marker))
+        raise RuntimeError("persistent sampler failure")
+
+    with pytest.raises(RuntimeError, match="persistent"):
+        warm._make_owned_sampler(123, "/tmp/owned-marker", broken)
+    assert len(calls) == 1
