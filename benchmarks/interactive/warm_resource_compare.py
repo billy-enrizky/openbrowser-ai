@@ -115,10 +115,21 @@ class ProcessSession:
         self.process.stdin.flush()
 
     def receive(self, timeout: float) -> dict:
-        try:
-            return self._queue.get(timeout=timeout)
-        except queue.Empty as error:
-            raise TimeoutError("warm worker message timeout") from error
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("warm worker message timeout")
+            try:
+                return self._queue.get(timeout=min(0.05, remaining))
+            except queue.Empty:
+                code = self.process.poll()
+                if code is None:
+                    continue
+                try:
+                    return self._queue.get(timeout=min(0.1, max(0.0, deadline - time.monotonic())))
+                except queue.Empty:
+                    raise RuntimeError(f"warm worker exited with code {code}") from None
 
     def close(self) -> None:
         with contextlib.suppress(Exception):
@@ -183,10 +194,18 @@ def _write_record(path: Path, record: dict) -> None:
 
 
 def run_worker(arm_name: str, workdir: Path) -> int:
-    arm = make_arm(arm_name)
-    root_ctx = make_context(workdir, arm_name)
     try:
-        payload, warmup_ms = arm.warmup(root_ctx)
+        arm = make_arm(arm_name)
+        root_ctx = make_context(workdir, arm_name)
+    except Exception as error:
+        _emit({"type": "fatal", "error": f"worker setup failed: {type(error).__name__}: {error}"})
+        return 2
+    try:
+        try:
+            payload, warmup_ms = arm.warmup(root_ctx)
+        except Exception as error:
+            _emit({"type": "fatal", "error": f"warmup failed: {type(error).__name__}: {error}"})
+            return 2
         _emit(
             {
                 "type": "ready",
@@ -345,6 +364,7 @@ def run_warm_lane(
     diagnostics = output.parent / f"{output.stem}.diagnostics"
     expected_observations = len(arms) * len(tasks) * samples
     records: list[dict] = []
+    fixture_errors: list[dict] = []
     with output.open("x") as handle:
         header: dict = {
             "record_type": "run",
@@ -381,6 +401,7 @@ def run_warm_lane(
                         "failures": 0,
                         "provenance_verified": False,
                         "cleanup_verified": False,
+                        "fixture_errors": [],
                         "valid": False,
                         "terminal": True,
                         "latency_claim_allowed": False,
@@ -401,9 +422,15 @@ def run_warm_lane(
         try:
             try:
                 for arm in arms:
-                    session = session_factory(arm, workdir, diagnostics)
+                    owned = (Path(workdir).resolve() / f"warm-{arm}-{uuid.uuid4().hex}").resolve()
+                    owned.mkdir(parents=True, exist_ok=True)
+                    session = session_factory(arm, owned, diagnostics)
                     sessions[arm] = session
+                    lane_samplers[arm] = sampler_factory(session.pid, str(owned))
+                    _sample_tree(lane_samplers[arm])
                     ready = session.receive(worker_timeout)
+                    if ready.get("type") == "fatal":
+                        raise RuntimeError(f"{arm} warmup failed: {ready.get('error')}")
                     if ready.get("type") != "ready":
                         raise RuntimeError(f"{arm} did not become ready")
                     root = _validated_root(ready.get("root"), workdir)
@@ -413,156 +440,192 @@ def run_warm_lane(
                         "warmup_ms": ready.get("warmup_ms"),
                         "root": root,
                         "downloads": downloads,
+                        "marker": str(owned),
                     }
-                    lane_samplers[arm] = sampler_factory(session.pid, root)
-                    _sample_tree(lane_samplers[arm])
             except Exception as error:
                 setup_error = f"{type(error).__name__}: {error}"
                 LOGGER.error("warm lane setup failed: %s", setup_error)
             if setup_error is None:
                 for entry in warm_plan(arms, tasks, samples):
                     session = sessions[entry.arm]
-                    server, thread = fixture_factory()
-                    ctx_downloads = Path(warmups[entry.arm]["downloads"])
-                    ctx_downloads.mkdir(parents=True, exist_ok=True)
-                    clean_downloads(ctx_downloads)
-                    sampler = sampler_factory(session.pid, warmups[entry.arm]["root"])
-                    _sample_tree(sampler)
-                    baseline = sampler.result()
-                    nonce = uuid.uuid4().hex
-                    record_path = diagnostics / f"record-{entry.task}-{entry.arm}-s{entry.sample}-{nonce}.json"
-                    started = time.monotonic()
-                    failure = None
                     try:
-                        session.send(
+                        server, thread = fixture_factory()
+                    except Exception as error:
+                        fixture_errors.append(
                             {
-                                "type": "task",
                                 "task": entry.task,
+                                "arm": entry.arm,
                                 "sample": entry.sample,
-                                "base_url": server.base_url,
-                                "downloads": str(ctx_downloads),
-                                "record": str(record_path),
-                                "nonce": nonce,
+                                "phase": "start",
+                                "error": f"{type(error).__name__}: {error}",
                             }
                         )
-                        ack = session.receive(worker_timeout)
+                        break
+                    try:
+                        try:
+                            ctx_downloads = Path(warmups[entry.arm]["downloads"])
+                            ctx_downloads.mkdir(parents=True, exist_ok=True)
+                            clean_downloads(ctx_downloads)
+                            sampler = sampler_factory(session.pid, warmups[entry.arm]["marker"])
+                            _sample_tree(sampler)
+                            baseline = sampler.result()
+                            nonce = uuid.uuid4().hex
+                            record_path = diagnostics / f"record-{entry.task}-{entry.arm}-s{entry.sample}-{nonce}.json"
+                            started = time.monotonic()
+                        except Exception as error:
+                            fixture_errors.append(
+                                {
+                                    "task": entry.task,
+                                    "arm": entry.arm,
+                                    "sample": entry.sample,
+                                    "phase": "setup",
+                                    "error": f"{type(error).__name__}: {error}",
+                                }
+                            )
+                            continue
+                        failure = None
+                        try:
+                            session.send(
+                                {
+                                    "type": "task",
+                                    "task": entry.task,
+                                    "sample": entry.sample,
+                                    "base_url": server.base_url,
+                                    "downloads": str(ctx_downloads),
+                                    "record": str(record_path),
+                                    "nonce": nonce,
+                                }
+                            )
+                            ack = session.receive(worker_timeout)
+                            if (
+                                ack.get("type") != "started"
+                                or ack.get("arm") != entry.arm
+                                or ack.get("task") != entry.task
+                                or ack.get("sample") != entry.sample
+                                or ack.get("nonce") != nonce
+                            ):
+                                raise RuntimeError("worker acknowledgement does not match the task")
+                            _sample_tree(sampler)
+                            done = _receive_until_done(
+                                session, sampler, interval=interval, deadline=time.monotonic() + worker_timeout
+                            )
+                            if (
+                                done.get("arm") != entry.arm
+                                or done.get("task") != entry.task
+                                or done.get("sample") != entry.sample
+                                or done.get("nonce") != nonce
+                            ):
+                                raise RuntimeError("worker completion does not match the task")
+                            _sample_tree(sampler)
+                            emitted = done.get("record")
+                            if not isinstance(emitted, str) or Path(emitted).resolve() != record_path.resolve():
+                                raise ValueError("worker record path does not match the task")
+                            record = json.loads(record_path.read_text())
+                            if (
+                                record.get("arm") != entry.arm
+                                or record.get("task") != entry.task
+                                or record.get("sample") != entry.sample
+                                or record.get("nonce") != nonce
+                            ):
+                                raise ValueError("worker record is stale or foreign")
+                        except Exception as error:
+                            failure = f"{type(error).__name__}: {error}"
+                            record = {
+                                "task": entry.task,
+                                "arm": entry.arm,
+                                "sample": entry.sample,
+                                "nonce": nonce,
+                                "ok": False,
+                                "adapter_ok": False,
+                                "reported": {},
+                                "keychain_verified": None,
+                                "error": failure,
+                            }
+                        resources = sampler.result() if failure is None else {}
+                        final_cpu = resources.get("observed_tree_cpu_seconds")
+                        baseline_cpu = baseline.get("observed_tree_cpu_seconds")
                         if (
-                            ack.get("type") != "started"
-                            or ack.get("arm") != entry.arm
-                            or ack.get("task") != entry.task
-                            or ack.get("sample") != entry.sample
-                            or ack.get("nonce") != nonce
+                            isinstance(final_cpu, (int, float))
+                            and not isinstance(final_cpu, bool)
+                            and isinstance(baseline_cpu, (int, float))
+                            and not isinstance(baseline_cpu, bool)
+                            and math.isfinite(float(final_cpu))
+                            and math.isfinite(float(baseline_cpu))
+                            and final_cpu >= baseline_cpu
                         ):
-                            raise RuntimeError("worker acknowledgement does not match the task")
-                        _sample_tree(sampler)
-                        done = _receive_until_done(
-                            session, sampler, interval=interval, deadline=time.monotonic() + worker_timeout
+                            cpu_delta = float(final_cpu) - float(baseline_cpu)
+                            cpu_error = None
+                        else:
+                            cpu_delta = None
+                            cpu_error = "invalid_counter"
+                        rss = resources.get("peak_tree_rss_bytes")
+                        unverified = resources.get("unverified_processes", 0)
+                        rss_valid = (
+                            isinstance(rss, (int, float))
+                            and not isinstance(rss, bool)
+                            and math.isfinite(float(rss))
+                            and float(rss) > 0
                         )
-                        if (
-                            done.get("arm") != entry.arm
-                            or done.get("task") != entry.task
-                            or done.get("sample") != entry.sample
-                            or done.get("nonce") != nonce
-                        ):
-                            raise RuntimeError("worker completion does not match the task")
-                        _sample_tree(sampler)
-                        emitted = done.get("record")
-                        if not isinstance(emitted, str) or Path(emitted).resolve() != record_path.resolve():
-                            raise ValueError("worker record path does not match the task")
-                        record = json.loads(record_path.read_text())
-                        if (
-                            record.get("arm") != entry.arm
-                            or record.get("task") != entry.task
-                            or record.get("sample") != entry.sample
-                            or record.get("nonce") != nonce
-                        ):
-                            raise ValueError("worker record is stale or foreign")
-                    except Exception as error:
-                        failure = f"{type(error).__name__}: {error}"
-                        record = {
-                            "task": entry.task,
-                            "arm": entry.arm,
-                            "sample": entry.sample,
-                            "nonce": nonce,
-                            "ok": False,
-                            "adapter_ok": False,
-                            "reported": {},
-                            "keychain_verified": None,
-                            "error": failure,
+                        resource_ok = bool(
+                            rss_valid
+                            and resources.get("fatal_read_errors") == 0
+                            and unverified == 0
+                            and resources.get("observed_browser_during_native_run", 0) > 0
+                            and cpu_delta is not None
+                        )
+                        oracle = ORACLES[entry.task](
+                            server.state.snapshot() if hasattr(server, "state") else {},
+                            record.get("reported", {}),
+                            ctx_downloads,
+                        )
+                        row = {
+                            **record,
+                            "record_type": "sample",
+                            "order": entry.position,
+                            "arm_order": list(entry.order),
+                            "oracle_ok": oracle.ok,
+                            "oracle_detail": oracle.detail,
+                            "warm_peak_tree_rss_bytes": rss,
+                            "warm_peak_child_footprint_bytes": resources.get("peak_child_footprint_bytes"),
+                            "warm_task_tree_cpu_delta_seconds": cpu_delta,
+                            "warm_cpu_delta_error": cpu_error,
+                            "warm_unverified_processes": unverified,
+                            "warm_observed_child_processes": resources.get("observed_child_processes"),
+                            "warm_observed_browser_during_native_run": resources.get(
+                                "observed_browser_during_native_run"
+                            ),
+                            "warm_read_errors": resources.get("read_errors"),
+                            "warm_fatal_read_errors": resources.get("fatal_read_errors"),
+                            "warm_footprint_status": resources.get("footprint_status"),
+                            "resource_ok": resource_ok,
+                            "elapsed_seconds": round(time.monotonic() - started, 6),
+                            "latency_claim_allowed": False,
+                            "provisional": True,
                         }
+                        records.append(row)
+                        handle.write(json.dumps(row) + "\n")
+                        handle.flush()
+                        LOGGER.info(
+                            "%s %s s%s ok=%s oracle=%s",
+                            entry.task,
+                            entry.arm,
+                            entry.sample,
+                            row.get("ok"),
+                            oracle.ok,
+                        )
                     finally:
-                        with contextlib.suppress(Exception):
+                        try:
                             fixture_stop(server, thread)
-                    resources = sampler.result() if failure is None else {}
-                    final_cpu = resources.get("observed_tree_cpu_seconds")
-                    baseline_cpu = baseline.get("observed_tree_cpu_seconds")
-                    if (
-                        isinstance(final_cpu, (int, float))
-                        and not isinstance(final_cpu, bool)
-                        and isinstance(baseline_cpu, (int, float))
-                        and not isinstance(baseline_cpu, bool)
-                        and math.isfinite(float(final_cpu))
-                        and math.isfinite(float(baseline_cpu))
-                        and final_cpu >= baseline_cpu
-                    ):
-                        cpu_delta = float(final_cpu) - float(baseline_cpu)
-                        cpu_error = None
-                    else:
-                        cpu_delta = None
-                        cpu_error = "invalid_counter"
-                    rss = resources.get("peak_tree_rss_bytes")
-                    unverified = resources.get("unverified_processes", 0)
-                    rss_valid = (
-                        isinstance(rss, (int, float))
-                        and not isinstance(rss, bool)
-                        and math.isfinite(float(rss))
-                        and float(rss) > 0
-                    )
-                    resource_ok = bool(
-                        rss_valid
-                        and resources.get("fatal_read_errors") == 0
-                        and unverified == 0
-                        and resources.get("observed_browser_during_native_run", 0) > 0
-                        and cpu_delta is not None
-                    )
-                    oracle = ORACLES[entry.task](
-                        server.state.snapshot() if hasattr(server, "state") else {},
-                        record.get("reported", {}),
-                        ctx_downloads,
-                    )
-                    row = {
-                        **record,
-                        "record_type": "sample",
-                        "order": entry.position,
-                        "arm_order": list(entry.order),
-                        "oracle_ok": oracle.ok,
-                        "oracle_detail": oracle.detail,
-                        "warm_peak_tree_rss_bytes": rss,
-                        "warm_peak_child_footprint_bytes": resources.get("peak_child_footprint_bytes"),
-                        "warm_task_tree_cpu_delta_seconds": cpu_delta,
-                        "warm_cpu_delta_error": cpu_error,
-                        "warm_unverified_processes": unverified,
-                        "warm_observed_child_processes": resources.get("observed_child_processes"),
-                        "warm_observed_browser_during_native_run": resources.get("observed_browser_during_native_run"),
-                        "warm_read_errors": resources.get("read_errors"),
-                        "warm_fatal_read_errors": resources.get("fatal_read_errors"),
-                        "warm_footprint_status": resources.get("footprint_status"),
-                        "resource_ok": resource_ok,
-                        "elapsed_seconds": round(time.monotonic() - started, 6),
-                        "latency_claim_allowed": False,
-                        "provisional": True,
-                    }
-                    records.append(row)
-                    handle.write(json.dumps(row) + "\n")
-                    handle.flush()
-                    LOGGER.info(
-                        "%s %s s%s ok=%s oracle=%s",
-                        entry.task,
-                        entry.arm,
-                        entry.sample,
-                        row.get("ok"),
-                        oracle.ok,
-                    )
+                        except Exception as error:
+                            fixture_errors.append(
+                                {
+                                    "task": entry.task,
+                                    "arm": entry.arm,
+                                    "sample": entry.sample,
+                                    "phase": "stop",
+                                    "error": f"{type(error).__name__}: {error}",
+                                }
+                            )
         finally:
             cleanup_reports: dict[str, dict] = {}
             for arm, session in sessions.items():
@@ -618,6 +681,7 @@ def run_warm_lane(
                 "failures": failures,
                 "warmups": warmups,
                 "cleanup": cleanup_reports,
+                "fixture_errors": fixture_errors,
                 "cleanup_verified": bool(cleanup_reports)
                 and all(item.get("verified", False) for item in cleanup_reports.values()),
                 "provenance_verified": verified,
@@ -638,6 +702,7 @@ def run_warm_lane(
                 and setup_error is None
                 and failures == 0
                 and len(records) == expected_observations
+                and not fixture_errors
             )
             handle.write(json.dumps(terminal) + "\n")
             handle.flush()
@@ -645,16 +710,48 @@ def run_warm_lane(
 
 
 def lane_valid(records: list[dict], terminal: dict) -> bool:
-    """Strict gate: complete cohort, every correctness gate, provenance and cleanup."""
-    return bool(
-        terminal.get("valid") is True
-        and terminal.get("failures") == 0
-        and len(records) == terminal.get("expected_observations")
-        and terminal.get("provenance_verified") is True
-        and terminal.get("cleanup_verified") is True
-        and not terminal.get("aborted", False)
-        and terminal.get("setup_error") is None
-    )
+    """Strict gate: types, terminal fields, complete unique cohort, provenance and cleanup."""
+    if not isinstance(records, list) or not isinstance(terminal, dict):
+        return False
+    if terminal.get("terminal") is not True or terminal.get("valid") is not True:
+        return False
+    failures = terminal.get("failures")
+    if isinstance(failures, bool) or not isinstance(failures, int) or failures != 0:
+        return False
+    expected = terminal.get("expected_observations")
+    observations = terminal.get("observations")
+    if isinstance(expected, bool) or not isinstance(expected, int) or expected < 1:
+        return False
+    if isinstance(observations, bool) or not isinstance(observations, int):
+        return False
+    if expected != len(records) or observations != len(records):
+        return False
+    if terminal.get("provenance_verified") is not True:
+        return False
+    if terminal.get("cleanup_verified") is not True:
+        return False
+    if terminal.get("aborted", False) or terminal.get("setup_error") is not None:
+        return False
+    if terminal.get("fixture_errors"):
+        return False
+    seen: set[tuple[str, str, int]] = set()
+    for row in records:
+        if not isinstance(row, dict):
+            return False
+        task = row.get("task")
+        arm = row.get("arm")
+        sample = row.get("sample")
+        if not isinstance(task, str) or not task:
+            return False
+        if not isinstance(arm, str) or not arm:
+            return False
+        if isinstance(sample, bool) or not isinstance(sample, int) or sample < 0:
+            return False
+        key = (task, arm, sample)
+        if key in seen:
+            return False
+        seen.add(key)
+    return True
 
 
 def main(argv: list[str] | None = None) -> int:
