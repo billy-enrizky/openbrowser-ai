@@ -5,8 +5,10 @@ from __future__ import annotations
 import errno
 import json
 import os
+import stat
 import tempfile
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -27,6 +29,12 @@ class ProfileInUseError(RuntimeError):
 	def __init__(self, profile_dir: str | Path):
 		self.profile_dir = str(Path(profile_dir).expanduser().resolve())
 		super().__init__(f'Browser profile already in use: {self.profile_dir}')
+
+
+@dataclass(frozen=True)
+class _PristineProfileSnapshot:
+	eligible: bool
+	directory_identity: tuple[int, int] | None
 
 
 class ProfileLease:
@@ -54,6 +62,7 @@ class ProfileLease:
 		)
 		self._lock_handle: BinaryIO | None = None
 		self.previous_metadata: dict[str, Any] | None = None
+		self._profile_pristine = False
 
 	@property
 	def lock_path(self) -> Path:
@@ -67,11 +76,19 @@ class ProfileLease:
 	def acquired(self) -> bool:
 		return self._lock_handle is not None
 
+	@property
+	def profile_pristine(self) -> bool:
+		"""Return whether this lease proved the profile was pristine at acquisition."""
+		return self._profile_pristine
+
 	def acquire(self) -> dict[str, Any] | None:
 		"""Acquire the profile lock and return metadata from the prior owner."""
 		if self.acquired:
+			self._profile_pristine = False
 			return self.previous_metadata
 
+		self._profile_pristine = False
+		snapshot = self._capture_pristine_profile_snapshot()
 		self.profile_dir.mkdir(parents=True, exist_ok=True)
 		handle = self.lock_path.open('a+b')
 
@@ -85,12 +102,16 @@ class ProfileLease:
 
 		self._lock_handle = handle
 		self.previous_metadata = self.read_metadata(self.profile_dir)
+		self._profile_pristine = self._verify_pristine_profile(snapshot, handle)
 		return self.previous_metadata
 
 	def write_metadata(self, browser: dict[str, Any] | None = None) -> None:
 		"""Atomically write metadata for this acquired lease."""
 		if not self.acquired:
 			raise RuntimeError('Cannot write profile metadata before acquiring the lease')
+
+		if browser is not None:
+			self._profile_pristine = False
 
 		metadata = {
 			'schema_version': self.SCHEMA_VERSION,
@@ -100,7 +121,11 @@ class ProfileLease:
 			'owner_start_time': self.owner_start_time,
 			'browser': browser,
 		}
-		self._atomic_write(metadata)
+		try:
+			self._atomic_write(metadata)
+		except BaseException:
+			self._profile_pristine = False
+			raise
 
 	def record_browser(
 		self,
@@ -111,6 +136,7 @@ class ProfileLease:
 		cdp_port: int,
 	) -> dict[str, Any]:
 		"""Record the identity and launch details of the owned browser."""
+		self._profile_pristine = False
 		browser = {
 			'pid': int(process.pid),
 			'start_time': float(process.create_time()),
@@ -129,6 +155,7 @@ class ProfileLease:
 
 	def release(self) -> None:
 		"""Remove only this owner's metadata and release the OS lock."""
+		self._profile_pristine = False
 		handle = self._lock_handle
 		if handle is None:
 			return
@@ -144,6 +171,108 @@ class ProfileLease:
 				handle.close()
 				self._lock_handle = None
 				self.previous_metadata = None
+
+	def _capture_pristine_profile_snapshot(self) -> _PristineProfileSnapshot:
+		"""Capture directory state before creating any lease-owned files."""
+		directory_identity: tuple[int, int] | None = None
+		try:
+			directory_stat = self.profile_dir.stat()
+		except FileNotFoundError:
+			directory_exists = False
+			directory_empty = True
+		except OSError:
+			return _PristineProfileSnapshot(False, None)
+		else:
+			directory_exists = True
+			if not stat.S_ISDIR(directory_stat.st_mode):
+				return _PristineProfileSnapshot(False, None)
+			directory_identity = (directory_stat.st_dev, directory_stat.st_ino)
+			try:
+				with os.scandir(self.profile_dir) as entries:
+					directory_empty = next(entries, None) is None
+			except OSError:
+				return _PristineProfileSnapshot(False, directory_identity)
+
+		lock_exists = self._path_lexists(self.lock_path)
+		metadata_exists = self._path_lexists(self.metadata_path)
+		if lock_exists is None or metadata_exists is None:
+			return _PristineProfileSnapshot(False, directory_identity)
+		eligible = (not directory_exists or directory_empty) and not lock_exists and not metadata_exists
+		return _PristineProfileSnapshot(eligible, directory_identity)
+
+	@staticmethod
+	def _path_lexists(path: Path) -> bool | None:
+		"""Return lexical path existence, or None when the check is uncertain."""
+		try:
+			os.lstat(path)
+		except FileNotFoundError:
+			return False
+		except OSError:
+			return None
+		return True
+
+	def _verify_pristine_profile(self, snapshot: _PristineProfileSnapshot, handle: BinaryIO) -> bool:
+		"""Confirm the locked directory still contains only this lease's lock file."""
+		if not snapshot.eligible:
+			return False
+		try:
+			directory_stat = self.profile_dir.stat()
+			lock_stat = os.lstat(self.lock_path)
+			handle_stat = os.fstat(handle.fileno())
+		except OSError:
+			return False
+		if not stat.S_ISDIR(directory_stat.st_mode):
+			return False
+		if snapshot.directory_identity is not None and snapshot.directory_identity != (
+			directory_stat.st_dev,
+			directory_stat.st_ino,
+		):
+			return False
+		if not stat.S_ISREG(lock_stat.st_mode) or not stat.S_ISREG(handle_stat.st_mode):
+			return False
+		if (lock_stat.st_dev, lock_stat.st_ino) != (handle_stat.st_dev, handle_stat.st_ino):
+			return False
+		if lock_stat.st_dev != directory_stat.st_dev:
+			return False
+		try:
+			with os.scandir(self.profile_dir) as entries:
+				names = {entry.name for entry in entries}
+		except OSError:
+			return False
+		try:
+			final_directory_stat = self.profile_dir.stat()
+			final_lock_stat = os.lstat(self.lock_path)
+			final_handle_stat = os.fstat(handle.fileno())
+		except OSError:
+			return False
+		if (
+			final_directory_stat.st_dev,
+			final_directory_stat.st_ino,
+			final_directory_stat.st_mode,
+		) != (directory_stat.st_dev, directory_stat.st_ino, directory_stat.st_mode):
+			return False
+		if (final_lock_stat.st_dev, final_lock_stat.st_ino, final_lock_stat.st_mode) != (
+			lock_stat.st_dev,
+			lock_stat.st_ino,
+			lock_stat.st_mode,
+		):
+			return False
+		if (final_handle_stat.st_dev, final_handle_stat.st_ino, final_handle_stat.st_mode) != (
+			handle_stat.st_dev,
+			handle_stat.st_ino,
+			handle_stat.st_mode,
+		):
+			return False
+		if not stat.S_ISREG(final_lock_stat.st_mode) or not stat.S_ISREG(final_handle_stat.st_mode):
+			return False
+		if (final_lock_stat.st_dev, final_lock_stat.st_ino) != (
+			final_handle_stat.st_dev,
+			final_handle_stat.st_ino,
+		):
+			return False
+		if final_lock_stat.st_dev != final_directory_stat.st_dev:
+			return False
+		return names == {self.LOCK_FILENAME}
 
 	@classmethod
 	def read_metadata(cls, profile_dir: str | Path) -> dict[str, Any] | None:
