@@ -49,12 +49,13 @@ class PlaywrightCliArm:
         binary: str | None = None,
         *,
         secrets_file: Path | None = None,
+        browser_version: str | None = None,
         timeout: float = 180.0,
     ) -> None:
         self.binary = str(binary or os.environ.get("PLAYWRIGHT_CLI_BIN") or DEFAULT_CLI_BINARY)
         self.secrets_file = Path(secrets_file) if secrets_file else None
         self.timeout = timeout
-        self.browser_version = chrome_version()
+        self.browser_version = browser_version or chrome_version()
         self._result = ArmResult(ok=False)
         self._opened = False
         self._attempted_open = False

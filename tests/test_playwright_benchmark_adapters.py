@@ -1,11 +1,14 @@
-"""Offline contracts for the native Playwright MCP and CLI benchmark arms.
+"""Unit contracts for the native Playwright MCP and CLI benchmark arms.
 
-No native process, browser, profile, or network is used.
+No browser, profile, socket, or native process is used. Constructors and the
+Chrome version probe are replaced with metadata fakes by an autouse guard.
 """
 
 from __future__ import annotations
 
 import json
+import socket
+import subprocess
 from pathlib import Path
 from typing import ClassVar
 
@@ -26,6 +29,20 @@ from benchmarks.interactive.adapters.playwright_tasks import (
     task_program,
 )
 from benchmarks.interactive.fixtures.server import BENCH_PASSWORD, BENCH_USER, REPORT_BYTES
+
+
+@pytest.fixture(autouse=True)
+def _no_native_io(monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("fake test attempted native I/O")
+
+    monkeypatch.setattr(subprocess, "Popen", forbidden)
+    monkeypatch.setattr(socket, "socket", forbidden)
+    monkeypatch.setattr(socket, "create_connection", forbidden)
+    monkeypatch.setattr(playwright_mcp, "chrome_version", lambda: "Guarded/1.0")
+    monkeypatch.setattr(playwright_cli, "chrome_version", lambda: "Guarded/1.0")
+    monkeypatch.setattr(playwright_mcp, "terminate_matching", lambda marker: [])
+    monkeypatch.setattr(playwright_cli, "terminate_matching", lambda marker: [])
 
 
 def make_context(tmp_path: Path, *, task: str = "wizard") -> RunContext:
@@ -165,7 +182,7 @@ def test_mcp_server_command_and_execute_program(tmp_path, monkeypatch):
     assert config["browser"]["launchOptions"]["args"] == ["--use-mock-keychain"]
     assert config["browser"]["launchOptions"]["headless"] is True
     assert config["browser"]["launchOptions"]["downloadsPath"] == str(ctx.downloads)
-    assert config["browser"]["contextOptions"]["viewport"] == "1280x800"
+    assert config["browser"]["contextOptions"]["viewport"] == {"width": 1280, "height": 800}
     assert config["outputDir"] == str(ctx.downloads)
     assert config["codegen"] == "none"
     arm.cleanup(ctx)
@@ -249,7 +266,7 @@ def test_cli_commands_and_execute_program(tmp_path, monkeypatch):
     assert config["codegen"] == "none"
     assert config["browser"]["launchOptions"]["executablePath"] == playwright_common.CHROME
     assert config["browser"]["launchOptions"]["args"] == ["--use-mock-keychain"]
-    assert config["browser"]["contextOptions"]["viewport"] == "1280x800"
+    assert config["browser"]["contextOptions"]["viewport"] == {"width": 1280, "height": 800}
 
 
 def test_cli_auth_uses_secret_fill_and_restart(tmp_path, monkeypatch):
@@ -413,3 +430,46 @@ def test_mcp_initialize_failure_archives_stderr(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError):
         arm._start(ctx)
     assert "startup failure trace" in arm._result.stderr
+
+
+def test_explicit_browser_version_skips_native_probe(monkeypatch):
+    def boom():
+        raise AssertionError("probe must not run when a preflight version is supplied")
+
+    monkeypatch.setattr(playwright_mcp, "chrome_version", boom)
+    monkeypatch.setattr(playwright_cli, "chrome_version", boom)
+    mcp = playwright_mcp.PlaywrightMcpArm(binary="/bin/playwright-mcp", browser_version="Preflight/1.0")
+    cli = playwright_cli.PlaywrightCliArm(binary="/bin/playwright-cli", browser_version="Preflight/1.0")
+    assert mcp.browser_version == "Preflight/1.0"
+    assert cli.browser_version == "Preflight/1.0"
+
+
+def test_browser_version_env_preflight_wins(monkeypatch):
+    monkeypatch.setenv("PLAYWRIGHT_BENCH_BROWSER_VERSION", "EnvPreflight/2.0")
+
+    def boom():
+        raise AssertionError("probe must not run when the env preflight is set")
+
+    monkeypatch.setattr(playwright_common, "_VERSION_CACHE", {})
+    monkeypatch.setattr(playwright_common.subprocess, "run", lambda *a, **k: boom())
+    assert playwright_common.chrome_version() == "EnvPreflight/2.0"
+
+
+class FakeCompleted:
+    stdout = "Google Chrome 999.0.0.0\n"
+    stderr = ""
+
+
+def test_chrome_version_uses_injected_metadata_and_caches(monkeypatch):
+    monkeypatch.delenv("PLAYWRIGHT_BENCH_BROWSER_VERSION", raising=False)
+    monkeypatch.setattr(playwright_common, "_VERSION_CACHE", {})
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return FakeCompleted()
+
+    monkeypatch.setattr(playwright_common.subprocess, "run", fake_run)
+    assert playwright_common.chrome_version() == "Google Chrome 999.0.0.0"
+    assert playwright_common.chrome_version() == "Google Chrome 999.0.0.0"
+    assert len(calls) == 1

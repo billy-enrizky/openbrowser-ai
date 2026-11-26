@@ -28,7 +28,14 @@ _VERSION_CACHE: dict[str, str] = {}
 
 
 def chrome_version() -> str:
-    """Return the pinned Chrome version once, before any timed observation."""
+    """Return the pinned Chrome version once, before any timed observation.
+
+    A harness preflight can export PLAYWRIGHT_BENCH_BROWSER_VERSION so fresh
+    resource workers never spawn a metadata probe inside the measured tree.
+    """
+    configured = os.environ.get("PLAYWRIGHT_BENCH_BROWSER_VERSION")
+    if configured:
+        return configured
     if CHROME not in _VERSION_CACHE:
         try:
             completed = subprocess.run(
@@ -66,7 +73,7 @@ def write_browser_config(ctx: RunContext) -> Path:
                         "args": ["--use-mock-keychain"],
                         "downloadsPath": str(ctx.downloads),
                     },
-                    "contextOptions": {"viewport": "1280x800"},
+                    "contextOptions": {"viewport": {"width": 1280, "height": 800}},
                 },
                 "outputDir": str(ctx.downloads),
                 "codegen": "none",
