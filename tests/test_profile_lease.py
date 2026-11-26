@@ -83,7 +83,9 @@ def test_record_browser_normalizes_process_identity(tmp_path: Path):
 
 		assert record['pid'] == 123
 		assert record['start_time'] == 456.5
-		assert ProfileLease.read_metadata(tmp_path / 'profile')['browser'] == record
+		metadata = ProfileLease.read_metadata(tmp_path / 'profile')
+		assert metadata is not None
+		assert metadata['browser'] == record
 	finally:
 		lease.release()
 
@@ -461,3 +463,13 @@ def test_pristine_profile_proof_rejects_closing_identity_read_failure(tmp_path: 
 		assert lease.profile_pristine is False
 	finally:
 		lease.release()
+
+
+@pytest.mark.parametrize(
+	('value', 'expected'),
+	[(None, False), ('invalid', False), ('1.5', True), (1.5, True), (2.5, False)],
+)
+def test_owner_metadata_start_time_handles_missing_and_numeric_values(tmp_path: Path, value, expected):
+	lease = ProfileLease(tmp_path / 'profile', instance_id='owner', owner_pid=12345, owner_start_time=1.5)
+	metadata = {'instance_id': 'owner', 'owner_pid': 12345, 'owner_start_time': value}
+	assert lease._metadata_belongs_to_this_lease(metadata) is expected

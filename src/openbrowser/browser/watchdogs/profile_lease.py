@@ -365,8 +365,11 @@ class ProfileLease:
 			raise RuntimeError(f'Unable to determine owner process start time for pid={pid}') from exc
 
 	def _metadata_belongs_to_this_lease(self, metadata: dict[str, Any]) -> bool:
+		raw_start_time = metadata.get('owner_start_time')
+		if raw_start_time is None:
+			return False
 		try:
-			owner_start_time = float(metadata.get('owner_start_time'))
+			owner_start_time = float(raw_start_time)
 		except (TypeError, ValueError):
 			return False
 		return (
