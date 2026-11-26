@@ -114,8 +114,6 @@ def format_ms(value: float) -> str:
 
 
 def format_mib(value: float) -> str:
-    if value >= 100:
-        return f"{value:.0f}"
     return f"{value:.1f}"
 
 
@@ -394,6 +392,18 @@ def warm_resource_rows(
                 }
             )
     return rows
+
+
+def provenance_text(
+    rows: Iterable[Mapping[str, Any]],
+    tasks: Sequence[str],
+    styles: Sequence[ArmStyle],
+) -> str:
+    """Count verified provenance against every required task and arm cell."""
+    required = {(task, style.name) for task in tasks for style in styles}
+    present = {(row.get("task"), row.get("arm")): row for row in rows}
+    verified = sum(1 for key in required if present.get(key, {}).get("provenance_verified") is True)
+    return f"Provenance: {verified}/{len(required)} required cells verified."
 
 
 def has_metric_rows(rows: Iterable[Mapping[str, Any]]) -> bool:
