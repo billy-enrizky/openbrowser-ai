@@ -53,6 +53,7 @@ class PlaywrightCliArm:
         self.timeout = timeout
         self._result = ArmResult(ok=False)
         self._opened = False
+        self._attempted_open = False
         self._config_path: Path | None = None
         self._program_index = 0
 
@@ -85,6 +86,7 @@ class PlaywrightCliArm:
     def _open(self, ctx: RunContext) -> None:
         if self._opened:
             return
+        self._attempted_open = True
         self._run(
             ctx,
             "open",
@@ -185,9 +187,10 @@ class PlaywrightCliArm:
         return self._result
 
     def cleanup(self, ctx: RunContext) -> None:
-        if self._opened:
+        if self._opened or self._attempted_open:
             with contextlib.suppress(Exception):
                 self._run(ctx, "close", timeout=60)
             self._opened = False
+            self._attempted_open = False
         terminate_matching(str(ctx.profile))
         terminate_matching(str(ctx.downloads))

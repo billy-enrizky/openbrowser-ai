@@ -76,9 +76,15 @@ class PlaywrightMcpArm:
         if self._client is not None:
             return self._client
         client = StdioMcpClient(self._server_command(ctx), env=ctx.env, timeout=self.timeout)
-        client.initialize()
-        self._result.process_starts += 1
         self._client = client
+        try:
+            client.initialize()
+        except Exception:
+            self._client = None
+            with contextlib.suppress(Exception):
+                client.close()
+            raise
+        self._result.process_starts += 1
         return client
 
     def _call(self, ctx: RunContext, name: str, arguments: dict, *, timeout: float | None = None) -> str:
