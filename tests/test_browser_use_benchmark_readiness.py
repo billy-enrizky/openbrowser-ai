@@ -505,3 +505,35 @@ def test_initial_readiness_waits_for_document_parse_with_visible_geometry():
     assert len(checks) == 2
     assert clock.sleeps == [0.1]
     assert all("document.readyState==='loading'" in expression for expression in checks)
+
+
+def test_auth_keeps_method_and_stderr_provenance_after_restart(monkeypatch, tmp_path):
+    from benchmarks.interactive.fixtures.server import ACCOUNT_SECRET
+
+    arm = adapter.BrowserUseArm()
+    monkeypatch.setattr(arm, "_chrome", SimpleNamespace(process=None, cdp_url="http://127.0.0.1:1"))
+    monkeypatch.setattr(arm, "_warm_keychain_verified", True)
+    monkeypatch.setattr(arm, "_stop_chrome", lambda: None)
+    monkeypatch.setattr(arm, "_start_chrome", lambda context: None)
+    calls = []
+
+    def script(context, code, timeout):
+        calls.append(code)
+        arm._result.reported.update(
+            adapter_version=adapter.ADAPTER_VERSION,
+            stderr_total_bytes=42 + len(calls),
+            stderr_truncated=False,
+        )
+        return {"secret": ACCOUNT_SECRET}
+
+    monkeypatch.setattr(arm, "_script", script)
+    context = ctx(tmp_path)
+    context.task = "auth"
+    result = arm.run(context, cleanup=False)
+    assert result.ok is True
+    assert len(calls) == 2
+    assert result.reported["adapter_version"] == adapter.ADAPTER_VERSION
+    assert result.reported["stderr_total_bytes"] == 44
+    assert result.reported["stderr_truncated"] is False
+    assert result.reported["secret"] == ACCOUNT_SECRET
+    assert result.reported["phase1_secret"] == ACCOUNT_SECRET

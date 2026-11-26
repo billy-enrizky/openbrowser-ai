@@ -410,6 +410,7 @@ class BrowserUseArm:
                 self._start_chrome(ctx)
                 phase2 = self._script(ctx, _read_account(ctx.base_url + "/account"), 120)
                 self._result.reported = {
+                    **self._result.reported,
                     "secret": phase2.get("secret", ""),
                     "phase1_secret": phase1.get("secret", ""),
                 }
