@@ -336,6 +336,8 @@ class BrowserArm:
         self.namespace = create_namespace(browser_session=self.session, tools=CodeAgentTools())
 
     async def _ensure_started(self) -> None:
+        if self.session is None:
+            raise RuntimeError("start() must complete before browser use")
         if not self._started:
             await self.session.start()
             self._started = True
@@ -347,10 +349,11 @@ class BrowserArm:
 
     async def stop(self) -> None:
         if self.session is not None:
-            with contextlib.suppress(Exception):
-                await self.session.kill()
+            await self.session.kill()
 
     async def scrape(self, **kwargs):
+        if self.namespace is None:
+            raise RuntimeError("start() must complete before scraping")
         kwargs.setdefault("engine", self.engine)
         result = await self.namespace["scrape_page"](**kwargs)
         self.last_engine = result.get("engine_used", "browser")
