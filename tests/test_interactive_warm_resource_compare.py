@@ -13,8 +13,10 @@ from typing import ClassVar
 
 import pytest
 
+from benchmarks.interactive import resource_compare
 from benchmarks.interactive import warm_resource_compare as warm
 from benchmarks.interactive.fixtures.server import REPORT_BYTES
+from benchmarks.interactive.resource_compare import ProcessTreeSampler, cleanup_owned
 
 COMBINED_STATE = {
     "wizard_submissions": [
@@ -427,7 +429,7 @@ def test_foreign_record_path_is_rejected(tmp_path):
 
 
 def test_task_downloads_must_match_warmed_context(tmp_path):
-    ctx = warm.make_context(tmp_path, "a")
+    ctx = warm.make_owned_context(tmp_path / "owned", "a")
     assert warm._task_downloads({"downloads": str(ctx.downloads)}, ctx) == ctx.downloads
     with pytest.raises(ValueError):
         warm._task_downloads({"downloads": str(tmp_path / "other")}, ctx)
@@ -702,10 +704,101 @@ def test_ready_failure_cleans_preallocated_owned_sampler(tmp_path):
     marker, sampler = samplers[0]
     assert marker == str(sessions[0].workdir.resolve())
     assert sessions[0].workdir.name.startswith("warm-")
+    assert len(sessions[0].workdir.name) == len("warm-") + 10
     assert cleanups == [sampler]
     assert terminal["cleanup_verified"] is True
     assert terminal["setup_error"] is not None
     assert terminal["valid"] is False
+
+
+def test_preallocated_marker_cleans_reparented_descendant(tmp_path, monkeypatch):
+    owned = (tmp_path / "warm-a-marker").resolve()
+    owned.mkdir()
+
+    class Descendant:
+        pid = 200
+
+        def __init__(self):
+            self.alive = True
+            self.terminated = False
+            self.killed = False
+
+        def create_time(self):
+            return 2.0
+
+        def is_running(self):
+            return self.alive
+
+        def status(self):
+            return "running" if self.alive else "zombie"
+
+        def children(self, recursive=True):
+            return []
+
+        def memory_info(self):
+            return SimpleNamespace(rss=1024)
+
+        def cpu_times(self):
+            return SimpleNamespace(user=0.0, system=0.0)
+
+        def name(self):
+            return "chrome-headless-shell"
+
+        def cmdline(self):
+            return [f"--user-data-dir={owned}"]
+
+        def terminate(self):
+            self.terminated = True
+            self.alive = False
+
+        def kill(self):
+            self.killed = True
+            self.alive = False
+
+    class ProcessInfo:
+        pid = 200
+        info: ClassVar[dict] = {
+            "pid": 200,
+            "cmdline": [f"--user-data-dir={owned}"],
+            "create_time": 2.0,
+        }
+
+    child = Descendant()
+
+    def factory(pid):
+        if pid == 200:
+            return child
+        raise resource_compare.psutil.NoSuchProcess(pid)
+
+    monkeypatch.setattr(resource_compare.psutil, "process_iter", lambda attrs=None: [ProcessInfo()])
+    sampler = ProcessTreeSampler(
+        100,
+        process_factory=factory,
+        footprint_reader=lambda pid: None,
+        footprint_supported=False,
+        ownership_marker=str(owned),
+    )
+    report = cleanup_owned(sampler, interval=0.01, timeout=0.2)
+    assert report["verified"] is True
+    assert report["initial_leftovers"] == 1
+    assert child.terminated is True
+    assert report["remaining"] == []
+
+
+def test_owned_context_has_no_nested_timestamp(tmp_path):
+    owned = tmp_path / "warm-abcdef1234"
+    ctx = warm.make_owned_context(owned, "playwright-mcp")
+    assert ctx.root == owned.resolve()
+    assert ctx.downloads.parent == ctx.root
+    assert ctx.profile.parent == ctx.root
+    assert ctx.tmp.parent == ctx.root
+    assert sorted(path.name for path in ctx.root.iterdir()) == [
+        "config",
+        "downloads",
+        "home",
+        "profile",
+        "tmp",
+    ]
 
 
 def test_worker_warmup_failure_emits_fatal_and_cleans(tmp_path, monkeypatch):
@@ -720,11 +813,6 @@ def test_worker_warmup_failure_emits_fatal_and_cleans(tmp_path, monkeypatch):
             cleaned.append(True)
 
     monkeypatch.setattr(warm, "make_arm", lambda name: Arm())
-    monkeypatch.setattr(
-        warm,
-        "make_context",
-        lambda workdir, name: SimpleNamespace(root=Path(workdir) / "root", downloads=Path(workdir) / "downloads"),
-    )
     monkeypatch.setattr(warm, "_emit", messages.append)
     assert warm.run_worker("a", tmp_path) == 2
     assert len(messages) == 1
