@@ -77,6 +77,10 @@ def write_browser_config(ctx: RunContext) -> Path:
                 },
                 "outputDir": str(ctx.downloads),
                 "codegen": "none",
+                # Pinned playwright-core reads config.timeouts.settle in
+                # waitForCompletion. The shared config applies to MCP and CLI;
+                # the scripted programs already wait exact readiness.
+                "timeouts": {"settle": 0},
             },
             indent=2,
         )
