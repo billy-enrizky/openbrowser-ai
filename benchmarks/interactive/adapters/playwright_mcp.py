@@ -50,12 +50,13 @@ class PlaywrightMcpArm:
         binary: str | None = None,
         *,
         secrets_file: Path | None = None,
+        browser_version: str | None = None,
         timeout: float = 180.0,
     ) -> None:
         self.binary = str(binary or os.environ.get("PLAYWRIGHT_MCP_BIN") or DEFAULT_MCP_BINARY)
         self.secrets_file = Path(secrets_file) if secrets_file else None
         self.timeout = timeout
-        self.browser_version = chrome_version()
+        self.browser_version = browser_version or chrome_version()
         self._result = ArmResult(ok=False)
         self._client: StdioMcpClient | None = None
 
