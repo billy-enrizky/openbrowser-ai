@@ -453,6 +453,7 @@ class TestWaitForCdpUrl:
 
         mock_response = MagicMock()
         mock_response.status_code = 200
+        mock_response.json.return_value = {"webSocketDebuggerUrl": "ws://localhost:9222/devtools/browser/test"}
 
         with patch("httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
@@ -462,7 +463,7 @@ class TestWaitForCdpUrl:
             MockClient.return_value = mock_client
 
             result = await LocalBrowserWatchdog._wait_for_cdp_url(9222)
-            assert result == "http://localhost:9222/"
+            assert result == "ws://localhost:9222/devtools/browser/test"
 
 
 @pytest.mark.asyncio

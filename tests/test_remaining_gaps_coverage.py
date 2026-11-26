@@ -1132,6 +1132,7 @@ class TestLbwWaitForCdpUrlLine326_329:
 
         mock_resp_200 = MagicMock()
         mock_resp_200.status_code = 200
+        mock_resp_200.json.return_value = {"webSocketDebuggerUrl": "ws://localhost:9222/devtools/browser/test"}
 
         async def mock_get(url):
             nonlocal call_count

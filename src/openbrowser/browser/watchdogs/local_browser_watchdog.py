@@ -631,7 +631,7 @@ class LocalBrowserWatchdog(BaseWatchdog):
 
 	@staticmethod
 	async def _wait_for_cdp_url(port: int, timeout: float = 30) -> str:
-		"""Wait for the browser to start and return the CDP URL."""
+		"""Wait for local readiness and return the resolved browser WebSocket URL."""
 		import httpx
 
 		start_time = asyncio.get_event_loop().time()
@@ -641,14 +641,17 @@ class LocalBrowserWatchdog(BaseWatchdog):
 				try:
 					resp = await client.get(f'http://localhost:{port}/json/version')
 					if resp.status_code == 200:
-						# Chrome is ready
-						return f'http://localhost:{port}/'
-					else:
-						# Chrome is starting up and returning 502/500 errors
-						await asyncio.sleep(0.02)
+						version = resp.json()
+						endpoint = version.get('webSocketDebuggerUrl') if isinstance(version, dict) else None
+						if isinstance(endpoint, str) and endpoint.startswith(('ws://', 'wss://')):
+							parsed = urlsplit(endpoint)
+							if parsed.hostname and '#' not in endpoint and not any(char.isspace() for char in endpoint):
+								_ = parsed.port  # Validate an explicitly supplied port.
+								return endpoint
 				except Exception:
-					# Connection error or request timeout - Chrome might not be ready yet
-					await asyncio.sleep(0.02)
+					# Local discovery can be incomplete while Chrome starts.
+					pass
+				await asyncio.sleep(0.02)
 
 		raise TimeoutError(f'Browser did not start within {timeout} seconds')
 
