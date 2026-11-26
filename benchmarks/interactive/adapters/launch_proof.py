@@ -46,7 +46,7 @@ class ProcessIdentity:
 class LaunchProof:
     server: ProcessIdentity
     browser: ProcessIdentity
-    profile_marker: str
+    profile_marker: str  # canonical physical path
     context_id: str | None
     keychain_verified: bool
 
@@ -58,6 +58,19 @@ def read_pid_file(path: Path) -> int | None:
     except (OSError, ValueError):
         return None
     return value if value > 0 else None
+
+
+def canonical_profile_marker(profile_marker: str) -> str | None:
+    """Return the physical profile path or None when the marker is invalid."""
+    if not isinstance(profile_marker, str) or len(profile_marker) < 8:
+        return None
+    path = Path(profile_marker).expanduser()
+    if not path.is_absolute():
+        return None
+    try:
+        return str(path.resolve(strict=False))
+    except (OSError, RuntimeError):
+        return None
 
 
 def identity_status(
@@ -97,7 +110,8 @@ def main_browser_identity(
     process_factory: ProcessFactory | None = None,
 ) -> ProcessIdentity | None:
     """Return the unique main browser identity for an owned profile marker."""
-    if not isinstance(profile_marker, str) or len(profile_marker) < 8 or not Path(profile_marker).is_absolute():
+    marker = canonical_profile_marker(profile_marker)
+    if marker is None:
         return None
     table = command_table or _process_table
 
@@ -114,7 +128,14 @@ def main_browser_identity(
                 continue
             if any(token.startswith("--type=") for token in tokens):
                 continue
-            if f"--user-data-dir={profile_marker}" not in tokens:
+            user_data_dir = None
+            for token in tokens:
+                if token.startswith("--user-data-dir="):
+                    user_data_dir = token.split("=", 1)[1]
+                    break
+            if user_data_dir is None:
+                continue
+            if canonical_profile_marker(user_data_dir) != marker:
                 continue
             if "--use-mock-keychain" not in tokens:
                 continue
@@ -154,11 +175,14 @@ def capture_launch_proof(
         return None
     if context_id is not None and not isinstance(context_id, str):
         return None
+    marker = canonical_profile_marker(profile_marker)
+    if marker is None:
+        return None
     server, server_reason = identity_status(server_pid, process_factory)
     if server_reason != "ok" or server is None:
         return None
     browser = main_browser_identity(
-        profile_marker,
+        marker,
         command_table=command_table,
         process_factory=process_factory,
     )
@@ -173,7 +197,7 @@ def capture_launch_proof(
     return LaunchProof(
         server=server,
         browser=browser,
-        profile_marker=profile_marker,
+        profile_marker=marker,
         context_id=context_id,
         keychain_verified=True,
     )
@@ -190,7 +214,8 @@ def proof_status(
     """Return a closed proof status for the current task fences."""
     if not isinstance(proof, LaunchProof) or proof.keychain_verified is not True:
         return "keychain_unproven"
-    if proof.profile_marker != profile_marker:
+    current_marker = canonical_profile_marker(profile_marker)
+    if current_marker is None or proof.profile_marker != current_marker:
         return "profile_changed"
     if proof.context_id != context_id:
         return "context_changed"

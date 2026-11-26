@@ -200,6 +200,7 @@ class OpenBrowserMcpArm:
             "server": "started",
             "context_id": context_id,
             "keychain_verified": verified,
+            "launch_proof_captured": self._launch_proof is not None,
         }, elapsed_ms
 
     def _parse_last_json(self) -> dict:

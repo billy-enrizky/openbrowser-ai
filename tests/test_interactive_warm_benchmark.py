@@ -130,7 +130,10 @@ def test_openbrowser_warmup_parses_json():
         result, elapsed_ms = arm.warmup(_ctx())
 
     assert result["keychain_verified"] is True
-    assert {key: value for key, value in result.items() if key != "keychain_verified"} == payload
+    assert result["launch_proof_captured"] is False
+    assert {
+        key: value for key, value in result.items() if key not in {"keychain_verified", "launch_proof_captured"}
+    } == payload
     assert elapsed_ms >= 0
 
 

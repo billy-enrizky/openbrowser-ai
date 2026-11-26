@@ -113,10 +113,12 @@ def sequence_table(*tables):
 
 def sample_proof(*, context_id: str | None = None):
     module = proof_module()
+    marker = module.canonical_profile_marker(MARKER)
+    assert marker is not None
     return module.LaunchProof(
         server=module.ProcessIdentity(10, 1.0),
         browser=module.ProcessIdentity(20, 2.0),
-        profile_marker=MARKER,
+        profile_marker=marker,
         context_id=context_id,
         keychain_verified=True,
     )
@@ -141,9 +143,9 @@ def test_capture_requires_positive_keychain_and_one_main_browser():
     )
 
     assert proof is not None
+    assert proof.profile_marker == module.canonical_profile_marker(MARKER)
     assert proof.server == module.ProcessIdentity(10, 1.0)
     assert proof.browser == module.ProcessIdentity(20, 2.0)
-    assert proof.profile_marker == MARKER
     assert proof.keychain_verified is True
     assert (
         module.capture_launch_proof(
@@ -432,6 +434,7 @@ def test_cli_warmup_captures_positive_proof(monkeypatch):
     payload, _ = arm.warmup(ctx)
 
     assert payload["keychain_verified"] is True
+    assert payload["launch_proof_captured"] is True
     assert arm._launch_proof == proof
 
 
@@ -534,6 +537,7 @@ def test_mcp_warmup_captures_positive_proof(monkeypatch):
 
     payload, _ = arm.warmup(ctx)
 
+    assert payload["launch_proof_captured"] is True
     assert payload["keychain_verified"] is True
     assert payload["context_id"] == "ctx"
     assert arm._launch_proof == proof
@@ -706,3 +710,80 @@ def test_fake_guard_blocks_host_process_lookup():
         psutil.Process(1)
     with pytest.raises(AssertionError, match="native I/O"):
         proof_module()._process_table()
+
+
+def test_canonical_profile_marker_resolves_symlink_alias(tmp_path):
+    module = proof_module()
+    assert module.canonical_profile_marker("relative") is None
+    real = tmp_path / "real"
+    real.mkdir()
+    alias = tmp_path / "alias"
+    try:
+        alias.symlink_to(real, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks unavailable")
+    marker = str(alias)
+    canonical = module.canonical_profile_marker(marker)
+    assert canonical == str(real.resolve())
+    rows = [(20, f"Google Chrome --user-data-dir={real} --use-mock-keychain")]
+
+    proof = module.capture_launch_proof(
+        marker,
+        10,
+        keychain_verified=True,
+        command_table=command_table(rows),
+        process_factory=process_factory({10: 1.0, 20: 2.0}),
+    )
+
+    assert proof is not None
+    assert proof.profile_marker == canonical
+
+
+def test_main_browser_identity_rejects_path_prefix_not_exact():
+    module = proof_module()
+    marker = "/tmp/launch-proof-test/config/profiles/daemon"
+    rows = [(20, f"Google Chrome --user-data-dir={marker}-extra --use-mock-keychain")]
+
+    assert (
+        module.main_browser_identity(
+            marker,
+            command_table=command_table(rows),
+            process_factory=process_factory({20: 2.0}),
+        )
+        is None
+    )
+
+
+def test_proof_status_invalidates_on_symlink_retarget(tmp_path):
+    module = proof_module()
+    real_a = tmp_path / "a"
+    real_b = tmp_path / "b"
+    real_a.mkdir()
+    real_b.mkdir()
+    alias = tmp_path / "alias"
+    try:
+        alias.symlink_to(real_a, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks unavailable")
+    marker = str(alias)
+    rows = [(20, f"Google Chrome --user-data-dir={real_a} --use-mock-keychain")]
+    proof = module.capture_launch_proof(
+        marker,
+        10,
+        keychain_verified=True,
+        command_table=command_table(rows),
+        process_factory=process_factory({10: 1.0, 20: 2.0}),
+    )
+    assert proof is not None
+    alias.unlink()
+    alias.symlink_to(real_b, target_is_directory=True)
+
+    status = module.proof_status(
+        proof,
+        profile_marker=marker,
+        server_pid=10,
+        context_id=None,
+        process_factory=process_factory({10: 1.0, 20: 2.0}),
+    )
+
+    assert status == "profile_changed"

@@ -526,6 +526,7 @@ class OpenBrowserArm:
             context_id=None,
             keychain_verified=verified,
         )
+        payload["launch_proof_captured"] = self._launch_proof is not None
         return payload, elapsed_ms
 
     def _reset_browser(self, ctx: RunContext) -> None:
