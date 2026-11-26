@@ -4,26 +4,76 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import subprocess
 import time
 from pathlib import Path
 
 from ..fixtures.server import BENCH_PASSWORD, REPORT_SHA256, REPORT_SIZE
 from .base import RunContext, verify_mock_keychain
+from .playwright_tasks import SECRET_PASSWORD
 
 MCP_VERSION = "0.0.86"
 CLI_VERSION = "0.1.25"
 PLAYWRIGHT_VERSION = "1.66.0-alpha-2026-11-18"
+CHROME = os.environ.get(
+    "CHROME_BIN",
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+)
 CACHE_ROOT = Path.home() / ".cache" / "openbrowser-interactive-bench" / f"playwright-native-{MCP_VERSION}-{CLI_VERSION}"
 DEFAULT_MCP_BINARY = CACHE_ROOT / "node_modules" / ".bin" / "playwright-mcp"
 DEFAULT_CLI_BINARY = CACHE_ROOT / "node_modules" / ".bin" / "playwright-cli"
 SECRETS_ENV = "PLAYWRIGHT_MCP_SECRETS_FILE"
+_VERSION_CACHE: dict[str, str] = {}
+
+
+def chrome_version() -> str:
+    """Return the pinned Chrome version once, before any timed observation."""
+    if CHROME not in _VERSION_CACHE:
+        try:
+            completed = subprocess.run(
+                [CHROME, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            value = (completed.stdout or completed.stderr).strip()
+        except (OSError, subprocess.TimeoutExpired):
+            value = ""
+        _VERSION_CACHE[CHROME] = value
+    return _VERSION_CACHE[CHROME]
 
 
 def write_secrets(ctx: RunContext) -> Path:
-    """Write the native secrets file for the run, readable only by the owner."""
+    """Write the native secrets file with the exact lookup key."""
     path = ctx.config / "playwright-secrets.env"
-    path.write_text(f"BENCH_PASSWORD={BENCH_PASSWORD}\n")
+    path.write_text(f"{SECRET_PASSWORD}={BENCH_PASSWORD}\n")
     path.chmod(0o600)
+    return path
+
+
+def write_browser_config(ctx: RunContext) -> Path:
+    """Write one native config shared by the MCP and CLI surfaces."""
+    path = ctx.config / "playwright-config.json"
+    path.write_text(
+        json.dumps(
+            {
+                "browser": {
+                    "launchOptions": {
+                        "executablePath": CHROME,
+                        "headless": True,
+                        "args": ["--use-mock-keychain"],
+                        "downloadsPath": str(ctx.downloads),
+                    },
+                    "contextOptions": {"viewport": "1280x800"},
+                },
+                "outputDir": str(ctx.downloads),
+                "codegen": "none",
+            },
+            indent=2,
+        )
+    )
     return path
 
 

@@ -11,7 +11,7 @@ from typing import ClassVar
 
 import pytest
 
-from benchmarks.interactive.adapters import playwright_cli, playwright_mcp
+from benchmarks.interactive.adapters import playwright_cli, playwright_common, playwright_mcp
 from benchmarks.interactive.adapters.base import RunContext
 from benchmarks.interactive.adapters.playwright_common import (
     SECRETS_ENV,
@@ -93,7 +93,7 @@ def test_last_json_and_missing_result():
 def test_secrets_file_permissions(tmp_path):
     ctx = make_context(tmp_path)
     path = write_secrets(ctx)
-    assert f"BENCH_PASSWORD={BENCH_PASSWORD}" in path.read_text()
+    assert f"SECRET_BENCH_PASSWORD={BENCH_PASSWORD}" in path.read_text()
     assert (path.stat().st_mode & 0o777) == 0o600
 
 
@@ -159,6 +159,15 @@ def test_mcp_server_command_and_execute_program(tmp_path, monkeypatch):
     assert "--secrets" in client.command
     assert client.command[client.command.index("--codegen") + 1] == "none"
     assert client.command[client.command.index("--snapshot-mode") + 1] == "none"
+    assert client.command[client.command.index("--viewport-size") + 1] == "1280x800"
+    config = json.loads((ctx.config / "playwright-config.json").read_text())
+    assert config["browser"]["launchOptions"]["executablePath"] == playwright_common.CHROME
+    assert config["browser"]["launchOptions"]["args"] == ["--use-mock-keychain"]
+    assert config["browser"]["launchOptions"]["headless"] is True
+    assert config["browser"]["launchOptions"]["downloadsPath"] == str(ctx.downloads)
+    assert config["browser"]["contextOptions"]["viewport"] == "1280x800"
+    assert config["outputDir"] == str(ctx.downloads)
+    assert config["codegen"] == "none"
     arm.cleanup(ctx)
     assert client.closed is True
 
@@ -190,7 +199,7 @@ def test_mcp_warmup_payload(tmp_path, monkeypatch):
     monkeypatch.setattr(playwright_mcp, "StdioMcpClient", FakeMcpClient)
     arm = playwright_mcp.PlaywrightMcpArm(binary="/bin/playwright-mcp")
     payload, elapsed = arm.warmup(ctx)
-    assert payload["browser_version"] == "TestUA"
+    assert payload["user_agent"] == "TestUA"
     assert payload["server"] == "playwright-mcp"
     assert elapsed >= 0
 
@@ -235,9 +244,12 @@ def test_cli_commands_and_execute_program(tmp_path, monkeypatch):
     assert code_commands and "--filename" in code_commands[0]
     assert code_commands[0][-1] == "--raw"
     assert FakeProcess.envs[0][SECRETS_ENV].endswith("playwright-secrets.env")
-    config = json.loads((ctx.config / "playwright-cli.json").read_text())
+    config = json.loads((ctx.config / "playwright-config.json").read_text())
     assert config["outputDir"] == str(ctx.downloads)
     assert config["codegen"] == "none"
+    assert config["browser"]["launchOptions"]["executablePath"] == playwright_common.CHROME
+    assert config["browser"]["launchOptions"]["args"] == ["--use-mock-keychain"]
+    assert config["browser"]["contextOptions"]["viewport"] == "1280x800"
 
 
 def test_cli_auth_uses_secret_fill_and_restart(tmp_path, monkeypatch):
@@ -334,3 +346,70 @@ def test_cli_cleanup_closes_after_partial_open_and_is_idempotent(tmp_path, monke
     arm.cleanup(ctx)
     closes = [command for command in FakeProcess.commands if len(command) > 3 and command[3] == "close"]
     assert len(closes) == 1
+
+
+def test_modal_program_waits_for_hidden_state():
+    code = task_program("modal", "http://x", None)
+    assert "state: 'hidden'" in code
+    assert "#modal[hidden]" not in code
+
+
+def test_arms_expose_pinned_browser_version(monkeypatch):
+    monkeypatch.setattr(playwright_mcp, "chrome_version", lambda: "TestChrome/1.0")
+    monkeypatch.setattr(playwright_cli, "chrome_version", lambda: "TestChrome/1.0")
+    mcp = playwright_mcp.PlaywrightMcpArm(binary="/bin/playwright-mcp")
+    cli = playwright_cli.PlaywrightCliArm(binary="/bin/playwright-cli")
+    assert mcp.browser_version == "TestChrome/1.0"
+    assert cli.browser_version == "TestChrome/1.0"
+
+
+def test_mcp_run_sets_browser_version(tmp_path, monkeypatch):
+    ctx = make_context(tmp_path)
+    monkeypatch.setattr(playwright_mcp, "chrome_version", lambda: "TestChrome/1.0")
+    monkeypatch.setattr(playwright_mcp, "StdioMcpClient", FakeMcpClient)
+    monkeypatch.setattr(playwright_mcp, "keychain", lambda ctx: True)
+    FakeMcpClient.instances.clear()
+    arm = playwright_mcp.PlaywrightMcpArm(binary="/bin/playwright-mcp")
+    result = arm.run(ctx, cleanup=False)
+    assert result.browser_version == "TestChrome/1.0"
+
+
+def test_mcp_archives_stderr_before_cleanup_and_fails_leak(tmp_path, monkeypatch):
+    ctx = make_context(tmp_path)
+
+    class StderrLeakClient(FakeMcpClient):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.stderr_lines.append(f"server logged {BENCH_PASSWORD}")
+
+        def call_tool(self, name, arguments, *, timeout=None):
+            if name == "browser_run_code_unsafe":
+                return {"content": [{"type": "text", "text": '{"quote": "Q-1"}'}]}
+            return {"content": [{"type": "text", "text": ""}]}
+
+    monkeypatch.setattr(playwright_mcp, "StdioMcpClient", StderrLeakClient)
+    monkeypatch.setattr(playwright_mcp, "keychain", lambda ctx: True)
+    arm = playwright_mcp.PlaywrightMcpArm(binary="/bin/playwright-mcp")
+    result = arm.run(ctx, cleanup=True)
+    assert BENCH_PASSWORD in result.stderr
+    assert result.ok is False
+    assert "leaked" in result.error
+
+
+def test_mcp_initialize_failure_archives_stderr(tmp_path, monkeypatch):
+    ctx = make_context(tmp_path)
+
+    class FailingInitClient(FakeMcpClient):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.stderr_lines.append("startup failure trace")
+
+        def initialize(self):
+            raise RuntimeError("initialize failed")
+
+    monkeypatch.setattr(playwright_mcp, "StdioMcpClient", FailingInitClient)
+    FailingInitClient.instances.clear()
+    arm = playwright_mcp.PlaywrightMcpArm(binary="/bin/playwright-mcp")
+    with pytest.raises(RuntimeError):
+        arm._start(ctx)
+    assert "startup failure trace" in arm._result.stderr

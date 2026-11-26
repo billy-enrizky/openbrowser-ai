@@ -2,13 +2,14 @@
 
 The arm drives the official ``@playwright/cli`` session. The primary scripted
 path is one ``run-code --filename`` program per task. Downloads use the native
-automatic save with ``outputDir`` set to the run directory.
+automatic save with the run output directory. Browser launch is pinned to the
+benchmark Chrome with an explicit mock keychain, a 1280x800 viewport, and the
+same native config the MCP surface uses.
 """
 
 from __future__ import annotations
 
 import contextlib
-import json
 import os
 import time
 from pathlib import Path
@@ -20,9 +21,11 @@ from .playwright_common import (
     PLAYWRIGHT_VERSION,
     SECRETS_ENV,
     assert_no_secret,
+    chrome_version,
     keychain,
     last_json,
     wait_for_download,
+    write_browser_config,
     write_secrets,
 )
 from .playwright_tasks import SECRET_PASSWORD, account_program, login_program, task_program
@@ -51,6 +54,7 @@ class PlaywrightCliArm:
         self.binary = str(binary or os.environ.get("PLAYWRIGHT_CLI_BIN") or DEFAULT_CLI_BINARY)
         self.secrets_file = Path(secrets_file) if secrets_file else None
         self.timeout = timeout
+        self.browser_version = chrome_version()
         self._result = ArmResult(ok=False)
         self._opened = False
         self._attempted_open = False
@@ -60,9 +64,7 @@ class PlaywrightCliArm:
     # -- native lifecycle --------------------------------------------------
     def _config(self, ctx: RunContext) -> Path:
         if self._config_path is None:
-            path = ctx.config / "playwright-cli.json"
-            path.write_text(json.dumps({"outputDir": str(ctx.downloads), "codegen": "none"}))
-            self._config_path = path
+            self._config_path = write_browser_config(ctx)
         return self._config_path
 
     def _run(self, ctx: RunContext, *args: str, timeout: float | None = None) -> str:
@@ -115,10 +117,11 @@ class PlaywrightCliArm:
         )
 
     def _restart(self, ctx: RunContext) -> None:
-        if self._opened:
+        if self._opened or self._attempted_open:
             with contextlib.suppress(Exception):
                 self._run(ctx, "close", timeout=60)
             self._opened = False
+            self._attempted_open = False
         self._open(ctx)
 
     # -- benchmark surface -------------------------------------------------
@@ -127,7 +130,15 @@ class PlaywrightCliArm:
         self._result = ArmResult(ok=False)
         text = self._code(ctx, READINESS_PROGRAM)
         payload = last_json(text)
-        payload.update({"server": "playwright-cli", "package": CLI_VERSION, "playwright": PLAYWRIGHT_VERSION})
+        payload["user_agent"] = payload.pop("browser_version", "")
+        payload.update(
+            {
+                "server": "playwright-cli",
+                "package": CLI_VERSION,
+                "playwright": PLAYWRIGHT_VERSION,
+                "browser_version": self.browser_version,
+            }
+        )
         return payload, (time.monotonic() - started) * 1000.0
 
     def execute_program(self, ctx: RunContext, code: str, *, timeout: float | None = None) -> ArmResult:
@@ -138,6 +149,7 @@ class PlaywrightCliArm:
             text = self._code(ctx, code, timeout=timeout)
             result.stdout = text
             result.reported = last_json(text)
+            result.browser_version = self.browser_version
             result.ok = True
         except Exception as exc:
             result.error = str(exc)
@@ -173,10 +185,10 @@ class PlaywrightCliArm:
                     self._result.reported = {"download": path.name}
                 else:
                     self._result.reported = last_json(self._result.stdout)
+            self._result.browser_version = self.browser_version
             self._result.keychain_verified = keychain(ctx)
             if self._result.keychain_verified is False:
                 raise RuntimeError("Playwright Chrome launched without --use-mock-keychain")
-            assert_no_secret(self._result.stdout, self._result.stderr)
             self._result.ok = True
         except Exception as exc:
             self._result.ok = False
@@ -184,6 +196,11 @@ class PlaywrightCliArm:
         finally:
             if cleanup:
                 self.cleanup(ctx)
+        try:
+            assert_no_secret(self._result.stdout, self._result.stderr)
+        except RuntimeError as exc:
+            self._result.ok = False
+            self._result.error = str(exc)
         return self._result
 
     def cleanup(self, ctx: RunContext) -> None:
