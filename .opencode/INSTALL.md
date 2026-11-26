@@ -80,6 +80,17 @@ cmd /c mklink /J "$env:USERPROFILE\.config\opencode\skills\openbrowser" "$env:US
 
 ## 4. Verify
 
+Verify the CLI entries:
+
+```bash
+openbrowser-ai --version
+openbrowser-ai-py --version
+```
+
+The two commands must report the package version. If `openbrowser-ai-py --version` fails, reinstall OpenBrowser.
+
+Verify the plugin and skills paths:
+
 ```bash
 ls -l ~/.config/opencode/plugins/openbrowser.js
 ls -l ~/.config/opencode/skills/openbrowser
@@ -106,7 +117,7 @@ Add this entry to `opencode.json` in your project:
 
 If OpenCode cannot find `openbrowser-ai`, set `command` to `["uvx", "openbrowser-ai", "--mcp"]`.
 
-The default OpenBrowser stdio transport is a lean JSON-RPC loop. It answers discovery and the tool catalog before it imports the MCP SDK. Set `OPENBROWSER_MCP_TRANSPORT=sdk` in the server environment to use the MCP SDK 2.3 escape hatch. Invalid values exit with code 2. Modern `2026-07-28` clients see seven tools: `create_context`, `execute_code`, `get_status`, `reset_browser`, `close_context`, `web_search`, and `scrape_web`. The legacy handshakes `2024-11-05`, `2025-03-26`, `2025-06-18`, and `2025-11-25` see four tools: `execute_code`, `get_status`, `reset_browser`, and `web_search`. Call `create_context` first, pass its returned `context_id` to stateful tools, and call `close_context` when finished. `scrape_web` is stateless and fetches one HTTP(S) page in OpenBrowser no-browser mode: it starts no Chrome, Blink, or V8 process and stays on the HTTP path. JavaScript, screenshots, and browser cookies are unavailable on this path. The tool names in this section are from the current source branch. The current source server also accepts `search_web` as a call alias. The published `0.1.60` package advertises and accepts `search_web`; the current source server uses `web_search`. Update the installed server or run the source server with `uvx --from git+https://github.com/billy-enrizky/openbrowser-ai.git@main openbrowser-ai --mcp` to use `web_search`.
+The default OpenBrowser stdio transport is a lean JSON-RPC loop. It answers discovery and the tool catalog before it imports the MCP SDK. MCP runs through the Python CLI. On a native wheel, `openbrowser-ai --mcp` delegates to `openbrowser-ai-py --mcp`. Set `OPENBROWSER_MCP_TRANSPORT=sdk` in the server environment to use the MCP SDK 2.3 escape hatch. Invalid values exit with code 2. Modern `2026-07-28` clients see seven tools: `create_context`, `execute_code`, `get_status`, `reset_browser`, `close_context`, `web_search`, and `scrape_web`. The legacy handshakes `2024-11-05`, `2025-03-26`, `2025-06-18`, and `2025-11-25` see four tools: `execute_code`, `get_status`, `reset_browser`, and `web_search`. Call `create_context` first, pass its returned `context_id` to stateful tools, and call `close_context` when finished. `scrape_web` is stateless and fetches one HTTP(S) page in OpenBrowser no-browser mode: it starts no Chrome, Blink, or V8 process and stays on the HTTP path. JavaScript, screenshots, and browser cookies are unavailable on this path.
 
 ## 6. Available Skills
 
@@ -128,6 +139,8 @@ uv tool install openbrowser-ai
 openbrowser-ai install
 ```
 
+`uv tool install` selects a platform wheel on supported macOS and Linux platforms. That wheel installs a native `openbrowser-ai` launcher and the Python `openbrowser-ai-py` CLI. Native wheels cover macOS arm64 11.0+, macOS x86_64 10.13+, Linux x86_64, and Linux aarch64. The Linux wheels contain static musl binaries and use the manylinux_2_17 tag. Windows uses the pure Python wheel. A source checkout, a `uv sync` environment, an editable install, and a git URL install use the Python CLI by default. To build a native wheel from source, set `OPENBROWSER_BUILD_NATIVE=1`, select a supported target, and use the Rust toolchain. Editable native builds fail. See [Native CLI frontend](https://docs.openbrowser.me/customize/integrations/native-cli) for the public reference.
+
 ## 8. Usage
 
 Skills are discovered automatically. Load a specific skill:
@@ -144,7 +157,11 @@ openbrowser-ai -c "await navigate('https://example.com')"
 openbrowser-ai -c "print(await evaluate('document.title'))"
 ```
 
-A warm `-c` call uses a standard-library thin client, so it does not import the full CLI or agent stack. A cold call falls back to the full client and starts the daemon.
+On a native wheel, an exact `openbrowser-ai -c CODE` call uses the native launcher to send one JSON request to the daemon. On a pure Python install, the Python thin client sends the same request. Both paths keep variables in the daemon. A cold call starts the daemon and browser.
+
+Every other command form uses `openbrowser-ai-py`. Examples include `--mcp`, `--version`, `--help`, scrape, web-search, prompt runs, daemon commands, `-c -`, and options outside the exact `-c CODE` form. Keep `openbrowser-ai-py` installed. If the Python CLI is missing, delegated commands fail with a reinstall message.
+
+The native launcher accepts a JSON response frame up to 8 MiB (8,388,608 bytes). The limit includes the JSON envelope. The limit excludes the terminating newline. A larger frame exits with code 1 and `daemon_response_too_large`. The code may have run. Inspect the page before you retry. Run the same code with `openbrowser-ai-py -c CODE` for the Python CLI. The Python CLI uses the same daemon and variables. `OPENBROWSER_MAX_OUTPUT` still applies.
 
 For static pages, use OpenBrowser no-browser mode:
 
