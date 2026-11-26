@@ -23,9 +23,12 @@ icon: "scale-balanced"
   - [5.3. Render asset policy](#53-render-asset-policy)
   - [5.4. Lightpanda no-render latency](#54-lightpanda-no-render-latency)
   - [5.5. Discovery: map and crawl](#55-discovery-map-and-crawl)
-- [6. How to choose a surface](#6-how-to-choose-a-surface)
-- [7. What these lanes show](#7-what-these-lanes-show)
-- [8. Scope and open measurements](#8-scope-and-open-measurements)
+- [6. Why OpenBrowser is faster and more efficient](#6-why-openbrowser-is-faster-and-more-efficient)
+  - [6.1. What each area changes](#61-what-each-area-changes)
+  - [6.2. Scope](#62-scope)
+- [7. How to choose a surface](#7-how-to-choose-a-surface)
+- [8. What these lanes show](#8-what-these-lanes-show)
+- [9. Scope and open measurements](#9-scope-and-open-measurements)
 
 {/* toc:end */}
 
@@ -84,7 +87,7 @@ Task time (ms) ↓ **Lower is better**.
 | `tabs` | 593 | 683 | 2220 | 1393 | 797 |
 | `auth` | 1305 | 1604 | 3703 | 2506 | 2476 |
 
-Both OpenBrowser arms have the lowest p50 on all five cold tasks against all three competitors. OpenBrowser MCP and OpenBrowser CLI each won every pair, 5 of 5, on every task against every competitor. CLI `tabs` is 683 ms against browser-use at 797 ms.
+Both OpenBrowser arms have the lowest p50 on all five cold tasks against all three other frameworks. OpenBrowser MCP and OpenBrowser CLI each won every pair, 5 of 5, on every task against every other framework. CLI `tabs` is 683 ms against browser-use at 797 ms.
 
 Cold latency is time to result. The timer measures task completion and any in-task restart. Final adapter cleanup runs once after the timed interval for every arm. The task timer excludes that cleanup. An earlier harness version ran cleanup inside the timed interval and then again after it, so every arm paid that teardown twice. The current lane removes the duplicate. This is a harness correction. The product code is unchanged.
 
@@ -179,7 +182,7 @@ Observed process-tree CPU (seconds) ↓ **Lower is better**.
 | `tabs` | 0.79 | 0.95 | 2.08 | 1.74 | 1.45 |
 | `auth` | 1.11 | 1.71 | 3.04 | 2.94 | 2.84 |
 
-Both OpenBrowser arms have the lowest median on every task for all three metrics. Across 150 planned OpenBrowser-to-competitor pairs per metric, both arms won all 150 eligible footprint pairs, all 150 RSS pairs, and all 150 CPU pairs.
+Both OpenBrowser arms have the lowest median on every task for all three metrics. Across 150 planned OpenBrowser-to-other-framework pairs per metric, both arms won all 150 eligible footprint pairs, all 150 RSS pairs, and all 150 CPU pairs.
 
 Limits: process-tree RSS can count shared pages more than once. Physical footprint uses the macOS rusage-info ABI and is null on hosts that do not support it. CPU is a sampled lower bound and includes native driver subprocesses. The arms use different scripts and adapters. Read this as a resource comparison of the configured surfaces.
 
@@ -333,7 +336,29 @@ openbrowser-ai crawl https://docs.example.com --max-pages 20 --max-depth 2
 
 Limits: both use the OpenBrowser no-browser path. A JavaScript shell page is reported as failed or skipped. This section reports pass or fail for each mode and gives no timing result.
 
-## 6. How to choose a surface
+## 6. Why OpenBrowser is faster and more efficient
+
+The measured paths use four areas of work. Each area maps to a lane on this page.
+
+| Area | Mechanisms in the measured paths | Measured lane |
+| --- | --- | --- |
+| Request grouping and state reuse | Group several browser actions into one Python request, load optional libraries on first use, and use a small warm CLI client over standard-library IPC | Warm and cold interactive lanes |
+| Lean MCP entry | Serve `tools/list` from a generated catalog, keep stateful application setup lazy, and use a direct path for stateless tools | Cold and warm MCP lanes |
+| Strict HTTP | Fetch and parse static pages in a Python process, with a pooled batch client and bounded concurrency for CLI and namespace batches | Firecrawl Local batch and no-browser memory lane |
+| Targeted browser work | Use selector and CDP helpers for known targets, and block selected asset types in lightweight and no-render policies | Warm and cold interactive lanes and render asset lane |
+
+### 6.1. What each area changes
+
+1. **Request grouping and state reuse.** The interactive MCP and CLI arms group several browser actions into one Python request for most tasks. The `auth` task uses a login program and an account program around the browser restart. A request can hold several actions and persistent variables. The namespace loads optional libraries on first use. Warm CLI calls use a small standard-library client over IPC, and cold CLI startup loads the full client.
+2. **Lean MCP entry.** The lean stdio transport reads generated definitions for discovery. Stateful application setup stays lazy, and stateless tools use a direct path. The SDK escape hatch uses a different import path. Stateful task startup still includes browser and application work.
+3. **Strict HTTP.** Explicit `--no-browser` and `engine="http"` fetch and parse static pages in a Python process. CLI and namespace batches reuse one pooled HTTP client with bounded concurrency. The stateless MCP `scrape_web` call creates a one-shot client per call.
+4. **Targeted browser work.** Task scripts use selector and CDP helpers for known targets, which avoids a full DOM scan for those operations. Lightweight and no-render policies block selected asset types. The browser still loads Chromium, Blink, and V8. Indexed actions remain the general path for changing pages, and download and new-tab helpers keep their browser interaction.
+
+### 6.2. Scope
+
+Other frameworks also reuse sessions and batch work. These lanes measure the configured combination. The page assigns no causal share to one mechanism without an ablation. The Firecrawl Local batch uses a 10 ms job-poll workflow and returns markdown pages; OpenBrowser returns selected row dictionaries. The no-browser memory lane measures OpenBrowser on one local fixture. A matched single-call Firecrawl Local memory lane remains open, as do model-driven Agent and CodeAgent lanes and matched Lightpanda cold and warm lanes.
+
+## 7. How to choose a surface
 
 | Need | Use | Why |
 | --- | --- | --- |
@@ -346,21 +371,21 @@ Limits: both use the OpenBrowser no-browser path. A JavaScript shell page is rep
 | One-off interactive command | `openbrowser-ai -c` | No server to manage. |
 | Visual work | `--render-mode full` | Screenshots and real paint. |
 
-## 7. What these lanes show
+## 8. What these lanes show
 
 Task time and memory: **Lower is better** ↓. Pair counts: **Higher is better** ↑.
 
 | Question | Result | Limit |
 | --- | --- | --- |
-| Cold interactive p50 | Both OpenBrowser arms are lowest on all five tasks against all three competitors. Both won 5 of 5 pairs on every task against every competitor. | Cleanup runs once after the timed interval for every arm. The timer excludes harness teardown. |
-| Warm interactive p50 | Both OpenBrowser arms are lowest on all four tasks against all three competitors. Both won 5 of 5 pairs on every task against every competitor. | `auth` is cold only because it restarts the browser. |
+| Cold interactive p50 | Both OpenBrowser arms are lowest on all five tasks against all three other frameworks. Both won 5 of 5 pairs on every task against every other framework. | Cleanup runs once after the timed interval for every arm. The timer excludes harness teardown. |
+| Warm interactive p50 | Both OpenBrowser arms are lowest on all four tasks against all three other frameworks. Both won 5 of 5 pairs on every task against every other framework. | `auth` is cold only because it restarts the browser. |
 | No-browser memory | One `scrape_web` call: 48.1 MiB median. 25 concurrent calls: 62.4 MiB median. Zero browser processes. | Process-tree RSS on one local fixture. Not comparable to Lightpanda PSS or the Firecrawl controller-inclusive figure. |
 | Interactive memory | Both OpenBrowser arms have the lowest child footprint, tree RSS, and median CPU on all five tasks in the N=5 resource lane. | All 150 eligible pairs won for footprint, RSS, and CPU. N=5 in every cell. |
 | Sequential scraping vs Firecrawl Local | 50 of 50 pairs. Lower p50 on all five tasks for both OpenBrowser arms. | Firecrawl Local only. Different output artifacts. |
 | Batch vs Firecrawl Local | 10 of 10 pairs. 2.834 ms against 13.448 ms p50. 4.75 times faster. | Firecrawl poll interval contributes. Different artifacts. |
 | Lightpanda no-render latency | OpenBrowser no-render has a lower p50 on all five tasks. | Lightpanda starts a process per sample. Read the ordering within its startup-heavy scope. |
 
-## 8. Scope and open measurements
+## 9. Scope and open measurements
 
 These limits apply to the current native lanes. Every result is scoped to the listed tasks and surfaces.
 
