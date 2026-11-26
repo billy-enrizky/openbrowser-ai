@@ -8,7 +8,6 @@ from types import ModuleType
 
 import pytest
 
-
 EXPECTED_CANONICAL = (
     "openbrowser-mcp-fast",
     "openbrowser-fast",
@@ -76,7 +75,7 @@ def test_native_session_methodology_has_a_framework_neutral_identity():
     registry = importlib.import_module("benchmarks.interactive.arms")
     from benchmarks.interactive.adapters.browser_use import ADAPTER_VERSION
 
-    assert registry.WARM_METHOD_ID == "native-session-readiness-v3"
+    assert registry.WARM_METHOD_ID == "native-session-readiness-v4"
     assert registry.WARM_METHOD_LABEL == "Warm-session readiness"
     assert ADAPTER_VERSION == registry.WARM_METHOD_ID
     assert all(name not in registry.WARM_METHOD_ID for name in ("browser-use", "playwright", "openbrowser"))
@@ -90,11 +89,17 @@ def test_public_methodology_name_describes_the_workflow():
         assert "Warm-session readiness" in (root / name).read_text()
 
 
-@pytest.mark.parametrize("stage,error_type", [
-    ("warmup", ValueError), ("warmup", KeyboardInterrupt),
-    ("run", ValueError), ("run", KeyboardInterrupt),
-    ("cleanup", ValueError), ("unavailable", FileNotFoundError),
-])
+@pytest.mark.parametrize(
+    "stage,error_type",
+    [
+        ("warmup", ValueError),
+        ("warmup", KeyboardInterrupt),
+        ("run", ValueError),
+        ("run", KeyboardInterrupt),
+        ("cleanup", ValueError),
+        ("unavailable", FileNotFoundError),
+    ],
+)
 def test_warm_runner_cleans_each_owned_arm_once_on_every_exit(tmp_path, monkeypatch, stage, error_type):
     import socket
     import subprocess
@@ -143,9 +148,24 @@ def test_warm_runner_cleans_each_owned_arm_once_on_every_exit(tmp_path, monkeypa
     monkeypatch.setattr(warm, "start_fixture", lambda: (fixture, None))
     monkeypatch.setattr(warm, "stop_fixture", lambda *args: calls.append(("fixture", "stopped")))
     monkeypatch.setattr(warm, "ORACLES", {"wizard": lambda *args: SimpleNamespace(ok=True, detail="fake")})
-    monkeypatch.setattr(sys, "argv", ["warm_benchmark", "--arms", "playwright-mcp", "playwright-cli",
-                                     "--tasks", "wizard", "--samples", "1", "--workdir", str(tmp_path / "runs"),
-                                     "--output", str(tmp_path / "results.jsonl")])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "warm_benchmark",
+            "--arms",
+            "playwright-mcp",
+            "playwright-cli",
+            "--tasks",
+            "wizard",
+            "--samples",
+            "1",
+            "--workdir",
+            str(tmp_path / "runs"),
+            "--output",
+            str(tmp_path / "results.jsonl"),
+        ],
+    )
     if stage == "unavailable":
         assert warm.main() == 1
         assert calls.index(("cleanup", "playwright-cli")) < calls.index(("run", "playwright-mcp"))
