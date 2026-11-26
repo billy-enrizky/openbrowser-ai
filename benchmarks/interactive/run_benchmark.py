@@ -13,6 +13,7 @@ every adapter cleans up its daemons and browser processes before returning.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -20,6 +21,7 @@ import shutil
 import statistics
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from datetime import UTC, datetime
@@ -100,7 +102,7 @@ def percentile(values: list[float], fraction: float) -> float | None:
     if not values:
         return None
     ordered = sorted(values)
-    index = max(0, min(len(ordered) - 1, int(round(fraction * (len(ordered) - 1)))))
+    index = max(0, min(len(ordered) - 1, round(fraction * (len(ordered) - 1))))
     return ordered[index]
 
 
@@ -118,10 +120,9 @@ def stop_fixture(server: FixtureServer, thread: threading.Thread) -> None:
 
 
 def make_context(task: str, arm: str, sample: int, base_url: str, workdir: Path) -> RunContext:
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    root = workdir / stamp / f"{task}-{arm}-s{sample}"
-    if root.exists():
-        shutil.rmtree(root)
+    workdir = workdir.resolve()
+    workdir.mkdir(parents=True, exist_ok=True)
+    root = Path(tempfile.mkdtemp(prefix="c-", dir=workdir))
     for name in ("downloads", "profile", "home", "tmp", "config"):
         (root / name).mkdir(parents=True, exist_ok=True)
     return RunContext(
@@ -164,10 +165,8 @@ def run_one(
     finally:
         elapsed_ms = (time.monotonic() - started) * 1000.0
         if arm is not None:
-            try:
+            with contextlib.suppress(Exception):
                 arm.cleanup(ctx)
-            except Exception:
-                pass
         terminate_matching(str(ctx.root))
         state = server.state.snapshot()
         stop_fixture(server, thread)

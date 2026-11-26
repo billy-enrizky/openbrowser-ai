@@ -57,3 +57,20 @@ def test_benchmark_environment_exposes_the_host_browser_cache(tmp_path: Path) ->
         assert "PLAYWRIGHT_BROWSERS_PATH" not in env
     else:
         assert env["PLAYWRIGHT_BROWSERS_PATH"] == str(cache)
+
+
+def test_cold_context_uses_short_private_direct_scope_for_every_arm(tmp_path):
+    from benchmarks.interactive.arms import CANONICAL_ARMS
+    from benchmarks.interactive.run_benchmark import make_context
+
+    roots = []
+    for arm in CANONICAL_ARMS:
+        ctx = make_context("wizard", arm, 0, "http://fixture.invalid", tmp_path)
+        assert ctx.root.parent == tmp_path.resolve()
+        assert len(ctx.root.name) <= 12
+        assert ctx.root.stat().st_mode & 0o777 == 0o700
+        assert ctx.tmp.parent == ctx.root
+        roots.append(ctx.root)
+    repeated = make_context("wizard", CANONICAL_ARMS[0], 0, "http://fixture.invalid", tmp_path)
+    assert repeated.root not in roots
+    assert all(root.is_dir() for root in roots)
