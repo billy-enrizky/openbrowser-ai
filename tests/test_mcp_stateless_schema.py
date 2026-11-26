@@ -23,7 +23,7 @@ from openbrowser.mcp.catalog import load_tool_definitions
 from openbrowser.mcp.schema import UnsupportedSchemaError, compile_schema, iter_errors
 
 REPO_ROOT = Path(__file__).parents[1]
-_STATELESS_TOOLS = ("search_web", "scrape_web")
+_STATELESS_TOOLS = ("web_search", "scrape_web")
 
 
 def _schemas() -> dict[str, dict[str, Any]]:
@@ -51,7 +51,7 @@ def _assert_parity(schema: dict[str, Any], instance: Any) -> None:
 
 
 _CURATED: dict[str, list[Any]] = {
-    "search_web": [
+    "web_search": [
         {},
         {"query": ""},
         {"query": "x"},
@@ -228,13 +228,13 @@ def _generated_scrape_instances() -> list[dict[str, Any]]:
 @pytest.mark.parametrize("tool", _STATELESS_TOOLS)
 def test_generated_instances_match_draft202012(tool: str) -> None:
     schema = _schemas()[tool]
-    instances = _generated_search_instances() if tool == "search_web" else _generated_scrape_instances()
+    instances = _generated_search_instances() if tool == "web_search" else _generated_scrape_instances()
     for instance in instances:
         _assert_parity(schema, instance)
 
 
 def test_integer_semantics_match_json_schema() -> None:
-    schema = _schemas()["search_web"]
+    schema = _schemas()["web_search"]
     assert _ours(schema, {"query": "x", "max_results": 1.0}) is None
     assert _ours(schema, {"query": "x", "max_results": 2.0}) is None
 
@@ -262,23 +262,23 @@ def test_integer_semantics_match_json_schema() -> None:
 def test_huge_integers_match_draft202012(value: int) -> None:
     schemas = _schemas()
     instances = {
-        "search_web": {"query": "x", "max_results": value},
+        "web_search": {"query": "x", "max_results": value},
         "scrape_web": {"url": "https://e/", "max_chars": value},
     }
     for tool, instance in instances.items():
         _assert_parity(schemas[tool], instance)
 
     if value > 0:
-        assert _ours(schemas["search_web"], instances["search_web"]) is None
+        assert _ours(schemas["web_search"], instances["web_search"]) is None
         assert _ours(schemas["scrape_web"], instances["scrape_web"]) is None
     else:
-        rejection = _ours(schemas["search_web"], instances["search_web"])
+        rejection = _ours(schemas["web_search"], instances["web_search"])
         assert rejection is not None
         assert rejection.message == f"{value!r} is less than the minimum of 1"
 
 
 def test_unicode_length_bounds_use_code_points() -> None:
-    schema = _schemas()["search_web"]
+    schema = _schemas()["web_search"]
     assert _ours(schema, {"query": "\u00e9" * 2048}) is None
     assert _ours(schema, {"query": "\U0001f600" * 2048}) is None
     rejected = _ours(schema, {"query": "\U0001f600" * 2049})
@@ -288,7 +288,7 @@ def test_unicode_length_bounds_use_code_points() -> None:
 
 
 def test_additional_properties_message_is_sorted() -> None:
-    schema = _schemas()["search_web"]
+    schema = _schemas()["web_search"]
     rejection = _ours(schema, {"query": "ok", "zz": 1, "aa": 2, "mm": 3})
     assert rejection is not None
     assert rejection.json_path == "$"
@@ -300,7 +300,7 @@ def test_additional_properties_message_is_sorted() -> None:
 
 
 def test_additional_properties_plain_sorted_repro() -> None:
-    schema = _schemas()["search_web"]
+    schema = _schemas()["web_search"]
     rejection = _ours(schema, {"query": "ok", "a": 1, "b'quote": 2})
     assert rejection is not None
     assert rejection.json_path == "$"
@@ -320,7 +320,7 @@ def test_additional_properties_plain_sorted_repro() -> None:
     ],
 )
 def test_additional_properties_order_matches_draft202012(extra_keys: list[str]) -> None:
-    schema = _schemas()["search_web"]
+    schema = _schemas()["web_search"]
     instance: dict[str, Any] = {"query": "ok"}
     for key in extra_keys:
         instance[key] = 1
@@ -339,7 +339,7 @@ def test_nested_item_error_path_and_min_items() -> None:
 
 
 def test_bounds_are_inclusive() -> None:
-    search = _schemas()["search_web"]
+    search = _schemas()["web_search"]
     scrape = _schemas()["scrape_web"]
     assert _ours(search, {"query": "x", "max_results": 1}) is None
     minimum = _ours(search, {"query": "x", "max_results": 0})
@@ -446,7 +446,7 @@ import sys
 
 from openbrowser.mcp.stateless import validate_stateless_arguments
 
-validate_stateless_arguments("search_web", {"query": "x"})
+validate_stateless_arguments("web_search", {"query": "x"})
 validate_stateless_arguments("scrape_web", {"url": "https://example.com/"})
 banned = sorted(
     name
@@ -472,3 +472,9 @@ print("loaded:" + ",".join(banned) if banned else "clean")
     )
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout.strip() == "clean", completed.stdout
+
+
+def test_legacy_search_web_alias_uses_canonical_schema():
+    from openbrowser.mcp.stateless import validate_stateless_arguments
+
+    validate_stateless_arguments("search_web", {"query": "x", "max_results": 2})

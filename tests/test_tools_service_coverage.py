@@ -152,16 +152,16 @@ def _make_awaitable_event(result=None, side_effect=None):
 # ---------------------------------------------------------------------------
 
 
-class TestSearchAction:
+class TestBrowserWebSearchAction:
     @pytest.mark.asyncio
-    async def test_search_default_duckduckgo(self):
+    async def test_browser_web_search_default_duckduckgo(self):
         tools = Tools()
         session = _make_mock_browser_session()
         event = _make_awaitable_event()
         session.event_bus.dispatch = MagicMock(return_value=event)
 
         result = await tools.registry.execute_action(
-            "search",
+            "browser_web_search",
             {"query": "test query"},
             browser_session=session,
         )
@@ -169,14 +169,14 @@ class TestSearchAction:
         assert "Searched" in result.extracted_content
 
     @pytest.mark.asyncio
-    async def test_search_google(self):
+    async def test_browser_web_search_google(self):
         tools = Tools()
         session = _make_mock_browser_session()
         event = _make_awaitable_event()
         session.event_bus.dispatch = MagicMock(return_value=event)
 
         result = await tools.registry.execute_action(
-            "search",
+            "browser_web_search",
             {"query": "test", "engine": "google"},
             browser_session=session,
         )
@@ -184,14 +184,14 @@ class TestSearchAction:
         assert "Google" in result.extracted_content
 
     @pytest.mark.asyncio
-    async def test_search_bing(self):
+    async def test_browser_web_search_bing(self):
         tools = Tools()
         session = _make_mock_browser_session()
         event = _make_awaitable_event()
         session.event_bus.dispatch = MagicMock(return_value=event)
 
         result = await tools.registry.execute_action(
-            "search",
+            "browser_web_search",
             {"query": "test", "engine": "bing"},
             browser_session=session,
         )
@@ -199,12 +199,12 @@ class TestSearchAction:
         assert "Bing" in result.extracted_content
 
     @pytest.mark.asyncio
-    async def test_search_unsupported_engine(self):
+    async def test_browser_web_search_unsupported_engine(self):
         tools = Tools()
         session = _make_mock_browser_session()
 
         result = await tools.registry.execute_action(
-            "search",
+            "browser_web_search",
             {"query": "test", "engine": "yahoo_invalid"},
             browser_session=session,
         )
@@ -212,7 +212,7 @@ class TestSearchAction:
         assert "Unsupported" in result.error
 
     @pytest.mark.asyncio
-    async def test_search_navigation_failure(self):
+    async def test_browser_web_search_navigation_failure(self):
         tools = Tools()
         session = _make_mock_browser_session()
         event = _make_awaitable_event(side_effect=RuntimeError("nav failed"))
@@ -220,7 +220,7 @@ class TestSearchAction:
         session.navigate_to.side_effect = RuntimeError("nav failed")
 
         result = await tools.registry.execute_action(
-            "search",
+            "browser_web_search",
             {"query": "fail"},
             browser_session=session,
         )

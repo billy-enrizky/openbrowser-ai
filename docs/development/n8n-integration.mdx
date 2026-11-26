@@ -14,7 +14,7 @@ mode: "wide"
 {/* toc:end */}
 
 <Warning>
-The `n8n-nodes-openbrowser` community node is not published. There is no installable npm package or n8n community node yet. Do not run `npm install n8n-nodes-openbrowser`; it returns 404.
+The current release ships the CLI and the MCP server. The `n8n-nodes-openbrowser` community node is planned. Run `npm install n8n-nodes-openbrowser` after the package is published.
 </Warning>
 
 ## 1. Current options
@@ -39,7 +39,7 @@ Or call the MCP server from an MCP-capable node:
 uvx openbrowser-ai --mcp
 ```
 
-The lean stdio transport is the default. Set `OPENBROWSER_MCP_TRANSPORT=sdk` to use the MCP SDK transport. Invalid values exit with code 2. Modern `2026-07-28` clients see seven tools: `create_context`, `execute_code`, `get_status`, `reset_browser`, `close_context`, `search_web`, and `scrape_web`. The legacy handshakes `2024-11-05`, `2025-03-26`, `2025-06-18`, and `2025-11-25` see four tools: `execute_code`, `get_status`, `reset_browser`, and `search_web`.
+The lean stdio transport is the default. Set `OPENBROWSER_MCP_TRANSPORT=sdk` to use the MCP SDK transport. Invalid values exit with code 2. Modern `2026-07-28` clients see seven tools: `create_context`, `execute_code`, `get_status`, `reset_browser`, `close_context`, `web_search`, and `scrape_web`. The legacy handshakes `2024-11-05`, `2025-03-26`, `2025-06-18`, and `2025-11-25` see four tools: `execute_code`, `get_status`, `reset_browser`, and `web_search`.
 
 For the CLI daemon workflow, see [CLI Daemon](/customize/integrations/cli-daemon). For the MCP tool catalog, see [Browser Automation MCP](/customize/integrations/mcp-server).
 

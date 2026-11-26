@@ -54,16 +54,20 @@ print(f'{len(state.dom_state.selector_map)} interactive elements')
 
 ## 3. Native web search
 
-Use `search` to find source URLs without starting Chromium. The command prints a compact table by default.
+Use `openbrowser-ai web-search` to find source URLs without starting Chromium. The command prints a compact table by default.
+
+<Note>
+The canonical `web-search` command is on the current source branch. PyPI `0.1.60` exposes the same feature as `openbrowser-ai search`. To install the canonical CLI from source, run `uv tool install --force "openbrowser-ai @ git+https://github.com/billy-enrizky/openbrowser-ai.git@main"`. To run it once without changing the installed CLI, use `uvx --from git+https://github.com/billy-enrizky/openbrowser-ai.git@main openbrowser-ai web-search "OpenBrowser MCP docs"`.
+</Note>
 
 ```bash
-openbrowser-ai search "OpenBrowser MCP docs"
-openbrowser-ai search "OpenBrowser MCP docs" --json --output search-results.json
-openbrowser-ai search "OpenBrowser MCP docs" --urls-only --output search-urls.txt
-openbrowser-ai scrape --urls-file search-urls.txt --output scraped-pages.jsonl --output-format jsonl
+openbrowser-ai web-search "OpenBrowser MCP docs"
+openbrowser-ai web-search "OpenBrowser MCP docs" --json --output web-search-results.json
+openbrowser-ai web-search "OpenBrowser MCP docs" --urls-only --output web-search-urls.txt
+openbrowser-ai scrape --urls-file web-search-urls.txt --output scraped-pages.jsonl --output-format jsonl
 ```
 
-Use `--json` for a JSON array. Use `--urls-only` to write one URL per line. Search snippets do not count as evidence. Scrape and read the source page before you cite it. The package caps `max_results` at 20.
+Use `--json` for a JSON array. Use `--urls-only` to write one URL per line. Search snippets are discovery previews. Scrape and read the source page before you cite it. The package caps `max_results` at 20.
 
 ## 4. One-shot scraping
 
@@ -105,7 +109,7 @@ openbrowser-ai crawl https://docs.example.com --max-pages 20 --max-depth 2 --for
 
 `map` normalizes and deduplicates URLs, keeps same-origin links by default, and reports how many came from the page and how many from the sitemap. `crawl` follows same-origin links breadth first, fetches and parses each page once, and returns `ok`, `depth`, `title`, `content`, and `links_found` per page. Add `--timeout-ms` to bound each request.
 
-Both commands are HTTP-only. A page that needs JavaScript is reported as skipped rather than rendered.
+Both commands are HTTP-only. A page that needs JavaScript is reported as skipped.
 
 ### 4.2. Render modes and asset flags
 
@@ -131,7 +135,7 @@ openbrowser-ai --render-mode full --no-css --no-scripts -c "await navigate('http
 openbrowser-ai --text-only -c "await navigate('https://example.com')"
 ```
 
-Blocking external CSS exposes content that the page hides with `display:none` or `visibility:hidden`. Use `lightweight` when visibility matters. Asset flags reduce requests and bytes, not Chromium process memory; use `--engine http` or the static path for low memory.
+Blocking external CSS exposes content that the page hides with `display:none` or `visibility:hidden`. Use `lightweight` when visibility matters. Asset flags reduce requests and bytes while Chromium process memory stays the same. Use `--engine http` or the static path for low memory.
 
 The `scrape` browser fallback uses the installed Playwright headless shell by default. The shell has no browser UI or extension support and uses about half the process memory of full Chrome. Set `OPENBROWSER_USE_HEADLESS_SHELL=0` to force full Chrome.
 
@@ -187,19 +191,19 @@ uvx openbrowser-ai daemon reap      # Stop verified daemons and reap orphaned da
 uvx openbrowser-ai daemon restart   # Restart with fresh browser session
 ```
 
-The daemon runs in the background and communicates via a Unix socket at `~/.openbrowser/daemon.sock`. Logs are written next to the socket. The default socket uses `~/.openbrowser/daemon.log`; a custom socket uses `<socket-stem>.log`.
+The daemon runs in the background and communicates via a Unix socket at `~/.openbrowser/daemon.sock`. Logs are written next to the socket. The default socket uses `~/.openbrowser/daemon.log`. A custom socket uses `<socket-stem>.log`.
 
 `daemon status` returns `state`, `profile`, `browser`, `exec_timeout`, `init_timeout`, `idle_timeout`, `last_error`, `generation`, `uptime_seconds`, `version`, `startup`, `storage_state`, `storage_state_save`, `namespace_transfer`, `tools`, and `downloads`. It also includes `config.startup`, `config.current`, and `config.restart_required`. Tab state is nested under `browser.tabs` and is omitted until the browser has started. `startup.phase` is `idle`, `checking_ownership`, `cleaning_stale_lock`, `acquiring_ownership`, `binding_socket`, `listening`, `failed`, or `stopped`; `owner_state` is `absent`, `active`, `unresponsive`, or `stale`. `storage_state` reports the last load, and `storage_state_save` reports the last save attempt. `downloads` reports `count`, `pending`, the last 10 attempts with their phases, redacted terminal detail, and `pdf_detection`. `namespace_transfer` records how user variables survived a browser rebuild. The effective profile is resolved before the first browser start, so `daemon ensure` can compare `OPENBROWSER_USER_DATA_DIR`, `OPENBROWSER_DAEMON_PROFILE_DIR`, headless mode, and opted-in socket isolation without launching Chrome. When a browser connection fails, verify the page state and check status before retrying because the first call may have partially run. Use `daemon reset` to close the browser without stopping the daemon process. Reset also clears the Python executor and namespace, so persist values first. Use `daemon doctor` / `daemon reap` when a socket or process is stuck.
 
 Each `profile.resolution` entry has a `source` key plus a `value`, or a `mode` and optional `count`. The source is `default`, `config`, `environment`, `managed`, or `cli`. `storage_state`, `proxy`, and `args` report a mode and source only. They do not include cookies, proxy credentials, or argument values, and `args` includes a count.
 
-When a browser session exists, `browser.cdp` reports the root CDP transport phase, client presence, last probe time and latency, a closed error code, and pending cleanup. `cdp.healthy` is the last accepted connect or probe observation while the lifecycle preserves an active health claim; an inactive snapshot can report `null` and keeps the history fields. Use `cdp.last_probe_at` to tell whether a probe has run and how recent it is. `cdp.phase` is one of `disconnected`, `resolving`, `connecting`, `connected`, `degraded`, or `failed`. `cdp.last_error_code` is `null` or one of `not_connected`, `timeout`, `connection_closed`, `session_not_found`, `probe_failed`, `connect_failed`, or `cancelled`. `session_not_found` can come from target attachment during connect setup, not from the root probe alone. `cdp_connected` only means a client object is present. Root CDP health does not prove a target session, tab, or page can accept commands. Daemon status reports the last observation and does not probe the browser.
+When a browser session exists, `browser.cdp` reports the root CDP transport phase, client presence, last probe time and latency, a closed error code, and pending cleanup. `cdp.healthy` is the last accepted connect or probe observation while the lifecycle preserves an active health claim. An inactive snapshot can report `null` and keeps the history fields. Use `cdp.last_probe_at` to tell whether a probe has run and how recent it is. `cdp.phase` is one of `disconnected`, `resolving`, `connecting`, `connected`, `degraded`, or `failed`. `cdp.last_error_code` is `null` or one of `not_connected`, `timeout`, `connection_closed`, `session_not_found`, `probe_failed`, `connect_failed`, or `cancelled`. `session_not_found` can come from target attachment during connect setup as well as the root probe. `cdp_connected` only means a client object is present. Root CDP health does not prove a target session, tab, or page can accept commands. Daemon status reports the last observation and does not probe the browser.
 
-`daemon status` adds `browser.health` when a session exists. `health.phase` is `unknown`, `healthy`, `degraded`, `crashed`, `stopped`, or `failed`. The block records page-target crash history, the latest focus-recovery outcome, and a status-time process check. `health.healthy=true` means setup or focus recovery completed, not that a page is ready. Wait while recovery is pending. After a failed recovery, use `daemon reset` only when no usable target exists. `process_present` is `null` when the current CDP root is not bound to the recorded local owner or when process identity is inconclusive, including remote, stopped, and ambiguous local sessions. A missing `health` block means no browser session exists.
+`daemon status` adds `browser.health` when a session exists. `health.phase` is `unknown`, `healthy`, `degraded`, `crashed`, `stopped`, or `failed`. The block records page-target crash history, the latest focus-recovery outcome, and a status-time process check. `health.healthy=true` means setup or focus recovery completed. A page read shows the current page state. Hydration and target readiness can differ. Wait while recovery is pending. After a failed recovery, use `daemon reset` only when no usable target exists. `process_present` is `null` when the current CDP root is not bound to the recorded local owner or when process identity is inconclusive, including remote, stopped, and ambiguous local sessions. A missing `health` block means no browser session exists.
 
-Automatic starts for one socket are serialized across processes. The first client starts the daemon; concurrent clients wait, then reuse it. A socket that accepts connections but does not answer status is treated as busy and left alone, because user code may be blocking the daemon event loop. A socket with no listener and no verified OpenBrowser owner is removed before spawning. Use `daemon restart` or `daemon reap` when an owned process must be terminated.
+Automatic starts for one socket are serialized across processes. The first client starts the daemon. Concurrent clients wait, then reuse it. A socket that accepts connections but does not answer status is treated as busy and left alone, because user code may be blocking the daemon event loop. A socket with no listener and no verified OpenBrowser owner is removed before spawning. Use `daemon restart` or `daemon reap` when an owned process must be terminated.
 
-> **Windows**: On Windows, the daemon uses a localhost TCP connection on port 19222 instead of a Unix socket. This means any process on the same machine can connect. The Unix socket on macOS/Linux is restricted to the file owner (mode `0600`).
+> **Windows**: On Windows, the daemon uses a localhost TCP connection on port 19222, so any process on the same machine can connect. On macOS and Linux, the daemon uses a Unix socket restricted to the file owner (mode `0600`).
 
 ## 7. Available Functions
 
@@ -214,15 +218,15 @@ All functions from the MCP `execute_code` tool are available in `-c` mode:
 | **Tabs** | `get_tabs()`, `switch(tab_id)`, `close(tab_id)` |
 | **JavaScript** | `evaluate(code)` -- run JS in page context, returns Python objects |
 | **Downloads** | `download_file(url, filename)`; `wait_for_download(timeout, url, lookback, download_ref)`; `download_outcomes()` and `download_failures()` (sync); `list_downloads()` (sync) |
-| **Search** | `search_web(query, max_results, backend, region, safe_search, timelimit)`, `search_and_scrape(query, max_results, concurrency, format, ...)` |
+| **Web search** | `web_search(query, max_results, backend, region, safe_search, timelimit)`, `web_search_and_scrape(query, max_results, concurrency, format, ...)` |
 | **Scraping** | `scrape_page(url, format, selector, wait_for, engine)`, `scrape_pages(urls, concurrency, format, engine)` |
 | **State** | `browser.get_browser_state_summary()` -- page metadata and interactive elements |
 | **CSS** | `get_selector_from_index(index)` -- CSS selector for an element |
 | **Completion** | `done(text, success)` -- signal task completion |
 
-Prefer indexed actions whenever an element index exists. Coordinate actions use CSS viewport pixels, not screenshot pixels. If a screenshot uses a `devicePixelRatio` other than 1, divide its coordinates by `window.devicePixelRatio` before calling an `*_xy` function.
+Prefer indexed actions whenever an element index exists. Coordinate actions use CSS viewport pixels. If a screenshot uses a `devicePixelRatio` other than 1, divide its coordinates by `window.devicePixelRatio` before calling an `*_xy` function.
 
-Downloads default to `~/Downloads/openbrowser-daemon`; files survive `daemon stop` and `daemon reset`.
+Downloads default to `~/Downloads/openbrowser-daemon`. Files survive `daemon stop` and `daemon reset`.
 
 **Bundled libraries**: `json`, `csv`, `re`, `datetime`, `asyncio`, `Path`, `requests`, `numpy`/`np`, `pandas`/`pd`
 
@@ -307,12 +311,12 @@ Both use the same `CodeExecutor` engine and browser automation functions.
 - Run `uvx openbrowser-ai daemon doctor` and check the reported log tail
 - Verify Chrome/Chromium is installed
 - Run `uvx openbrowser-ai daemon reap` to stop OpenBrowser-owned daemons and remove stale files
-- `daemon list` reports `socket_known` and `socket_live` for each process. A default daemon with no `OPENBROWSER_SOCKET` is checked against the default `daemon.sock`, not treated as socketless.
+- `daemon list` reports `socket_known` and `socket_live` for each process. A default daemon with no `OPENBROWSER_SOCKET` is checked against the default `daemon.sock`.
 
 **"Daemon not running" on status**
 - The daemon shuts down after 10 minutes of inactivity
 - Run any `-c` command to auto-start it
-- If status times out while a command is running, the daemon may be busy rather than dead. Wait for the active execution or use `daemon restart` when termination is intended.
+- If status times out while a command is running, the daemon may be busy. Wait for the active execution or use `daemon restart` when termination is intended.
 
 **Socket permission errors**
 - The socket is created with `0600` permissions (owner-only)

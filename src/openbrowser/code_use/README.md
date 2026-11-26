@@ -13,7 +13,7 @@
 
 <!-- toc:end -->
 
-Code-Use Mode is a Notebook-like code execution system for browser automation. Instead of the agent choosing from a predefined set of actions, the LLM writes Python code that gets executed in a persistent namespace with all browser control functions available.
+Code-Use Mode is a Notebook-like code execution system for browser automation. The LLM writes Python code that runs in a persistent namespace with all browser control functions available.
 
 ## 1. Problem Solved
 
@@ -57,8 +57,8 @@ The namespace is initialized with:
 - `list_downloads()` - List files in the downloads directory
 - `scrape_page(url=None, format='markdown', selector=None, wait_for=None, engine='auto', only_main_content=False, include_tags=None, exclude_tags=None)` - Scrape one page without an LLM. `engine=auto` uses HTTP first and falls back to the browser. `engine='http'` is OpenBrowser no-browser mode: it starts no Chrome, Blink, or V8 process and cannot run JavaScript, take screenshots, or use browser cookies. `only_main_content` drops navigation, headers, footers, cookie banners, and ad blocks. `include_tags` keeps the first matching selector and `exclude_tags` removes matches
 - `scrape_pages(urls, concurrency=4, format='markdown', engine='auto', only_main_content=False, include_tags=None, exclude_tags=None)` - Scrape many URLs without an LLM. HTTP requests run concurrently. Browser fallbacks run sequentially. Pass `engine='http'` for OpenBrowser no-browser mode: it starts no Chrome, Blink, or V8 process and cannot run JavaScript, take screenshots, or use browser cookies
-- `search_web(query, max_results=5, backend='auto', region='us-en', safe_search='moderate', timelimit=None)` - Search with the package-native DDGS client in `openbrowser.search` and return title, URL, and snippet fields. This is not a shell call to a `ddgs` CLI
-- `search_and_scrape(query, max_results=5, concurrency=4, format='markdown', ...)` - Search with `openbrowser.search`, then scrape result URLs through `scrape_pages`. Pass `engine='http'` for OpenBrowser no-browser mode
+- `web_search(query, max_results=5, backend='auto', region='us-en', safe_search='moderate', timelimit=None)` - Search with the package-native DDGS client in `openbrowser.web_search` and return title, URL, and snippet fields. This runs the package DDGS client in process
+- `web_search_and_scrape(query, max_results=5, concurrency=4, format='markdown', ...)` - Search with `openbrowser.web_search`, then scrape result URLs through `scrape_pages`. Pass `engine='http'` for OpenBrowser no-browser mode
 - `map_urls(url, max_urls=100, include=None, exclude=None, timeout_ms=None, use_sitemap=True)` - List URLs from one page, `/sitemap.xml`, and one sitemap index level. Normalizes, deduplicates, and keeps same-origin links. No browser
 - `crawl_site(url, max_pages=10, max_depth=2, format='markdown', selector=None, include=None, exclude=None, timeout_ms=None, concurrency=4)` - Follow same-origin links breadth first and return each page's content. No browser
 
@@ -70,13 +70,13 @@ The namespace is initialized with:
 
 Use these helpers when the page has a stable CSS selector, such as a fixture id. Use `click_selector_and_wait_for_new_tab()` when a blank-target link must open a tab and you need its target ID. Set `rel="opener"` when the new page needs `window.opener`. Use `click_element()` or `click(index=...)` for download links. Ordinary selector actions do not request a browser-state summary.
 
-Search snippets do not count as evidence. Read each scraped page before you cite it. The package caps `max_results` at 20. Set `engine='http'` to prevent browser fallback.
+Search snippets are discovery previews. Read each scraped page before you cite it. The package caps `max_results` at 20. Set `engine='http'` to prevent browser fallback.
 
 Indexed actions remain preferred whenever an element index exists. For screenshot-derived coordinates, divide screenshot pixels by `window.devicePixelRatio` before calling an `*_xy` function.
 
 **Custom evaluate() Function:**
 ```python
-# Returns values directly, not wrapped in ActionResult
+# Returns values directly
 result = await evaluate('''
 (function(){
   return Array.from(document.querySelectorAll('.product')).map(p => ({

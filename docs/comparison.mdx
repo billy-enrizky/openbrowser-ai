@@ -1,10 +1,8 @@
 ---
 title: "Benchmark Comparison"
-description: "Benchmark comparison of OpenBrowser against browser automation and scraping tools for the 2026-11-25 release baseline and retained native lanes"
+description: "Benchmark comparison of OpenBrowser against browser automation and scraping tools for the 2026-11-25 release baseline and current native lanes"
 icon: "scale-balanced"
 ---
-
-# Browser Automation Comparison
 
 {/* toc:start */}
 ## Contents
@@ -18,7 +16,7 @@ icon: "scale-balanced"
     - [3.2.2. Why the MCP surface](#322-why-the-mcp-surface)
   - [3.3. Interactive resource lane](#33-interactive-resource-lane)
 - [4. OpenBrowser no-browser memory, 2026-11-25](#4-openbrowser-no-browser-memory-2026-11-25)
-  - [4.1. Non-comparable context](#41-non-comparable-context)
+  - [4.1. Published context from other scopes](#41-published-context-from-other-scopes)
 - [5. Other native local lanes, 2026-11-24](#5-other-native-local-lanes-2026-11-24)
   - [5.1. Scraping latency against Firecrawl Local](#51-scraping-latency-against-firecrawl-local)
   - [5.2. Firecrawl Local batch](#52-firecrawl-local-batch)
@@ -27,13 +25,13 @@ icon: "scale-balanced"
   - [5.5. Discovery: map and crawl](#55-discovery-map-and-crawl)
 - [6. How to choose a surface](#6-how-to-choose-a-surface)
 - [7. What these lanes show](#7-what-these-lanes-show)
-- [8. What this page does not measure](#8-what-this-page-does-not-measure)
+- [8. Scope and open measurements](#8-scope-and-open-measurements)
 
 {/* toc:end */}
 
 ## 1. Benchmark index
 
-Cold interactive and resource tables use the release baseline. Warm interactive uses method `browser-use-native-readiness-v2` and OpenBrowser app `5a88fb97`. These are separate method scopes, not a cold-to-warm speedup comparison. Scraping dates remain specific to each lane.
+Cold interactive and resource tables use the release baseline. Warm interactive uses method `browser-use-native-readiness-v2` and OpenBrowser app `5a88fb97`. These method scopes are separate. Compare cold results with cold results and warm results with warm results. Scraping dates remain specific to each lane.
 
 | Run | Date | Scope | Status |
 | --- | --- | --- | --- |
@@ -54,7 +52,7 @@ A fixture is a local test page with a deterministic expected result. The native 
 | --- | --- |
 | p50 (median) | The middle sample. Half the runs were faster and half were slower. |
 | Cold start | Every task starts a fresh process tree, including the daemon or server and the browser. |
-| Warm | The browser is already open. Each task gets a fresh fixture page, not a fresh browser. |
+| Warm | The browser is already open. Each task gets a fresh fixture page and reuses the browser. |
 | No-browser | No Chromium, Blink, or V8 process. The tool fetches over HTTP and parses the response. JavaScript does not run. |
 | RSS | Resident set size: physical memory held by the process tree at the sample time. Shared pages can be counted more than once. |
 | Pair | One sample from each arm on the same task and sample index. A 5 of 5 result means OpenBrowser was faster in all five pairs. |
@@ -88,7 +86,7 @@ Task time (ms) ↓ **Lower is better**.
 
 Both OpenBrowser arms have the lowest p50 on all five cold tasks against all three competitors. OpenBrowser MCP and OpenBrowser CLI each won every pair, 5 of 5, on every task against every competitor. CLI `tabs` is 683 ms against browser-use at 797 ms.
 
-Cold latency is time to result. The timer measures task completion and any in-task restart. Final adapter cleanup runs once after the timed interval for every arm and is not charged to the task. An earlier harness version ran cleanup inside the timed interval and then again after it, so every arm paid that teardown twice. The current lane removes the duplicate. This is a harness correction, not a product speedup.
+Cold latency is time to result. The timer measures task completion and any in-task restart. Final adapter cleanup runs once after the timed interval for every arm. The task timer excludes that cleanup. An earlier harness version ran cleanup inside the timed interval and then again after it, so every arm paid that teardown twice. The current lane removes the duplicate. This is a harness correction. The product code is unchanged.
 
 Raw data: [results-cold-five-arm-lean-2026-11-25-n5-final4.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-five-arm-lean-2026-11-25-n5-final4.jsonl).
 
@@ -139,7 +137,7 @@ Raw data and method provenance:
 
 #### 3.2.2. Why the MCP surface
 
-In the displayed cold release baseline and warm v2 lane, OpenBrowser MCP has the lower p50 on every measured task. It keeps one server process and one context open across tasks, which matches the warm workflow. Use the CLI for a one-off command when you do not want to manage a server. This page does not claim that the CLI starts faster than a full server. The cold lane measures the whole task, not server startup alone.
+In the displayed cold release baseline and warm v2 lane, OpenBrowser MCP has the lower p50 on every measured task. It keeps one server process and one context open across tasks, which matches the warm workflow. Use the CLI for a one-off command without a running server. The cold lane measures each whole task, including server startup, so read the CLI and MCP results as two workflow options.
 
 <a id="interactive-resources"></a>
 
@@ -183,7 +181,7 @@ Observed process-tree CPU (seconds) ↓ **Lower is better**.
 
 Both OpenBrowser arms have the lowest median on every task for all three metrics. Across 150 planned OpenBrowser-to-competitor pairs per metric, both arms won all 150 eligible footprint pairs, all 150 RSS pairs, and all 150 CPU pairs.
 
-Limits: process-tree RSS can count shared pages more than once. Physical footprint uses the macOS rusage-info ABI and is null on hosts that do not support it. CPU is a sampled lower bound and includes native driver subprocesses. The arms use different scripts and adapters, so this is a resource comparison of the configured surfaces, not an engine benchmark.
+Limits: process-tree RSS can count shared pages more than once. Physical footprint uses the macOS rusage-info ABI and is null on hosts that do not support it. CPU is a sampled lower bound and includes native driver subprocesses. The arms use different scripts and adapters. Read this as a resource comparison of the configured surfaces.
 
 Raw data: [results-interactive-resources-2026-11-25-n5-final.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-interactive-resources-2026-11-25-n5-final.jsonl).
 
@@ -195,7 +193,7 @@ Peak process-tree RSS (MiB) ↓ **Lower is better**.
 
 <img src="/images/native-mcp-http-memory-2026-11-25.png" alt="Bar chart of peak process-tree RSS in MiB for one scrape_web call and 25 concurrent scrape_web calls. Both use no browser process." />
 
-The `scrape_web` MCP tool runs without Chromium, Blink, or V8. It performs an HTTP fetch and parses the response. It does not run JavaScript, take screenshots, or use browser cookies. It never falls back to a browser. This is not the same scope as a browser engine. A page that needs JavaScript must use `execute_code` with a browser.
+The `scrape_web` MCP tool runs without Chromium, Blink, or V8. It performs an HTTP fetch and parses the response. JavaScript, screenshots, and browser cookies are outside its scope, and it stays on the HTTP path. A page that needs JavaScript uses `execute_code` with a browser.
 
 Peak process-tree RSS (MiB) ↓ **Lower is better**.
 
@@ -206,19 +204,18 @@ Peak process-tree RSS (MiB) ↓ **Lower is better**.
 
 Sequential latency was 77 to 90 ms per call after discovery. The 25 concurrent calls completed in 155 to 169 ms. These timings are for one local static fixture and are not a general throughput claim.
 
-### 4.1. Non-comparable context
+### 4.1. Published context from other scopes
 
-The following published or earlier figures use different measurement methods and workloads. They are context, not points on the chart, and they are not a direct memory ranking. For memory values, **Lower is better** ↓, but the scopes below are not comparable.
+The following published or earlier figures use different measurement methods and workloads. They provide context for the chart. Read each value within its own scope. For memory values, **Lower is better** ↓.
 
-| Reference | Value | Scope | Why it is not comparable |
+| Reference | Value | Scope | Scope difference |
 | --- | ---: | --- | --- |
-| Lightpanda, one automation page | 21.2 MB | Published by Lightpanda | Uses its own measurement method, not process-tree RSS on this fixture. |
+| Lightpanda, one automation page | 21.2 MB | Published by Lightpanda | Uses Lightpanda's published measurement method. This fixture measures process-tree RSS. |
 | Lightpanda, 25 parallel crawler processes | 123 MB | PSS for 25 processes crawling 933 pages on Ubuntu AWS m5.xlarge | PSS on a different host and workload. Our 25-call number is one server process. |
-| Firecrawl Local static, earlier local measurement | about 155 MiB | Included the benchmark controller | Our number is process-tree RSS without a controller. |
 
-Our values are process-tree RSS in MiB, divided by 1048576. RSS can count shared pages more than once. Our 25-call number is one server process that handles 25 concurrent calls. Lightpanda's 123 MB is PSS for 25 separate processes. RSS and PSS are not directly comparable.
+Our values are process-tree RSS in MiB, divided by 1048576. RSS can count shared pages more than once. Our 25-call number is one server process that handles 25 concurrent calls. Lightpanda's 123 MB is PSS for 25 separate processes. RSS and PSS use different accounting.
 
-A single-call comparison with Lightpanda's 21.2 MB is not supported by this lane. No direct memory win against Lightpanda or Firecrawl follows from these numbers.
+This lane supports comparisons within one measurement scope. Read Lightpanda's 21.2 MB as published context from another scope.
 
 Raw data: [results-mcp-scrape-web-resource-2026-11-25-n5.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-mcp-scrape-web-resource-2026-11-25-n5.json).
 
@@ -246,7 +243,7 @@ Task time (ms) ↓ **Lower is better**.
 | `js_list` | 13.1 | 15.1 | 556.4 | 10/10 |
 | `asset_heavy` | 56.8 | 17.1 | 570.7 | 10/10 |
 
-OpenBrowser lightweight won 50 of 50 paired samples. The full arm won 49 of 50, with one static sample 0.13 ms slower. Both arms have a lower p50 on every task than Firecrawl Local. A zero-warmup run passed all correctness checks but can lose one first static pair per arm to HTTP client setup, so the published lane keeps one warmup. Firecrawl Local is the official local offering, not Firecrawl Cloud or the full self-hosted service.
+OpenBrowser lightweight won 50 of 50 paired samples. The full arm won 49 of 50, with one static sample 0.13 ms slower. Both arms have a lower p50 on every task than Firecrawl Local. A zero-warmup run passed all correctness checks. It can lose one first static pair per arm to HTTP client setup, so the published lane keeps one warmup. Firecrawl Local is the official local offering. Firecrawl Cloud and the full self-hosted service are separate products.
 
 Raw data: [results-firecrawl-final6-2026-11-25-n10-interleaved.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-firecrawl-final6-2026-11-25-n10-interleaved.json).
 
@@ -273,13 +270,13 @@ Raw data: [results-batch-firecrawl-final-2026-11-24-n10.json](https://github.com
 
 ### 5.3. Render asset policy
 
-Requests, bytes, and scrape time: **Lower is better** ↓. Screenshots are a capability, not a score.
+Requests, bytes, and scrape time: **Lower is better** ↓. Screenshots describe capability. The score uses requests, bytes, and scrape time.
 
 The render mode is a capability preset. The asset flags change only which resource types reach the network, so a caller can keep screenshots and still skip external CSS.
 
 This table comes from a local page with two stylesheets, one web font, 20 images, and 20 JavaScript-rendered headlines. N=10, interleaved. The request and byte columns are exact server observations.
 
-Requests, bytes, and scrape time: **Lower is better** ↓. Screenshots are a capability, not a score.
+Requests, bytes, and scrape time: **Lower is better** ↓. Screenshots describe capability. The score uses requests, bytes, and scrape time.
 
 | Arm | Blocked types | Requests | Bytes | Scrape p50 | Screenshots |
 | --- | --- | ---: | ---: | ---: | --- |
@@ -290,7 +287,7 @@ Requests, bytes, and scrape time: **Lower is better** ↓. Screenshots are a cap
 
 Blocking CSS is the scrape-time lever on this fixture: 44.6 ms falls to 31.3 ms. Blocking images alone does not move scrape time because the images are tiny and load in parallel.
 
-Two limits matter. First, blocking external CSS exposes content that the page hides with `display:none` or `visibility:hidden`, which is why Lightpanda's own agent modes keep CSS on. Second, these flags reduce requests and bytes, not Chromium process memory. Use the OpenBrowser no-browser path (`--no-browser` or `scrape_web`) for static pages.
+Two limits matter. First, blocking external CSS exposes content that the page hides with `display:none` or `visibility:hidden`, which is why Lightpanda's own agent modes keep CSS on. Second, these flags reduce requests and bytes. The browser still loads Chromium, Blink, and V8, so RSS effects require a separate resource measurement. Use the OpenBrowser no-browser path (`--no-browser` or `scrape_web`) for static pages.
 
 ```bash
 openbrowser-ai scrape https://example.com --text-only --only-main-content
@@ -317,7 +314,7 @@ Task time (ms) ↓ **Lower is better**.
 | `js_list` | 14.5 | 209.9 |
 | `asset_heavy` | 16.1 | 219.5 |
 
-Lightpanda starts one process per sample, so its startup dominates the static tasks. Use the ordering, not the absolute Lightpanda value. OpenBrowser no-render keeps Blink and V8 and blocks CSS, images, fonts, and media. It is not the same engine as Lightpanda. This lane measures latency only. It does not establish a memory ranking.
+Lightpanda starts one process per sample, so its startup dominates the static tasks. Use the ordering across arms. Read the Lightpanda absolute value within its per-sample startup scope. OpenBrowser no-render keeps Blink and V8 and blocks CSS, images, fonts, and media. Lightpanda uses its own engine. This lane measures latency only.
 
 Raw data: [results-lightpanda-final6-2026-11-25-n10-interleaved.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-lightpanda-final6-2026-11-25-n10-interleaved.json).
 
@@ -334,7 +331,7 @@ openbrowser-ai crawl https://docs.example.com --max-pages 20 --max-depth 2
 
 `map_urls` reads the page, `/sitemap.xml`, and one sitemap index level, then normalizes, deduplicates, and filters by origin, include, and exclude patterns. `crawl_site` follows same-origin links breadth first, fetches each page once, parses it once, and returns page content plus a per-page link count.
 
-Limits: both use the OpenBrowser no-browser path. A JavaScript shell page is reported as a failed or skipped page, not rendered. This section is a functional check, not a timed comparison.
+Limits: both use the OpenBrowser no-browser path. A JavaScript shell page is reported as failed or skipped. This section reports pass or fail for each mode and gives no timing result.
 
 ## 6. How to choose a surface
 
@@ -344,7 +341,7 @@ Limits: both use the OpenBrowser no-browser path. A JavaScript shell page is rep
 | Many known URLs | `openbrowser-ai scrape --no-browser --jsonl` | Concurrent no-browser fetches. |
 | Site discovery | `openbrowser-ai map URL` | Page links plus sitemap. No browser. |
 | Site-wide text | `openbrowser-ai crawl URL` | Bounded breadth-first crawl. No browser. |
-| JavaScript page, one shot | `openbrowser-ai scrape --engine browser` | Headless shell, not the no-browser path. |
+| JavaScript page, one shot | `openbrowser-ai scrape --engine browser` | Headless shell path. |
 | Long interactive session | MCP `create_context` plus `execute_code` | Lowest measured warm p50 on every task. |
 | One-off interactive command | `openbrowser-ai -c` | No server to manage. |
 | Visual work | `--render-mode full` | Screenshots and real paint. |
@@ -361,14 +358,14 @@ Task time and memory: **Lower is better** ↓. Pair counts: **Higher is better**
 | Interactive memory | Both OpenBrowser arms have the lowest child footprint, tree RSS, and median CPU on all five tasks in the N=5 resource lane. | All 150 eligible pairs won for footprint, RSS, and CPU. N=5 in every cell. |
 | Sequential scraping vs Firecrawl Local | 50 of 50 pairs. Lower p50 on all five tasks for both OpenBrowser arms. | Firecrawl Local only. Different output artifacts. |
 | Batch vs Firecrawl Local | 10 of 10 pairs. 2.834 ms against 13.448 ms p50. 4.75 times faster. | Firecrawl poll interval contributes. Different artifacts. |
-| Lightpanda no-render latency | OpenBrowser no-render has a lower p50 on all five tasks. | Lightpanda starts a process per sample. Not a matched startup or engine test. |
+| Lightpanda no-render latency | OpenBrowser no-render has a lower p50 on all five tasks. | Lightpanda starts a process per sample. Read the ordering within its startup-heavy scope. |
 
-## 8. What this page does not measure
+## 8. Scope and open measurements
 
-These limits apply to the current native lanes. These lanes do not declare a universal winner. No universal winner is claimed; every result is scoped to the listed tasks and surfaces.
+These limits apply to the current native lanes. Every result is scoped to the listed tasks and surfaces.
 
-- Model-driven Agent and CodeAgent comparisons in the current lanes. The current interactive lanes use fixed task adapters, not a model choosing actions.
-- Matched cold and warm Lightpanda lanes. The Lightpanda lane starts one process per sample, and OpenBrowser starts before timing. Use its ordering, not its absolute values.
+- Model-driven Agent and CodeAgent comparisons in the current lanes. The current interactive lanes use fixed task adapters with scripted actions.
+- Matched cold and warm Lightpanda lanes. The Lightpanda lane starts one process per sample, and OpenBrowser starts before timing. Use its ordering across arms. Read its absolute values within the per-sample startup scope.
 - Live-site anti-bot behavior, CAPTCHA, login providers, PDFs, uploads, iframes, screenshot fidelity, long sessions, and concurrent browser contexts.
 - Every CLI or MCP surface of each product. The current interactive lanes use the selected native surfaces listed in the tables.
-- Statistical significance. The current native lanes report observed samples and pair counts, not confidence intervals.
+- Statistical significance. The current native lanes report observed samples and pair counts. Confidence intervals are outside this release.

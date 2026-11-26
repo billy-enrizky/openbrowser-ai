@@ -32,6 +32,7 @@ from openbrowser.tools.registry.views import (
 	ActionRegistry,
 	RegisteredAction,
 	SpecialActionParameters,
+	normalize_action_name,
 )
 from openbrowser.utils import is_new_tab_page, match_url_with_domain_pattern, time_execution_async
 
@@ -46,7 +47,22 @@ class Registry(Generic[Context]):
 	def __init__(self, exclude_actions: list[str] | None = None):
 		self.registry = ActionRegistry()
 		self.telemetry = ProductTelemetry()
-		self.exclude_actions = exclude_actions if exclude_actions is not None else []
+		expanded_exclusions: list[str] = []
+		for name in exclude_actions or []:
+			expanded_exclusions.append(name)
+			canonical = normalize_action_name(name)
+			if canonical != name:
+				expanded_exclusions.append(canonical)
+		self.exclude_actions = expanded_exclusions
+
+	def resolve_action_name(self, name: str) -> str:
+		"""Resolve a legacy alias only when the exact action name is not registered."""
+		if name in self.registry.actions:
+			return name
+		canonical = normalize_action_name(name)
+		if canonical != name and canonical in self.registry.actions:
+			return canonical
+		return name
 
 	def availability_snapshot(self, page_url: str | None = None) -> ToolAvailabilitySnapshot:
 		"""Return the explicit availability state for one page context."""
@@ -134,6 +150,7 @@ class Registry(Generic[Context]):
 		display_name: str | None = None,
 	) -> RegisteredAction:
 		"""Return the action when it is available, or raise a typed error."""
+		action_name = self.resolve_action_name(action_name)
 		action = self.registry.actions.get(action_name)
 		if action is None:
 			if action_name in self.exclude_actions:
@@ -183,6 +200,7 @@ class Registry(Generic[Context]):
 		supplied_page_url: str | None = None,
 	) -> str | None:
 		"""Resolve the page context, making a live browser session authoritative."""
+		action_name = self.resolve_action_name(action_name)
 		action = self.registry.actions.get(action_name)
 		has_domains = action is not None and action.domains is not None and action.domains != []
 		resolved = supplied_page_url
@@ -686,9 +704,17 @@ class Registry(Generic[Context]):
 		#   if page_url is provided, only include actions that match the URL
 
 		page_url = normalize_page_url(page_url)
+		include_names: set[str] | None = None
+		if include_actions is not None:
+			include_names = set()
+			for name in include_actions:
+				if name in self.registry.actions:
+					include_names.add(name)
+				else:
+					include_names.add(normalize_action_name(name))
 		available_actions: dict[str, RegisteredAction] = {}
 		for name, action in self.registry.actions.items():
-			if include_actions is not None and name not in include_actions:
+			if include_names is not None and name not in include_names:
 				continue
 
 			# If no page_url provided, only include actions with no filters

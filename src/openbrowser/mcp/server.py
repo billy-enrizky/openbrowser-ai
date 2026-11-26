@@ -98,7 +98,7 @@ logging.disable(logging.CRITICAL)
 
 # Import openbrowser modules. The browser, tools, and filesystem stacks are
 # imported on first context use: a client that only calls server/discover,
-# tools/list, or search_web never needs them, and deferring them lets the
+# tools/list, or web_search never needs them, and deferring them lets the
 # first execute_code overlap those imports with Chrome startup.
 from openbrowser.browser.lifecycle import (
 	LifecycleMachine,
@@ -360,11 +360,11 @@ def _tool_catalog(description: str, *, modern: bool) -> tuple[Any, ...]:
 			idempotent_hint=True,
 		),
 	)
-	search = types.Tool(
-		name='search_web',
+	web_search = types.Tool(
+		name='web_search',
 		description=(
-			'Search the web without starting a browser or requiring a context_id. '
-			'Returns a JSON array with title, url, and snippet fields. Snippets do not count as evidence. '
+			'Run OpenBrowser web search without starting a browser or requiring a context_id. '
+			'Returns a JSON array with title, url, and snippet fields. Snippets are discovery previews. '
 			'Scrape and read the source page before citing it. Values above 20 are capped at 20.'
 		),
 		input_schema={
@@ -443,7 +443,7 @@ def _tool_catalog(description: str, *, modern: bool) -> tuple[Any, ...]:
 		),
 	)
 	if not modern:
-		return (execute, status, reset, search)
+		return (execute, status, reset, web_search)
 
 	create = types.Tool(
 		name='create_context',
@@ -498,7 +498,7 @@ def _tool_catalog(description: str, *, modern: bool) -> tuple[Any, ...]:
 			idempotent_hint=True,
 		),
 	)
-	return (create, execute, status, reset, close, search, scrape)
+	return (create, execute, status, reset, close, web_search, scrape)
 
 
 def _ensure_all_loggers_use_stderr():
@@ -1976,6 +1976,12 @@ class OpenBrowserServer(_BrowserOwner):
 		self._modern_validators = {
 			name: Draft202012Validator(tool['inputSchema']) for name, tool in self._modern_defs_by_name.items()
 		}
+		for defs, validators in (
+			(self._legacy_defs_by_name, self._legacy_validators),
+			(self._modern_defs_by_name, self._modern_validators),
+		):
+			defs['search_web'] = defs['web_search']
+			validators['search_web'] = validators['web_search']
 		for tool in (*self._legacy_defs_by_name.values(), *self._modern_defs_by_name.values()):
 			Draft202012Validator.check_schema(tool['inputSchema'])
 			output_schema = tool.get('outputSchema')
@@ -2013,6 +2019,8 @@ class OpenBrowserServer(_BrowserOwner):
 		self._modern_tools = _tool_catalog(description, modern=True)
 		self._legacy_by_name = {tool.name: tool for tool in self._legacy_tools}
 		self._modern_by_name = {tool.name: tool for tool in self._modern_tools}
+		self._legacy_by_name['search_web'] = self._legacy_by_name['web_search']
+		self._modern_by_name['search_web'] = self._modern_by_name['web_search']
 
 		async def handle_list_tools(
 			ctx: ServerRequestContext, params: types.PaginatedRequestParams | None
@@ -2111,11 +2119,11 @@ class OpenBrowserServer(_BrowserOwner):
 				telemetry_error = 'empty_code'
 				error_msg = 'Error: No code provided'
 				return ToolCallOutcome.text(error_msg, is_error=True)
-			if name == 'search_web':
-				from openbrowser.search import SearchError, asearch
+			if name in {'web_search', 'search_web'}:
+				from openbrowser.web_search import WebSearchError, aweb_search
 
 				try:
-					results = await asearch(
+					results = await aweb_search(
 						call_arguments['query'],
 						max_results=call_arguments.get('max_results', 5),
 						backend=call_arguments.get('backend', 'auto'),
@@ -2124,7 +2132,7 @@ class OpenBrowserServer(_BrowserOwner):
 						timelimit=call_arguments.get('timelimit'),
 					)
 					txt = json.dumps([result.as_dict() for result in results], ensure_ascii=False)
-				except SearchError as error:
+				except WebSearchError as error:
 					telemetry_error = 'search_failed'
 					error_msg = 'search_failed'
 					txt = json.dumps({'error': 'search_failed', 'message': str(error)}, ensure_ascii=False)

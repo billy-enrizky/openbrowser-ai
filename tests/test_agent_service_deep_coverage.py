@@ -110,6 +110,16 @@ def _make_mock_tools():
     registry.get_prompt_description = MagicMock(return_value=None)
     registry.registry = MagicMock()
     registry.registry.actions = {}
+
+    def _resolve_action_name(name):
+        if name in registry.registry.actions:
+            return name
+        canonical = "browser_web_search" if name == "search" else name
+        if canonical in registry.registry.actions:
+            return canonical
+        return name
+
+    registry.resolve_action_name = MagicMock(side_effect=_resolve_action_name)
     tools.registry = registry
     return tools
 

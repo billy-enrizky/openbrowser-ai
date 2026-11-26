@@ -1,12 +1,23 @@
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from openbrowser.browser import BrowserSession
 from openbrowser.filesystem.file_system import FileSystem
 from openbrowser.llm.base import BaseChatModel
 from openbrowser.tools.action_availability import normalize_page_url
+
+# Canonical action names replaced older names. Keep the old spelling working at
+# the boundaries that read stored or hand-written action payloads: exclusion
+# lists, the dynamically generated action model, and initial-action conversion.
+LEGACY_ACTION_ALIASES: dict[str, str] = {'search': 'browser_web_search'}
+
+
+def normalize_action_name(name: str) -> str:
+	"""Return the canonical action name for a legacy alias."""
+	return LEGACY_ACTION_ALIASES.get(name, name)
+
 
 if TYPE_CHECKING:
 	pass
@@ -62,6 +73,25 @@ class ActionModel(BaseModel):
 	# done = param_model = None
 	#
 	model_config = ConfigDict(arbitrary_types_allowed=True, extra='forbid')
+
+	@model_validator(mode='before')
+	@classmethod
+	def _normalize_legacy_action_names(cls, data: Any) -> Any:
+		"""Accept a stored legacy action key on the model that now owns it."""
+		if not isinstance(data, Mapping):
+			return data
+		fields = cls.model_fields
+		for legacy_name, canonical_name in LEGACY_ACTION_ALIASES.items():
+			if (
+				legacy_name in data
+				and legacy_name not in fields
+				and canonical_name in fields
+				and canonical_name not in data
+			):
+				normalized = {key: value for key, value in data.items() if key != legacy_name}
+				normalized[canonical_name] = data[legacy_name]
+				return normalized
+		return data
 
 	def get_index(self) -> int | None:
 		"""Get the index of the action"""

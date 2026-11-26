@@ -279,4 +279,4 @@ trap cleanup EXIT
 # ... openbrowser-ai -c calls here ...
 ```
 
-Persist results to disk before stopping the daemon. `daemon reset` clears the Python namespace. Do not call `done()` as a substitute for cleanup; it only marks the task complete inside the agent loop.
+Persist results to disk before stopping the daemon. `daemon reset` clears the Python namespace. Call `done()` only to mark the task complete inside the agent loop. Persist results and stop the daemon for cleanup.

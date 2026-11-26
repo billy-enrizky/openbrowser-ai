@@ -24,7 +24,7 @@
 
 Deterministic local benchmark for scripted interactive browser tasks. No LLM,
 no cloud browser, no AWS, and no external network. Every task is scored by a
-server-side oracle, not by the adapter's self-report.
+server-side oracle.
 
 ## 1. How to read these numbers
 
@@ -38,8 +38,8 @@ server-side oracle, not by the adapter's self-report.
 - Lean MCP transport was the default.
 - No AWS or cloud browser was used.
 - Cold-lane host load was 6.570, 4.896, 4.404 before and 6.729, 6.016, 4.994 after on 18 logical CPUs. Warm v2 host load and prepared-bytecode counts are recorded in its provenance file.
-- Cold latency is time to result. The timer measures task completion and any in-task restart. Final adapter cleanup runs once after the timed interval for every arm and is not charged to the task.
-- A paired win means one arm was faster on an individual sample matched against the same task and fixture. It is not a significance test.
+- Cold latency is time to result. The timer measures task completion and any in-task restart. Final adapter cleanup runs once after the timed interval for every arm. The task timer excludes that cleanup.
+- A paired win means one arm was faster on an individual sample matched against the same task and fixture. Treat it as a sample comparison; run a significance test for statistical claims.
 
 ## 2. Current results, 2026-11-25, rotated N=5
 
@@ -92,7 +92,7 @@ Raw data and method provenance:
 
 The timer runs from the start of `arm.run` to its return. Cleanup runs once after that interval in `run_one` for every arm. An earlier harness version also ran cleanup inside `arm.run`, so every arm paid teardown twice and the timed interval included that teardown. The current lane removes the duplicate and keeps one verified cleanup outside the timer.
 
-This is a harness change, not a product speedup. The cold table above is the current measurement. The earlier final2 table included teardown and is retained only as history.
+This is a harness change. The cold table above is the current measurement. An earlier harness version included teardown in the timed interval; the current lane excludes it.
 
 ## 3. Interactive resource lane, 2026-11-25
 
@@ -152,8 +152,8 @@ Package and browser versions are recorded in each result artifact. They are not 
 
 The `openbrowser` and `openbrowser-fast` arms poll a JavaScript predicate every
 25 ms and notice a modal filter result within about 155 ms of the fixture's
-150 ms debounce. The `auth` fast script fills the login form through CSS ids
-instead of the semantic selector map, matching the other fast scripts.
+150 ms debounce. The `auth` fast script fills the login form through CSS ids,
+matching the other fast scripts.
 
 Per-run reset: each run starts a new `ThreadingHTTPServer` on an ephemeral
 loopback port with new state, a new profile, a new download directory, and a
@@ -184,7 +184,7 @@ are killed after every run.
 5. Score correctness first. A failed oracle scores zero regardless of latency.
    p50 and p95 are computed over successful runs only. A failure-inclusive
    latency is recorded in the raw JSONL.
-6. Keep the raw JSONL. The README table is a summary, not the evidence.
+6. Keep the raw JSONL. The README table summarizes the raw JSONL evidence.
 
 ## 7. Metrics
 
@@ -229,16 +229,15 @@ environment as unknown. When the environment is readable and has no explicit
 ## 9. Limitations
 
 - The current cold and warm lanes use five samples per arm and task. The p95
-  values are indicative, not a significance test. Older sections state their
-  own sample count.
+  values are indicative. Run a significance test for statistical claims. Older
+  sections state their own sample count.
 - Custom widget fidelity differs. chrome-devtools-mcp does not expose the
   ARIA listbox options in its accessibility snapshot, so the adapter uses its
   native `evaluate_script` fallback to click the option. The task still passes
   through the page's own selection handler.
 - Auth mechanisms differ by product. OpenBrowser exports and reloads a
   storage state file; the other arms rely on a persistent Chrome profile.
-  This measures each product's native session reuse path, not one identical
-  mechanism.
+  This measures each product's native session reuse path.
 - Tool-call counts reflect architecture. OpenBrowser batches actions in one
   cell, agent-browser uses one process per command, chrome-devtools-mcp uses
   one MCP call per action, and browser-use uses one piped Python process.

@@ -1823,13 +1823,13 @@ class TestCodeAgentUploadFileDispatchFailure:
 
 class TestCodeAgentToolsExclusions:
     def test_default_exclusions(self):
-        """Default CodeAgentTools excludes extract, find_text, screenshot, search, file ops."""
+        """Default CodeAgentTools excludes extract, find_text, screenshot, browser_web_search, file ops."""
         tools = CodeAgentTools()
         actions = tools.registry.registry.actions
         assert "extract" not in actions
         assert "find_text" not in actions
         assert "screenshot" not in actions
-        assert "search" not in actions
+        assert "browser_web_search" not in actions
         assert "write_file" not in actions
         assert "read_file" not in actions
         assert "replace_file" not in actions

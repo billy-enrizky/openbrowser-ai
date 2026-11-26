@@ -39,7 +39,7 @@ finally:
 
 `await session.navigate_to(url, new_tab=False, wait_until="load", timeout_ms=None)` waits for the declared document milestone. `wait_until` accepts `commit`, `domcontentloaded`, `load`, or `networkidle`. The last option waits for Chromium's matching `networkIdle` lifecycle event.
 
-A document milestone is not application hydration, page readiness, or business-task completion. A download handoff is recorded as `download`, not as document readiness. Overlapping navigation requests raise `NavigationBusyError`. Caller cancellation cancels that request without replaying it. Forbidden committed documents are tracked separately under `navigation.containment`.
+Milestones track document lifecycle. Verify the application condition required by the next action; hydration, page readiness, and business-task completion are separate. A download handoff is recorded as `download`. Overlapping navigation requests raise `NavigationBusyError`. Caller cancellation cancels that request without replaying it. Forbidden committed documents are tracked separately under `navigation.containment`.
 
 ## 2. Lifecycle and status
 
@@ -55,9 +55,9 @@ A document milestone is not application hydration, page readiness, or business-t
 - `storage_state` and `storage_state_save`: last load and save attempts
 - `warnings`: storage-state warnings
 
-Focus phases are `uninitialized`, `switching`, `focused`, `recovering`, and `lost`. Storage load phases are `not_configured`, `pending`, `loading`, `loaded`, `failed`, `skipped`, and `cancelled`; save phases are `idle`, `not_configured`, `saving`, `saved`, `failed`, `skipped`, and `cancelled`. A missing storage file reports `skipped`, not `failed`. Download phases are `requested`, `started`, `completed`, `failed`, and `cancelled`; the last three are terminal.
+Focus phases are `uninitialized`, `switching`, `focused`, `recovering`, and `lost`. Storage load phases are `not_configured`, `pending`, `loading`, `loaded`, `failed`, `skipped`, and `cancelled`; save phases are `idle`, `not_configured`, `saving`, `saved`, `failed`, `skipped`, and `cancelled`. A missing storage file reports `skipped`. Download phases are `requested`, `started`, `completed`, `failed`, and `cancelled`; the last three are terminal.
 
-`health.phase` is `unknown`, `healthy`, `degraded`, `crashed`, `stopped`, or `failed`. `health.healthy=true` means setup or focus recovery completed, not that a page can accept commands. `process_present` is `null` when the current CDP root is not bound to the recorded local owner or when process identity is inconclusive, including remote, stopped, and ambiguous local sessions.
+`health.phase` is `unknown`, `healthy`, `degraded`, `crashed`, `stopped`, or `failed`. `health.healthy=true` means setup or focus recovery completed. A page read shows the current page state. Hydration and target readiness can differ. `process_present` is `null` when the current CDP root is not bound to the recorded local owner or when process identity is inconclusive, including remote, stopped, and ambiguous local sessions.
 
 ## 3. Recovery
 
@@ -72,4 +72,4 @@ Use the observed state before retrying. A page-changing action may have partiall
 
 ## 4. Downloads
 
-`session.wait_for_download(timeout=30, url=None, lookback=0, download_ref=None)` waits for a terminal download phase. Start the wait before the click that triggers the download. `session.download_outcomes()` returns recent attempts, including non-terminal ones. `download_failures()` is a CodeAgent and MCP namespace helper, not a `BrowserSession` method; filter `session.download_outcomes()` by `phase == "failed"` instead. A `download_ref` resolves only in the attached session's live registry. After the session stops or is replaced, read the completed history instead of waiting on that reference.
+`session.wait_for_download(timeout=30, url=None, lookback=0, download_ref=None)` waits for a terminal download phase. Start the wait before the click that triggers the download. `session.download_outcomes()` returns recent attempts, including non-terminal ones. `download_failures()` is a CodeAgent and MCP namespace helper. Filter `session.download_outcomes()` by `phase == "failed"`. A `download_ref` resolves only in the attached session's live registry. After the session stops or is replaced, read the completed history.

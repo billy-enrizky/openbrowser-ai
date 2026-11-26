@@ -31,7 +31,7 @@ class Profiles(BaseModel):
 	profiles: list[Profile]
 
 
-tools = Tools(exclude_actions=['search'], output_model=Profiles)
+tools = Tools(exclude_actions=['browser_web_search'], output_model=Profiles)
 BEARER_TOKEN = os.getenv('BEARER_TOKEN')
 
 if not BEARER_TOKEN:
@@ -41,7 +41,7 @@ if not BEARER_TOKEN:
 
 
 @tools.registry.action('Search the web for a specific query')
-async def search_web(query: str):
+async def web_search(query: str):
 	keys_to_use = ['url', 'title', 'content', 'author', 'score']
 	headers = {'Authorization': f'Bearer {BEARER_TOKEN}'}
 	async with httpx.AsyncClient() as client:

@@ -525,7 +525,8 @@ class TestSessionToPythonScript:
 
         expected_functions = [
             "navigate", "click", "input_text", "evaluate",
-            "search", "extract", "scroll", "done",
+            "web_search", "web_search_and_scrape", "search_web", "search_and_scrape",
+            "extract", "scroll", "done",
             "go_back", "wait", "screenshot", "find_text",
             "switch_tab", "close_tab", "dropdown_options",
             "select_dropdown", "upload_file", "send_keys",
@@ -533,6 +534,8 @@ class TestSessionToPythonScript:
 
         for func in expected_functions:
             assert func in script, f"Missing function: {func}"
+        assert 'if "browser_web_search" in namespace:' in script
+        assert '\t\tbrowser_web_search = namespace["browser_web_search"]\n' in script
 
     def test_script_with_javascript_blocks(self):
         """Test script generation with JavaScript blocks."""

@@ -400,7 +400,7 @@ EOF
 
 - Code is piped via stdin using heredoc (`-c - <<'EOF'`), so all Python syntax works without shell escaping issues.
 - Store results in the `audit` dict -- variables persist between `-c` calls while the daemon is running.
-- Run audits on multiple pages, not just the homepage.
+- Run audits on multiple pages, including the homepage.
 - ARIA misuse is often worse than no ARIA at all.
 - The heading check catches the most common structural issues.
 - Missing form labels are the most common form accessibility failure.
@@ -439,4 +439,4 @@ trap cleanup EXIT
 # ... openbrowser-ai -c calls here ...
 ```
 
-Persist results to disk before stopping the daemon. `daemon reset` clears the Python namespace. Do not call `done()` as a substitute for cleanup; it only marks the task complete inside the agent loop.
+Persist results to disk before stopping the daemon. `daemon reset` clears the Python namespace. Call `done()` only to mark the task complete inside the agent loop. Persist results and stop the daemon for cleanup.

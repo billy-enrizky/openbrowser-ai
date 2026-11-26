@@ -45,10 +45,10 @@ After a browser error, use MCP `get_status` or CLI `openbrowser-ai daemon status
 - `download_outcomes()` / `download_failures()` -- Synchronous recent attempts and failures
 
 ## Web Search
-- `await search_web(query, max_results=5, backend="auto", region="us-en", safe_search="moderate", timelimit=None)` returns dictionaries with `title`, `url`, and `snippet`.
-- Search snippets do not count as evidence. Read the source page before you cite it. The package caps `max_results` at 20.
-- `await search_and_scrape(query, max_results=5, concurrency=4, format="markdown", ...)` searches, then passes ordered URLs to `scrape_pages`.
-- The result has `query`, `search_results`, and `page_results` fields.
+- `await web_search(query, max_results=5, backend="auto", region="us-en", safe_search="moderate", timelimit=None)` returns dictionaries with `title`, `url`, and `snippet`.
+- Snippets are discovery previews. Read the source page before you cite it. The package caps `max_results` at 20.
+- `await web_search_and_scrape(query, max_results=5, concurrency=4, format="markdown", ...)` searches, then passes ordered URLs to `scrape_pages`.
+- The result has `query`, `web_search_results`, and `page_results` fields.
 - Use `engine="http"` to prevent browser fallback. The default `auto` mode can use the browser for pages that need it.
 
 ## Scraping
@@ -91,7 +91,7 @@ EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with
 - `await click_xy(x: float, y: float, button: str = "left", click_count: int = 1)` -- Click a no-index canvas, PDF, embed, or native-rendered target.
 - `await hover_xy(x: float, y: float)` -- Move over a no-index canvas, PDF, embed, or native-rendered target.
 - `await scroll_xy(x: float, y: float, delta_x: int = 0, delta_y: int = 0)` -- Wheel-scroll a no-index surface. Positive `delta_y` scrolls down and positive `delta_x` scrolls right.
-- Prefer indexed actions whenever an index exists. The `*_xy` coordinates are CSS viewport pixels, not screenshot pixels. If `devicePixelRatio` is not 1, divide screenshot coordinates by `window.devicePixelRatio` first.
+- Prefer indexed actions whenever an index exists. The `*_xy` coordinates are CSS viewport pixels. If `devicePixelRatio` is not 1, divide screenshot coordinates by `window.devicePixelRatio` first.
 - `await send_keys(keys: str)` -- Send keyboard keys or shortcuts. Examples: "Escape", "Enter", "PageDown", "Control+o", "Control+a", "ArrowDown".
 - `await upload_file(index: int, path: str)` -- Upload a file to a file input element. index is the file input element index, path is the local file path.
 
@@ -136,10 +136,10 @@ EXECUTE_CODE_DESCRIPTION = """Execute Python code in a persistent namespace with
 - `list_downloads()` -- List all files in the downloads directory. Returns a list of absolute file paths.
 
 ## Web Search
-- `await search_web(query, max_results=5, backend="auto", region="us-en", safe_search="moderate", timelimit=None)` returns dictionaries with `title`, `url`, and `snippet`.
-- Search snippets do not count as evidence. Read the source page before you cite it. The package caps `max_results` at 20.
-- `await search_and_scrape(query, max_results=5, concurrency=4, format="markdown", ...)` searches, then passes ordered URLs to `scrape_pages`.
-- The result has `query`, `search_results`, and `page_results` fields.
+- `await web_search(query, max_results=5, backend="auto", region="us-en", safe_search="moderate", timelimit=None)` returns dictionaries with `title`, `url`, and `snippet`.
+- Snippets are discovery previews. Read the source page before you cite it. The package caps `max_results` at 20.
+- `await web_search_and_scrape(query, max_results=5, concurrency=4, format="markdown", ...)` searches, then passes ordered URLs to `scrape_pages`.
+- The result has `query`, `web_search_results`, and `page_results` fields.
 - Use `engine="http"` to prevent browser fallback. The default `auto` mode can use the browser for pages that need it.
 
 ## Scraping

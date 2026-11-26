@@ -7,8 +7,8 @@ from typing import Any
 import pytest
 from ddgs.exceptions import DDGSException
 
-import openbrowser.search as search_module
-from openbrowser.search import SearchError, SearchResult, asearch, search
+import openbrowser.web_search as search_module
+from openbrowser.web_search import WebSearchError, WebSearchResult, aweb_search, web_search
 
 
 def _install_provider(monkeypatch, responder: Callable[[int, str, dict[str, Any]], object]):
@@ -47,7 +47,7 @@ def test_search_normalizes_urls_deduplicates_and_preserves_provider_order(monkey
     ]
     calls = _install_provider(monkeypatch, lambda *_: rows)
 
-    results = search(
+    results = web_search(
         "  browser search  ",
         5,
         backend="duckduckgo",
@@ -57,8 +57,8 @@ def test_search_normalizes_urls_deduplicates_and_preserves_provider_order(monkey
     )
 
     assert results == [
-        SearchResult(title="First result", url="https://example.com/", snippet="first preview text"),
-        SearchResult(title="Second result", url="http://example.org/?topic=search", snippet="second preview"),
+        WebSearchResult(title="First result", url="https://example.com/", snippet="first preview text"),
+        WebSearchResult(title="Second result", url="http://example.org/?topic=search", snippet="second preview"),
     ]
     assert calls == [
         (
@@ -78,7 +78,7 @@ def test_search_caps_results_at_safe_limit(monkeypatch):
     rows = [{"title": f"Result {index}", "href": f"https://example-{index}.com"} for index in range(30)]
     calls = _install_provider(monkeypatch, lambda *_: rows)
 
-    results = search("query", max_results=100)
+    results = web_search("query", max_results=100)
 
     assert len(results) == 20
     assert calls[0][1]["max_results"] == 20
@@ -101,7 +101,7 @@ def test_search_rejects_invalid_options_before_provider_call(monkeypatch, query,
     calls = _install_provider(monkeypatch, lambda *_: pytest.fail("provider must not run"))
 
     with pytest.raises(error_type):
-        search(query, **kwargs)
+        web_search(query, **kwargs)
 
     assert calls == []
 
@@ -109,7 +109,7 @@ def test_search_rejects_invalid_options_before_provider_call(monkeypatch, query,
 def test_empty_provider_result_returns_empty_list(monkeypatch):
     calls = _install_provider(monkeypatch, lambda *_: [])
 
-    assert search("query") == []
+    assert web_search("query") == []
     assert len(calls) == 1
 
 
@@ -118,7 +118,7 @@ def test_provider_no_results_error_retries_then_returns_empty(monkeypatch):
     calls = _install_provider(monkeypatch, lambda *_: (_ for _ in ()).throw(DDGSException("No results found.")))
     monkeypatch.setattr(search_module.time, "sleep", delays.append)
 
-    assert search("query") == []
+    assert web_search("query") == []
     assert len(calls) == 2
     assert delays == [0.2]
 
@@ -134,7 +134,7 @@ def test_provider_no_results_retry_can_recover(monkeypatch):
     calls = _install_provider(monkeypatch, respond)
     monkeypatch.setattr(search_module.time, "sleep", delays.append)
 
-    assert search("query") == [SearchResult("Recovered", "https://example.com/", "")]
+    assert web_search("query") == [WebSearchResult("Recovered", "https://example.com/", "")]
     assert len(calls) == 2
     assert delays == [0.2]
 
@@ -150,8 +150,8 @@ def test_no_results_after_another_provider_failure_does_not_become_empty(monkeyp
     calls = _install_provider(monkeypatch, respond)
     monkeypatch.setattr(search_module.time, "sleep", delays.append)
 
-    with pytest.raises(SearchError) as error:
-        search("query")
+    with pytest.raises(WebSearchError) as error:
+        web_search("query")
 
     assert error.value.attempts == 3
     assert len(calls) == 3
@@ -161,8 +161,8 @@ def test_no_results_after_another_provider_failure_does_not_become_empty(monkeyp
 def test_nonempty_invalid_provider_rows_raise_instead_of_becoming_empty(monkeypatch):
     calls = _install_provider(monkeypatch, lambda *_: [{"title": "No usable URL", "href": "file:///tmp/a"}])
 
-    with pytest.raises(SearchError, match="absolute HTTP or HTTPS URLs") as error:
-        search("query")
+    with pytest.raises(WebSearchError, match="absolute HTTP or HTTPS URLs") as error:
+        web_search("query")
 
     assert error.value.attempts == 1
     assert len(calls) == 1
@@ -173,8 +173,8 @@ def test_provider_failures_retry_with_bounded_backoff_and_actionable_error(monke
     calls = _install_provider(monkeypatch, lambda *_: (_ for _ in ()).throw(TimeoutError("provider timeout")))
     monkeypatch.setattr(search_module.time, "sleep", delays.append)
 
-    with pytest.raises(SearchError, match="browser search fallback") as error:
-        search("query")
+    with pytest.raises(WebSearchError, match="browser search fallback") as error:
+        web_search("query")
 
     assert error.value.attempts == 3
     assert len(calls) == 3
@@ -192,7 +192,7 @@ def test_provider_retry_can_recover(monkeypatch):
     calls = _install_provider(monkeypatch, respond)
     monkeypatch.setattr(search_module.time, "sleep", delays.append)
 
-    assert search("query") == [SearchResult("Ready", "https://example.com/", "")]
+    assert web_search("query") == [WebSearchResult("Ready", "https://example.com/", "")]
     assert len(calls) == 2
     assert delays == [0.2]
 
@@ -208,7 +208,19 @@ async def test_async_search_runs_blocking_provider_in_worker_thread(monkeypatch)
 
     _install_provider(monkeypatch, respond)
 
-    results = await asearch("query")
+    results = await aweb_search("query")
 
-    assert results == [SearchResult("Async result", "https://example.com/", "")]
+    assert results == [WebSearchResult("Async result", "https://example.com/", "")]
     assert provider_thread and provider_thread[0] != event_loop_thread
+
+
+def test_legacy_openbrowser_search_imports_still_alias_web_search():
+    import openbrowser.search as legacy
+    from openbrowser.web_search import MAX_QUERY_LENGTH, MAX_WEB_SEARCH_RESULTS
+
+    assert legacy.search is web_search
+    assert legacy.asearch is aweb_search
+    assert legacy.SearchResult is WebSearchResult
+    assert legacy.SearchError is WebSearchError
+    assert legacy.MAX_SEARCH_RESULTS == MAX_WEB_SEARCH_RESULTS
+    assert legacy.MAX_QUERY_LENGTH == MAX_QUERY_LENGTH

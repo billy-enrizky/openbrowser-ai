@@ -64,7 +64,7 @@ openbrowser-ai scrape <url> --format json --selector "article"
 
 Add `--only-main-content` to drop navigation, headers, footers, cookie banners, and ad blocks before extraction. `--include-tag` keeps the first matching selector, and `--exclude-tag` removes matches before extraction. They work on the HTTP path and on the browser fallback.
 
-`--render-mode` accepts `full`, `lightweight`, or `no-render`. Lightweight blocks images, fonts, media, and text tracks. No-render adds external stylesheets and disables screenshots. For browser-fallback assets, use the granular flags instead of another mode: `--text-only` blocks CSS, images, fonts, media, and text tracks while keeping scripts and screenshots, and `--no-css`, `--no-images`, `--no-fonts`, and `--no-media` each block one group. `--no-scripts` is available on the one-shot prompt interface, not on `scrape`. Blocking external CSS exposes content the page hides with `display:none`, so prefer `lightweight` when visibility matters. Use `--wait-for <selector>` for client-rendered content.
+`--render-mode` accepts `full`, `lightweight`, or `no-render`. Lightweight blocks images, fonts, media, and text tracks. No-render adds external stylesheets and disables screenshots. For browser-fallback assets, use the granular flags for a specific asset policy: `--text-only` blocks CSS, images, fonts, media, and text tracks while keeping scripts and screenshots, and `--no-css`, `--no-images`, `--no-fonts`, and `--no-media` each block one group. `--no-scripts` applies to the one-shot prompt interface; `scrape` uses the asset flags. Blocking external CSS exposes content the page hides with `display:none`, so prefer `lightweight` when visibility matters. Use `--wait-for <selector>` for client-rendered content.
 
 For several URLs, use batch mode. HTTP requests run concurrently, while browser fallbacks run one at a time:
 
@@ -82,7 +82,7 @@ For static pages, add `--no-browser`. This is OpenBrowser no-browser mode: a lig
 openbrowser-ai scrape https://a.example https://b.example --no-browser --jsonl --concurrency 8
 ```
 
-It cannot run JavaScript, take screenshots, or use browser cookies. `--engine http` selects the same HTTP-only path. Use `auto` when a page may need JavaScript, or `browser` when it definitely does. The asset flags `--no-css`, `--no-images`, `--no-fonts`, `--no-media`, and `--render-mode` control the browser fallback, not the no-browser HTTP path.
+It cannot run JavaScript, take screenshots, or use browser cookies. `--engine http` selects the same HTTP-only path. Use `auto` when a page may need JavaScript, or `browser` when it definitely does. The asset flags `--no-css`, `--no-images`, `--no-fonts`, `--no-media`, and `--render-mode` control the browser fallback and leave the no-browser HTTP path unchanged.
 
 In CodeAgent, call `await scrape_page(url)` for one page or `await scrape_pages(urls, concurrency=4)` for a batch. Each URL returns its own result, and results keep the input order. HTTP requests run concurrently up to the limit. Browser fallbacks run sequentially. Pass `engine="http"` to `scrape_pages()` when the batch is static and must not start a browser. That is OpenBrowser no-browser mode: it starts no Chrome, Blink, or V8 process and cannot run JavaScript, take screenshots, or use browser cookies. `scrape_page` and `scrape_pages` also accept `only_main_content=True`, `include_tags=[...]`, and `exclude_tags=[...]`.
 
@@ -97,7 +97,7 @@ openbrowser-ai crawl https://docs.example.com --max-pages 20 --max-depth 2 --for
 
 `map` reads the page, `/sitemap.xml`, and one sitemap index level. It normalizes, deduplicates, and filters by origin and by `--include` / `--exclude` regular expressions. `crawl` follows same-origin links breadth first, fetches and parses each page once, and reports `ok`, `depth`, `title`, `content`, and `links_found` per page.
 
-In CodeAgent, call `await map_urls(url)` and `await crawl_site(url, max_pages=20, max_depth=2)`. Both are HTTP-only, so a JavaScript shell page is reported as skipped rather than rendered.
+In CodeAgent, call `await map_urls(url)` and `await crawl_site(url, max_pages=20, max_depth=2)`. Both are HTTP-only, so a JavaScript shell page is reported as skipped.
 
 ## 3. Workflow
 
@@ -268,7 +268,7 @@ EOF
 - Code is piped via stdin using heredoc (`-c - <<'EOF'`), so all Python syntax works without shell escaping issues.
 - Use `evaluate()` for structured DOM extraction -- it returns Python objects directly.
 - Use Python for post-processing: filtering, sorting, deduplication, format conversion.
-- For large datasets, process pages incrementally rather than loading everything into memory.
+- For large datasets, process pages incrementally to keep memory bounded.
 - Check for rate limiting; add `await wait(2)` between page loads if needed.
 - Use `get_tabs()` to list tabs without a DOM scan. Pass a returned `tab_id` to `switch()` or `close()` when a page opens a new tab.
 - Variables persist between `-c` calls while the daemon is running, so you can build up results across multiple calls.
@@ -307,4 +307,4 @@ trap cleanup EXIT
 # ... openbrowser-ai -c calls here ...
 ```
 
-Persist results to disk before stopping the daemon. `daemon reset` clears the Python namespace. Do not call `done()` as a substitute for cleanup; it only marks the task complete inside the agent loop.
+Persist results to disk before stopping the daemon. `daemon reset` clears the Python namespace. Call `done()` only to mark the task complete inside the agent loop. Persist results and stop the daemon for cleanup.

@@ -48,6 +48,7 @@ from openbrowser.tools.registry.service import Registry
 from openbrowser.tools.registry.views import ActionModel
 from openbrowser.tools.utils import get_click_description
 from openbrowser.tools.views import (
+	BrowserWebSearchAction,
 	ClickElementAction,
 	ClickXYAction,
 	CloseTabAction,
@@ -60,7 +61,6 @@ from openbrowser.tools.views import (
 	NoParamsAction,
 	ScrollAction,
 	ScrollXYAction,
-	SearchAction,
 	SelectDropdownOptionAction,
 	SendKeysAction,
 	StructuredOutputAction,
@@ -147,9 +147,9 @@ class Tools(Generic[Context]):
 		# Basic Navigation Actions
 		@self.registry.action(
 			'',
-			param_model=SearchAction,
+			param_model=BrowserWebSearchAction,
 		)
-		async def search(params: SearchAction, browser_session: BrowserSession):
+		async def browser_web_search(params: BrowserWebSearchAction, browser_session: BrowserSession):
 			import urllib.parse
 
 			# Encode query for URL safety
@@ -1592,6 +1592,7 @@ Validated Code (after quote fixing):
 		Enable direct action calls like tools.navigate(url=..., browser_session=...).
 		This provides a simpler API for tests and direct usage while maintaining backward compatibility.
 		"""
+		name = self.registry.resolve_action_name(name)
 		if name in self.registry.exclude_actions:
 
 			async def excluded_action(**_kwargs):
@@ -1709,7 +1710,7 @@ class CodeAgentTools(Tools[Context]):
 				# 'select_dropdown',  # Keep for code-use
 				# 'dropdown_options',  # Keep for code-use
 				'screenshot',  # Exclude - not needed
-				'search',  # Exclude - use navigate() directly
+				'browser_web_search',  # Exclude - use navigate() directly
 				# 'click',  # Keep for code-use
 				# 'input',  # Keep for code-use
 				# 'switch',  # Keep for code-use

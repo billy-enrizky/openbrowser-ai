@@ -156,7 +156,7 @@ async def test_lean_transport_modern_catalog_and_context_lifecycle(tmp_path):
             "get_status",
             "reset_browser",
             "close_context",
-            "search_web",
+            "web_search",
             "scrape_web",
         ]
         assert catalog["resultType"] == "complete"
@@ -329,7 +329,7 @@ async def test_latest_sdk_client_uses_the_lean_transport(tmp_path, mode):
         catalog = await client.list_tools()
         names = [tool.name for tool in catalog.tools]
         if mode == "legacy":
-            assert names == ["execute_code", "get_status", "reset_browser", "search_web"]
+            assert names == ["execute_code", "get_status", "reset_browser", "web_search"]
             status = await client.call_tool("get_status", {})
             assert not status.is_error
             assert json.loads(status.content[0].text)["browser"]["phase"] == "stopped"
@@ -340,7 +340,7 @@ async def test_latest_sdk_client_uses_the_lean_transport(tmp_path, mode):
                 "get_status",
                 "reset_browser",
                 "close_context",
-                "search_web",
+                "web_search",
                 "scrape_web",
             ]
             created = await client.call_tool("create_context", {})

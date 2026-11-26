@@ -57,15 +57,15 @@ Run `uv run openbrowser-ai config status` to inspect the selected config path an
 
 ## 3. Verify without a browser
 
-Search and HTTP-only scraping work before Chromium is installed. Neither command starts a browser:
+OpenBrowser web search and HTTP-only scraping work before Chromium is installed. Neither command starts a browser:
 
 ```bash
-uv run openbrowser-ai search "OpenBrowser MCP docs" --max-results 5
+uv run openbrowser-ai web-search "OpenBrowser MCP docs" --max-results 5
 uv run openbrowser-ai scrape https://example.com --engine http --format text
 uv run openbrowser-ai scrape https://a.example https://b.example --engine http --jsonl --concurrency 8
 ```
 
-Search snippets are not evidence. Scrape and read the source page before you cite it.
+Search snippets are discovery previews. Scrape and read the source page before you cite it.
 
 ## 4. Install Chromium
 
