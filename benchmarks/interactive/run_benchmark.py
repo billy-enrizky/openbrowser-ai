@@ -158,10 +158,16 @@ def run_one(
     server, thread = start_fixture()
     ctx = make_context(task, arm_name, sample, server.base_url, workdir)
     arm = None
-    timer = TaskTimer()
+    timer = None
+    setup_started = time.perf_counter_ns()
+    setup_ns = None
     try:
-        with timer:
+        try:
             arm = make_arm(arm_name, openbrowser_extensions=openbrowser_extensions)
+        finally:
+            setup_ns = time.perf_counter_ns() - setup_started
+        timer = TaskTimer()
+        with timer:
             result = arm.run(ctx, cleanup=False)
     except FileNotFoundError as exc:
         result = None
@@ -170,8 +176,8 @@ def run_one(
         result = None
         error = f"adapter crashed: {exc}"
     finally:
-        measurement = timer.public()
-        elapsed_ms = measurement["task_ns"] / 1_000_000
+        measurement = timer.public() if timer is not None else None
+        elapsed_ms = measurement["task_ns"] / 1_000_000 if measurement is not None else None
         if arm is not None:
             engine_observation = engine_session.observe(arm, ctx)
         if arm is not None:
@@ -242,6 +248,7 @@ def run_one(
         shutil.rmtree(ctx.root, ignore_errors=True)
     record["measurement_method"] = MEASUREMENT_METHOD
     record["measurement"] = measurement
+    record["adapter_setup_ns"] = setup_ns
     engine_session.stamp(record, engine_observation)
     return record
 
@@ -364,8 +371,9 @@ def main() -> int:
                 record["order"] = order_index
                 records.append(record)
                 status = "ok" if record["ok"] else ("unavailable" if record["unavailable"] else "fail")
+                latency = f"{record['latency_ms']:.0f}ms" if record["latency_ms"] is not None else "n/a"
                 print(
-                    f"    {status} latency={record['latency_ms']:.0f}ms "
+                    f"    {status} latency={latency} "
                     f"calls={record['tool_calls']} procs={record['process_starts']} "
                     f"bytes={record['output_bytes']}"
                 )

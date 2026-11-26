@@ -212,20 +212,42 @@ def test_cold_runner_preserves_native_task_time_and_separates_proof(monkeypatch,
 
     monkeypatch.setattr(base, "process_commands_matching", commands)
     monkeypatch.setattr(run_benchmark, "TaskTimer", lambda: measurement.TaskTimer(clock=clock), raising=False)
-    monkeypatch.setattr(
-        run_benchmark,
-        "make_arm",
-        lambda *a, **k: SimpleNamespace(run=run, cleanup=lambda *a: clock.advance(90_000_000)),
-    )
+
+    def construct(*args, **kwargs):
+        clock.advance(50_000_000)
+        return SimpleNamespace(run=run, cleanup=lambda *a: clock.advance(90_000_000))
+
+    monkeypatch.setattr(run_benchmark.time, "perf_counter_ns", clock)
+    monkeypatch.setattr(run_benchmark, "make_arm", construct)
     row = run_benchmark.run_one("wizard", "openbrowser-fast", 0, tmp_path, False)
     assert row["ok"] is True
     assert row["latency_ms"] == 30
+    assert row["adapter_setup_ns"] == 50_000_000
     assert row["measurement"] == {
         "wall_ns": 60_000_000,
         "validation_ns": 30_000_000,
         "task_ns": 30_000_000,
         "validation_calls": 1,
     }
+
+
+def test_failed_adapter_construction_has_no_native_task_measurement(monkeypatch, tmp_path):
+    from benchmarks.interactive import run_benchmark
+
+    server = SimpleNamespace(base_url="http://fixture.invalid", state=SimpleNamespace(snapshot=dict))
+    monkeypatch.setattr(run_benchmark, "start_fixture", lambda: (server, None))
+    monkeypatch.setattr(run_benchmark, "stop_fixture", lambda *args: None)
+    monkeypatch.setattr(run_benchmark, "terminate_matching", lambda *args: None)
+
+    def unavailable(*args, **kwargs):
+        raise FileNotFoundError("fake executable")
+
+    monkeypatch.setattr(run_benchmark, "make_arm", unavailable)
+    row = run_benchmark.run_one("wizard", "openbrowser-fast", 0, tmp_path, False)
+    assert row["ok"] is False
+    assert row["unavailable"] is True
+    assert row["latency_ms"] is None
+    assert row["measurement"] is None
 
 
 def test_warm_runner_uses_the_identical_measurement_boundary(monkeypatch, tmp_path):
