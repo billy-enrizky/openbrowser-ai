@@ -595,6 +595,92 @@ def test_malformed_pin_fails_closed_in_capture_and_verify(tmp_path):
     assert engine.verify_process_binding(binding, bad, process_factory=factory_for(process)) == "malformed_binding"
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("pid", True),
+        ("pid", None),
+        ("pid", 0),
+        ("created_at", None),
+        ("created_at", True),
+        ("created_at", "1000"),
+        ("created_at", 10**400),
+        ("created_at", math.nan),
+        ("created_at", math.inf),
+        ("created_at", 0),
+        ("executable_basename", None),
+        ("executable_basename", ""),
+        ("executable_basename", "a/b"),
+        ("lane", None),
+        ("lane", 1),
+        ("revision", None),
+        ("revision", "1254"),
+        ("version", None),
+        ("version", "158.0.8127.18"),
+        ("launcher_sha256", None),
+        ("launcher_sha256", 1),
+        ("launcher_sha256", "A" * 64),
+        ("launcher_sha256", "a" * 63),
+        ("launcher_sha256", []),
+        ("engine_image_sha256", None),
+        ("engine_image_sha256", 1),
+        ("engine_image_sha256", []),
+    ],
+)
+def test_malformed_binding_field_matrix_fails_closed(tmp_path, field, value):
+    engine = engine_module()
+    pin = capture_shell(shell_cache(tmp_path / "cache"))
+    process = FakeProcess(str(pin.launcher))
+    binding = engine.capture_process_binding(pin, 4242, process_factory=factory_for(process))
+    bad = replace(binding, **{field: value})
+    assert engine.verify_process_binding(bad, pin, process_factory=factory_for(process)) == "malformed_binding"
+
+
+@pytest.mark.parametrize(
+    "stat",
+    [
+        None,
+        object(),
+        "stat",
+    ],
+)
+def test_malformed_pin_nested_stat_fails_closed(tmp_path, stat):
+    engine = engine_module()
+    pin = capture_shell(shell_cache(tmp_path / "cache"))
+    process = FakeProcess(str(pin.launcher))
+    binding = engine.capture_process_binding(pin, 4242, process_factory=factory_for(process))
+    bad = replace(pin, launcher_stat=stat)
+    with raises_reason("malformed_pin"):
+        engine.capture_process_binding(bad, 4242, process_factory=factory_for(process))
+    assert engine.verify_process_binding(binding, bad, process_factory=factory_for(process)) == "malformed_binding"
+
+
+def test_nested_stat_fields_are_validated(tmp_path):
+    engine = engine_module()
+    pin = capture_shell(shell_cache(tmp_path / "cache"))
+    process = FakeProcess(str(pin.launcher))
+    binding = engine.capture_process_binding(pin, 4242, process_factory=factory_for(process))
+    for stat in (
+        engine.FileStat(device=True, inode=1, size=2, mtime_ns=3, ctime_ns=4),
+        engine.FileStat(device=1, inode=-1, size=2, mtime_ns=3, ctime_ns=4),
+        engine.FileStat(device=1, inode=1, size=0, mtime_ns=3, ctime_ns=4),
+        engine.FileStat(device=1, inode=1, size=2, mtime_ns=-1, ctime_ns=4),
+        engine.FileStat(device=1, inode=1, size=2, mtime_ns=3, ctime_ns=-1),
+    ):
+        bad = replace(pin, launcher_stat=stat)
+        with raises_reason("malformed_pin"):
+            engine.capture_process_binding(bad, 4242, process_factory=factory_for(process))
+        assert engine.verify_process_binding(binding, bad, process_factory=factory_for(process)) == "malformed_binding"
+
+
+def test_huge_process_create_time_is_closed_unknown(tmp_path):
+    engine = engine_module()
+    pin = capture_shell(shell_cache(tmp_path / "cache"))
+    process = FakeProcess(str(pin.launcher), created_at=10**400)
+    with raises_reason("process_unknown"):
+        engine.capture_process_binding(pin, 4242, process_factory=factory_for(process))
+
+
 def test_process_binding_detects_exec_change_within_read(tmp_path):
     engine = engine_module()
     pin = capture_shell(shell_cache(tmp_path / "cache"))

@@ -631,7 +631,10 @@ def _require_alive_status(status: Any) -> None:
 def _require_created(value: Any) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise EngineBindingError("process_unknown")
-    created = float(value)
+    try:
+        created = float(value)
+    except (OverflowError, ValueError) as error:
+        raise EngineBindingError("process_unknown") from error
     if created != created or created in (float("inf"), float("-inf")) or created <= 0:
         raise EngineBindingError("process_unknown")
     return created
@@ -662,7 +665,7 @@ def _valid_pin(pin: EnginePin) -> bool:
         return False
     if not isinstance(pin.launcher_kind, str) or not isinstance(pin.engine_image_kind, str):
         return False
-    if not isinstance(pin.launcher_stat, FileStat) or not isinstance(pin.engine_image_stat, FileStat):
+    if not _valid_file_stat(pin.launcher_stat) or not _valid_file_stat(pin.engine_image_stat):
         return False
     try:
         _validate_kinds(
@@ -683,16 +686,32 @@ def _valid_binding(binding: ProcessBinding) -> bool:
         return False
     if isinstance(binding.created_at, bool) or not isinstance(binding.created_at, (int, float)):
         return False
-    created = float(binding.created_at)
+    try:
+        created = float(binding.created_at)
+    except (OverflowError, ValueError):
+        return False
     if created != created or created in (float("inf"), float("-inf")) or created <= 0:
         return False
     if not isinstance(binding.executable_basename, str) or not binding.executable_basename:
         return False
     if "/" in binding.executable_basename or "\\" in binding.executable_basename:
         return False
-    if binding.lane not in SUPPORTED_LANES or binding.revision != REVISION or binding.version != EXPECTED_VERSION:
+    if not isinstance(binding.lane, str) or binding.lane not in SUPPORTED_LANES:
         return False
-    return bool(_SHA_RE.fullmatch(binding.launcher_sha256)) and bool(_SHA_RE.fullmatch(binding.engine_image_sha256))
+    if not isinstance(binding.revision, str) or binding.revision != REVISION:
+        return False
+    if not isinstance(binding.version, str) or binding.version != EXPECTED_VERSION:
+        return False
+    return _valid_sha(binding.launcher_sha256) and _valid_sha(binding.engine_image_sha256)
+
+
+def _valid_file_stat(stat: Any) -> bool:
+    if not isinstance(stat, FileStat):
+        return False
+    values = (stat.device, stat.inode, stat.size, stat.mtime_ns, stat.ctime_ns)
+    if any(type(value) is not int for value in values):
+        return False
+    return stat.device >= 0 and stat.inode >= 0 and stat.size > 0 and stat.mtime_ns >= 0 and stat.ctime_ns >= 0
 
 
 def _canonical_file(path: Path, reason: str) -> Path:
