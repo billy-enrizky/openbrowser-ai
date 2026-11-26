@@ -188,7 +188,7 @@ export PLAYWRIGHT_BENCH_BROWSER_VERSION="$("$CHROME_BIN" --version)"
 uv run --locked python -m benchmarks.scraping.scrape_compare \
   --arms playwright-mcp playwright-cli \
   --tasks static_article js_list pagination table asset_heavy \
-  --samples 10 --warmups 1 --interleave --chrome "$CHROME_BIN" \
+  --samples 5 --warmups 1 --interleave --chrome "$CHROME_BIN" \
   --output /tmp/ob-playwright-scraping.json \
   --raw-jsonl /tmp/ob-playwright-scraping.jsonl
 ```

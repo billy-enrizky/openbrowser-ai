@@ -304,25 +304,25 @@ tasks that preserve the browser session.
 uv run --no-project --python "$BENCH_PYTHON" python -m benchmarks.interactive.run_benchmark \
   --arms openbrowser-fast openbrowser-mcp-fast chrome-devtools agent-browser \
     browser-use playwright-mcp playwright-cli \
-  --tasks wizard modal download tabs auth --samples 7 --rotate-arms \
+  --tasks wizard modal download tabs auth --samples 5 --rotate-arms \
   --workdir /tmp/ob-cold --output /tmp/ob-cold-latency.jsonl
 
 uv run --no-project --python "$BENCH_PYTHON" python -m benchmarks.interactive.warm_benchmark \
   --arms openbrowser-fast openbrowser-mcp-fast chrome-devtools agent-browser \
     browser-use playwright-mcp playwright-cli \
-  --tasks wizard modal download tabs --samples 7 --rotate-arms \
+  --tasks wizard modal download tabs --samples 5 --rotate-arms \
   --workdir /tmp/ob-warm --output /tmp/ob-warm-latency.jsonl
 
 uv run --no-project --python "$BENCH_PYTHON" python -m benchmarks.interactive.resource_compare \
   --arms openbrowser-fast openbrowser-mcp-fast chrome-devtools agent-browser \
     browser-use playwright-mcp playwright-cli \
-  --tasks wizard modal download tabs auth --samples 7 \
+  --tasks wizard modal download tabs auth --samples 5 \
   --workdir /tmp/ob-resource --output /tmp/ob-cold-resource.jsonl
 
 uv run --no-project --python "$BENCH_PYTHON" python -m benchmarks.interactive.warm_resource_compare \
   --arms openbrowser-fast openbrowser-mcp-fast chrome-devtools agent-browser \
     browser-use playwright-mcp playwright-cli \
-  --tasks wizard modal download tabs --samples 7 \
+  --tasks wizard modal download tabs --samples 5 \
   --run-workdir /tmp/ob-wr --output /tmp/ob-warm-resource.jsonl
 ```
 
