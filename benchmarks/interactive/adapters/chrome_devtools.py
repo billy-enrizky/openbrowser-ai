@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 from ..fixtures.server import ACCOUNT_SECRET, BENCH_PASSWORD, BENCH_USER
+from ..measurement import browser_launch_checkpoint
 from .base import ArmResult, RunContext, matched_chrome, terminate_matching, verify_mock_keychain
 from .mcp_stdio import McpError, StdioMcpClient
 
@@ -313,15 +314,13 @@ class ChromeDevToolsArm:
             self._click(_find(entries, role="button", name="Sign in"))
             self._wait_js("!!document.getElementById('secret')")
             phase1 = self._evaluate("document.getElementById('secret').textContent")
+            browser_launch_checkpoint(str(ctx.profile))
         finally:
             self._stop_client()
         self._start(ctx)
-        try:
-            self._navigate(ctx.base_url + "/account")
-            self._wait_js("!!document.getElementById('secret')")
-            secret = self._evaluate("document.getElementById('secret').textContent")
-        finally:
-            self._stop_client()
+        self._navigate(ctx.base_url + "/account")
+        self._wait_js("!!document.getElementById('secret')")
+        secret = self._evaluate("document.getElementById('secret').textContent")
         self._result.reported = {"secret": secret, "phase1_secret": phase1}
         if secret != ACCOUNT_SECRET:
             raise RuntimeError(f"secret after restart was {secret!r}")

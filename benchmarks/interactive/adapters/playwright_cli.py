@@ -14,6 +14,7 @@ import os
 import time
 from pathlib import Path
 
+from ..measurement import browser_launch_checkpoint
 from .base import ArmResult, RunContext, run_process, terminate_matching
 from .playwright_common import (
     CLI_VERSION,
@@ -203,6 +204,7 @@ class PlaywrightCliArm:
                 )
                 self._code(ctx, AUTH_READY_PROGRAM, timeout=120)
                 if restart_for_auth:
+                    browser_launch_checkpoint(str(ctx.profile))
                     self._restart(ctx)
                 text = self._code(ctx, account_program(ctx.base_url), timeout=120)
                 self._result.reported = last_json(text)

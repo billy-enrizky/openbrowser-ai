@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from ..fixtures.server import ACCOUNT_SECRET, BENCH_PASSWORD, BENCH_USER
+from ..measurement import browser_launch_checkpoint
 from .base import ArmResult, RunContext, matched_chrome, run_process, terminate_matching, verify_mock_keychain
 
 BINARY = os.environ.get(
@@ -193,6 +194,7 @@ class AgentBrowserArm:
         self._run(ctx, "click", "#login-submit")
         self._run(ctx, "wait", "#secret")
         phase1 = self._text(ctx, "#secret")
+        browser_launch_checkpoint(str(ctx.profile))
         self._run(ctx, "close", timeout=60)
         self._run(ctx, "open", ctx.base_url + "/account")
         self._run(ctx, "wait", "#secret")

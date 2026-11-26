@@ -13,6 +13,7 @@ import json
 import os
 import time
 
+from ..measurement import browser_launch_checkpoint
 from .base import ArmResult, RunContext, terminate_matching, verify_mock_keychain
 from .launch_proof import LaunchProof, capture_launch_proof, proof_status
 from .mcp_modern import ModernMcpError, ModernStdioMcpClient
@@ -121,6 +122,7 @@ class OpenBrowserMcpArm:
                     client, context_id, self._program("auth", ctx.base_url, str(ctx.root / "storage_state.json")), 120
                 )
                 if restart_for_auth:
+                    browser_launch_checkpoint(self._mock_keychain_profile(ctx))
                     self._close_context(client, context_id)
                     context_id = self._create_context(client)
                     self._context_id = context_id

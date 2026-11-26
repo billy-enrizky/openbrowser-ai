@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 from ..fixtures.server import BENCH_PASSWORD, BENCH_USER
+from ..measurement import browser_launch_checkpoint
 from .base import (
     ArmResult,
     RunContext,
@@ -473,6 +474,7 @@ class OpenBrowserArm:
                 login = _fast_login if self.fast_selectors else _login
                 self._invoke(ctx, login(url + "/login", str(ctx.root / "storage_state.json")), 120)
                 if restart_for_auth:
+                    browser_launch_checkpoint(self._keychain_profile(ctx))
                     self._reset_browser(ctx)
                 self._invoke(ctx, _read_account(url + "/account"), 120)
             else:

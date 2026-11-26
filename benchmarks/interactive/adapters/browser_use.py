@@ -12,6 +12,7 @@ from pathlib import Path
 
 from ..arms import WARM_METHOD_ID
 from ..fixtures.server import ACCOUNT_SECRET, BENCH_PASSWORD, BENCH_USER
+from ..measurement import browser_launch_checkpoint
 from .base import (
     ArmResult,
     ChromeInstance,
@@ -399,6 +400,7 @@ class BrowserUseArm:
             elif ctx.task == "tabs":
                 self._result.reported = self._script(ctx, _tabs(ctx.base_url + "/tabs"), 120)
             elif ctx.task == "auth":
+                browser_launch_checkpoint(str(ctx.profile))
                 phase1 = self._script(ctx, _login(ctx.base_url + "/login"), 120)
                 if self._chrome is not None and self._chrome.process is not None:
                     with suppress(Exception):
