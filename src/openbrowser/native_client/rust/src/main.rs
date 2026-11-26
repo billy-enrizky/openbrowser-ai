@@ -15,6 +15,7 @@ const MIN_TIMEOUT: f64 = 0.05;
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 const BACKEND_NAME: &str = "openbrowser-ai-py";
 
+#[derive(Debug)]
 struct Failure {
     code: String,
     output: String,
@@ -118,6 +119,7 @@ fn print_failure(failure: &Failure) -> ! {
     std::process::exit(1);
 }
 
+#[cfg(unix)]
 fn run_fast(code: &str, arguments: &[OsString]) -> Result<String, Failure> {
     let connect_timeout =
         match parse_timeout("OPENBROWSER_CONNECT_TIMEOUT", DEFAULT_CONNECT_TIMEOUT) {
@@ -144,9 +146,7 @@ fn run_fast(code: &str, arguments: &[OsString]) -> Result<String, Failure> {
         delegate_or_exit(arguments);
     }
     let request = encode_request(code);
-    if let Err(error) = stream.write_all(&request) {
-        return Err(write_failure(error, read_timeout));
-    }
+    write_request(&mut stream, &request, connect_duration, read_timeout)?;
     let raw = read_frame(&mut stream, read_timeout, MAX_RESPONSE_BYTES)?;
     parse_response(&raw)
 }
@@ -235,10 +235,36 @@ fn backend_path() -> Result<PathBuf, String> {
     }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
+        let executable_metadata = fs::metadata(&executable)
+            .map_err(|error| format!("Unable to read the native client: {error}"))?;
+        if target_metadata.dev() == executable_metadata.dev()
+            && target_metadata.ino() == executable_metadata.ino()
+        {
+            return Err(format!(
+                "Refusing native fallback: {BACKEND_NAME} is the same file as the native client"
+            ));
+        }
         if target_metadata.permissions().mode() & 0o111 == 0 {
             return Err(format!("Python fallback {BACKEND_NAME} is not executable"));
+        }
+        let mut prefix = [0_u8; 4];
+        let mut file = fs::File::open(&target)
+            .map_err(|error| format!("Unable to read the Python fallback: {error}"))?;
+        let count = file
+            .read(&mut prefix)
+            .map_err(|error| format!("Unable to read the Python fallback: {error}"))?;
+        let prefix = &prefix[..count];
+        if is_native_magic(prefix) {
+            return Err(format!(
+                "Python fallback {BACKEND_NAME} is a native binary, not a launcher script"
+            ));
+        }
+        if !prefix.starts_with(b"#!") {
+            return Err(format!(
+                "Python fallback {BACKEND_NAME} is not a launcher script"
+            ));
         }
     }
     Ok(target)
@@ -268,6 +294,82 @@ fn connect(path: &Path, timeout: f64) -> Result<std::os::unix::net::UnixStream, 
 
 fn duration_from_seconds(seconds: f64) -> Option<Duration> {
     Duration::try_from_secs_f64(seconds).ok()
+}
+
+#[cfg(unix)]
+trait WriteBudget {
+    fn budget_write(&mut self, buffer: &[u8]) -> io::Result<usize>;
+
+    fn budget_timeout(&mut self, timeout: Duration) -> io::Result<()>;
+}
+
+#[cfg(unix)]
+struct SocketWriter<'a>(&'a mut std::os::unix::net::UnixStream);
+
+#[cfg(unix)]
+impl WriteBudget for SocketWriter<'_> {
+    fn budget_write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        self.0.write(buffer)
+    }
+
+    fn budget_timeout(&mut self, timeout: Duration) -> io::Result<()> {
+        self.0.set_write_timeout(Some(timeout))
+    }
+}
+
+#[cfg(unix)]
+fn write_request(
+    stream: &mut std::os::unix::net::UnixStream,
+    request: &[u8],
+    budget: Duration,
+    read_timeout: f64,
+) -> Result<(), Failure> {
+    let mut writer = SocketWriter(stream);
+    write_request_loop(&mut writer, request, budget, read_timeout)
+}
+
+#[cfg(unix)]
+fn write_request_loop<W: WriteBudget>(
+    writer: &mut W,
+    request: &[u8],
+    budget: Duration,
+    read_timeout: f64,
+) -> Result<(), Failure> {
+    let deadline = Instant::now() + budget;
+    let mut offset = 0;
+    while offset < request.len() {
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .filter(|remaining| !remaining.is_zero())
+            .ok_or_else(|| Failure::timeout(read_timeout))?;
+        writer.budget_timeout(remaining).map_err(|error| {
+            Failure::connection_lost(format!("Daemon connection lost: {error}"))
+        })?;
+        match writer.budget_write(&request[offset..]) {
+            Ok(0) => {
+                return Err(Failure::connection_lost(
+                    "Daemon connection lost: write returned zero",
+                ));
+            }
+            Ok(written) => offset += written,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(write_failure(error, read_timeout)),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn is_native_magic(prefix: &[u8]) -> bool {
+    prefix.starts_with(b"\x7fELF")
+        || prefix.starts_with(&[0xfe, 0xed, 0xfa, 0xce])
+        || prefix.starts_with(&[0xce, 0xfa, 0xed, 0xfe])
+        || prefix.starts_with(&[0xfe, 0xed, 0xfa, 0xcf])
+        || prefix.starts_with(&[0xcf, 0xfa, 0xed, 0xfe])
+        || prefix.starts_with(&[0xca, 0xfe, 0xba, 0xbe])
+        || prefix.starts_with(&[0xbe, 0xba, 0xfe, 0xca])
+        || prefix.starts_with(&[0xca, 0xfe, 0xba, 0xbf])
+        || prefix.starts_with(&[0xbf, 0xba, 0xfe, 0xca])
 }
 
 #[cfg(unix)]
@@ -346,6 +448,11 @@ fn parse_response(raw: &[u8]) -> Result<String, Failure> {
     let object = value
         .as_object()
         .ok_or_else(|| Failure::invalid("Daemon returned a non-object response"))?;
+    let response_id = match object.get("id") {
+        Some(Value::Number(number)) => number.as_u64(),
+        None => None,
+        Some(_) => return Err(Failure::invalid("Invalid daemon response id")),
+    };
     let success = match object.get("success") {
         Some(Value::Bool(success)) => *success,
         None => false,
@@ -353,7 +460,13 @@ fn parse_response(raw: &[u8]) -> Result<String, Failure> {
     };
     let output = text_field(object, "output")?;
     if success {
+        if response_id != Some(1) {
+            return Err(Failure::invalid("Unexpected daemon response id"));
+        }
         return Ok(output);
+    }
+    if response_id != Some(0) && response_id != Some(1) {
+        return Err(Failure::invalid("Unexpected daemon response id"));
     }
     let error = text_field(object, "error")?;
     let code = text_field(object, "error_code")?;
@@ -376,6 +489,7 @@ fn text_field(object: &serde_json::Map<String, Value>, name: &str) -> Result<Str
     }
 }
 
+#[cfg(unix)]
 fn write_failure(error: io::Error, read_timeout: f64) -> Failure {
     if error.kind() == io::ErrorKind::TimedOut || error.kind() == io::ErrorKind::WouldBlock {
         Failure::timeout(read_timeout)
@@ -453,5 +567,71 @@ fn format_timeout(value: f64) -> String {
         format!("{value:.0}")
     } else {
         format!("{value}")
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::{write_request_loop, WriteBudget};
+    use std::io;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    struct FakeWriter {
+        max_chunk: usize,
+        pause: Duration,
+        writes: usize,
+    }
+
+    impl WriteBudget for FakeWriter {
+        fn budget_write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+            thread::sleep(self.pause);
+            self.writes += 1;
+            Ok(self.max_chunk.min(buffer.len()))
+        }
+
+        fn budget_timeout(&mut self, _timeout: Duration) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn whole_request_budget_times_out() {
+        let mut writer = FakeWriter {
+            max_chunk: 1,
+            pause: Duration::from_millis(20),
+            writes: 0,
+        };
+        let request = vec![b'x'; 10_000];
+        let started = Instant::now();
+        let failure =
+            write_request_loop(&mut writer, &request, Duration::from_millis(40), 0.04).unwrap_err();
+        assert_eq!(failure.code, "daemon_timeout");
+        assert!(started.elapsed() < Duration::from_millis(500));
+        assert!(writer.writes >= 1);
+    }
+
+    #[test]
+    fn zero_write_is_terminal() {
+        let mut writer = FakeWriter {
+            max_chunk: 0,
+            pause: Duration::ZERO,
+            writes: 0,
+        };
+        let failure =
+            write_request_loop(&mut writer, b"request", Duration::from_secs(1), 1.0).unwrap_err();
+        assert_eq!(failure.code, "daemon_connection_lost");
+        assert_eq!(writer.writes, 1);
+    }
+
+    #[test]
+    fn complete_write_returns_ok() {
+        let mut writer = FakeWriter {
+            max_chunk: 1_000,
+            pause: Duration::ZERO,
+            writes: 0,
+        };
+        write_request_loop(&mut writer, b"request", Duration::from_secs(1), 1.0).unwrap();
+        assert_eq!(writer.writes, 1);
     }
 }

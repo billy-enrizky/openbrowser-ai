@@ -841,3 +841,164 @@ fn hex(value: &str) -> String {
 fn hex_bytes(value: &[u8]) -> String {
     value.iter().map(|byte| format!("{byte:02x}")).collect()
 }
+
+#[test]
+fn success_with_mismatched_id_is_invalid() {
+    let temp = TempDir::new("id-mismatch");
+    let executable = installed_binary(temp.path());
+    for response_id in [0, 2] {
+        let socket = temp.path().join(format!("daemon-{response_id}.sock"));
+        let peer = serve_once(
+            &socket,
+            Some(line(json!({
+                "id": response_id,
+                "success": true,
+                "output": "unexpected"
+            }))),
+            Duration::ZERO,
+        );
+        let output = run_native(
+            &executable,
+            temp.path(),
+            Some(&socket),
+            &args(&["-c", "pass"]),
+            None,
+            &[],
+        );
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        assert!(output.stdout.is_empty(), "{output:?}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("daemon_invalid_response"));
+        let _ = peer.handle.join().unwrap();
+    }
+}
+
+#[test]
+fn failure_with_mismatched_id_is_invalid() {
+    let temp = TempDir::new("failure-id-mismatch");
+    let executable = installed_binary(temp.path());
+    let socket = temp.path().join("daemon.sock");
+    let peer = serve_once(
+        &socket,
+        Some(line(json!({
+            "id": 2,
+            "success": false,
+            "output": "partial",
+            "error": "failed"
+        }))),
+        Duration::ZERO,
+    );
+
+    let output = run_native(
+        &executable,
+        temp.path(),
+        Some(&socket),
+        &args(&["-c", "pass"]),
+        None,
+        &[],
+    );
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("daemon_invalid_response"));
+    let _ = peer.handle.join().unwrap();
+}
+
+#[test]
+fn copied_native_backend_is_rejected_before_exec() {
+    let temp = TempDir::new("copied-backend");
+    let executable = installed_binary(temp.path());
+    let backend = temp.path().join("openbrowser-ai-py");
+    fs::copy(&executable, &backend).unwrap();
+    fs::set_permissions(&backend, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let output = run_native(
+        &executable,
+        temp.path(),
+        None,
+        &args(&["--version"]),
+        None,
+        &[],
+    );
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("script"), "{stderr}");
+}
+
+#[test]
+fn hardlinked_native_backend_is_rejected_before_exec() {
+    let temp = TempDir::new("hardlink-backend");
+    let executable = installed_binary(temp.path());
+    let backend = temp.path().join("openbrowser-ai-py");
+    fs::hard_link(&executable, &backend).unwrap();
+
+    let output = run_native(
+        &executable,
+        temp.path(),
+        None,
+        &args(&["--version"]),
+        None,
+        &[],
+    );
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("same file"), "{stderr}");
+}
+
+#[test]
+fn macho_and_elf_backend_magic_are_rejected() {
+    let temp = TempDir::new("native-magic");
+    let executable = installed_binary(temp.path());
+    for (name, magic) in [
+        ("macho", vec![0xcf, 0xfa, 0xed, 0xfe, 0x00]),
+        ("elf", vec![0x7f, 0x45, 0x4c, 0x46, 0x00]),
+    ] {
+        let backend = temp.path().join("openbrowser-ai-py");
+        write_executable(&backend, &magic);
+        let output = run_native(
+            &executable,
+            temp.path(),
+            None,
+            &args(&["--version"]),
+            None,
+            &[],
+        );
+        assert_eq!(output.status.code(), Some(1), "{name}: {output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("script"),
+            "{name}: {output:?}"
+        );
+        fs::remove_file(&backend).unwrap();
+    }
+}
+
+#[test]
+fn shell_shebang_with_spaces_is_accepted() {
+    let temp = TempDir::new("shell-shebang");
+    let executable = installed_binary(temp.path());
+    let marker_path = temp.path().join("shell-marker");
+    let backend = temp.path().join("openbrowser-ai-py");
+    write_executable(
+        &backend,
+        b"#!/bin/sh -e\nprintf 'executed' > \"$OB_MARKER\"\nexit 0\n",
+    );
+
+    let output = run_native(
+        &executable,
+        temp.path(),
+        None,
+        &args(&["--version"]),
+        None,
+        &[("OB_MARKER", marker_path.to_str().unwrap())],
+    );
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(marker_path.exists());
+    assert_eq!(fs::read_to_string(marker_path).unwrap(), "executed");
+}
+
+fn write_executable(path: &Path, contents: &[u8]) {
+    fs::write(path, contents).unwrap();
+    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+}
