@@ -1,6 +1,6 @@
-"""About:blank watchdog for managing about:blank tabs with DVD screensaver."""
+"""About:blank tab lifecycle and headed loading feedback."""
 
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from bubus import BaseEvent
 from cdp_use.cdp.target import TargetID
@@ -24,17 +24,17 @@ if TYPE_CHECKING:
 
 
 class AboutBlankWatchdog(BaseWatchdog):
-	"""Ensures there's always exactly one about:blank tab with DVD screensaver."""
+	"""Keep a browser tab available and decorate headed about:blank pages."""
 
 	# Event contracts
-	LISTENS_TO: ClassVar[list[type[BaseEvent]]] = [
+	LISTENS_TO: ClassVar[list[type[BaseEvent[Any]]]] = [
 		BrowserStopEvent,
 		BrowserStoppedEvent,
 		TabCreatedEvent,
 		TabClosedEvent,
 		TabClosingEvent,
 	]
-	EMITS: ClassVar[list[type[BaseEvent]]] = [
+	EMITS: ClassVar[list[type[BaseEvent[Any]]]] = [
 		NavigateToUrlEvent,
 		CloseTabEvent,
 		TabCreatedEvent,
@@ -128,7 +128,9 @@ class AboutBlankWatchdog(BaseWatchdog):
 			self.logger.error(f'[AboutBlankWatchdog] Error ensuring about:blank tab: {e}')
 
 	async def _show_dvd_screensaver_on_about_blank_tabs(self) -> None:
-		"""Show DVD screensaver on all about:blank pages only."""
+		"""Show the loading indicator on headed about:blank pages."""
+		if self.browser_session.browser_profile.headless is True:
+			return
 		try:
 			# Get just the page targets without expensive title fetching
 			page_targets = await self.browser_session._cdp_get_all_pages()
@@ -152,6 +154,8 @@ class AboutBlankWatchdog(BaseWatchdog):
 		Injects a DVD screensaver-style bouncing text animation overlay into the target using CDP.
 		This is used to visually indicate that the browser is setting up or waiting.
 		"""
+		if self.browser_session.browser_profile.headless is True:
+			return
 		try:
 			# Create temporary session for this target without switching focus
 			temp_session = await self.browser_session.get_or_create_cdp_session(target_id, focus=False)
