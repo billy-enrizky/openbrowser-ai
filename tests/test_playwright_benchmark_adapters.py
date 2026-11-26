@@ -503,3 +503,18 @@ def test_mcp_restart_closes_browser_before_transport(tmp_path, monkeypatch):
     assert ("tool", "browser_close") in first.sequence
     assert first.sequence.index(("tool", "browser_close")) < first.sequence.index(("close", ""))
     assert len(FakeMcpClient.instances) == 2
+
+
+@pytest.mark.parametrize(
+    ("task", "key"),
+    [
+        ("static_article", "content"),
+        ("js_list", "skus"),
+        ("pagination", "ids"),
+        ("table", "rows"),
+        ("asset_heavy", "content"),
+    ],
+)
+def test_scraping_program_reports_oracle_key(task, key):
+    code = task_program(task, "http://x", None)
+    assert f"{key}" in code.split("return", 1)[1]
