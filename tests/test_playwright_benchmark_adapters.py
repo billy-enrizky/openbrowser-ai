@@ -191,8 +191,22 @@ def test_mcp_server_command_and_execute_program(tmp_path, monkeypatch):
     assert config["browser"]["contextOptions"]["viewport"] == {"width": 1280, "height": 800}
     assert config["outputDir"] == str(ctx.downloads)
     assert config["codegen"] == "none"
+    assert config["timeouts"]["settle"] == 0
     arm.cleanup(ctx)
     assert client.closed is True
+
+
+def test_shared_config_sets_zero_settle_for_both_native_paths(tmp_path):
+    ctx = make_context(tmp_path)
+    mcp = playwright_mcp.PlaywrightMcpArm(binary="/bin/playwright-mcp")
+    cli = playwright_cli.PlaywrightCliArm(binary="/bin/playwright-cli")
+    command = mcp._server_command(ctx)
+    mcp_config = Path(command[command.index("--config") + 1])
+    cli_config = cli._config(ctx)
+    assert mcp_config == cli_config
+    config = json.loads(cli_config.read_text())
+    assert config["timeouts"]["settle"] == 0
+    assert "browser" in config and "contextOptions" in config["browser"]
 
 
 def test_mcp_auth_uses_native_secret_fill_and_restart(tmp_path, monkeypatch):
@@ -272,6 +286,7 @@ def test_cli_commands_and_execute_program(tmp_path, monkeypatch):
     config = json.loads((ctx.config / "playwright-config.json").read_text())
     assert config["outputDir"] == str(ctx.downloads)
     assert config["codegen"] == "none"
+    assert config["timeouts"]["settle"] == 0
     assert config["browser"]["launchOptions"]["executablePath"] == playwright_common.CHROME
     assert config["browser"]["launchOptions"]["args"] == ["--use-mock-keychain"]
     assert config["browser"]["contextOptions"]["viewport"] == {"width": 1280, "height": 800}
