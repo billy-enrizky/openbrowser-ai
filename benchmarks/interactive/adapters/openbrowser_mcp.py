@@ -3,21 +3,24 @@
 This arm drives the package's own MCP server over the stateless
 ``2026-07-28`` stdio protocol: one ``server/discover`` probe, then
 ``create_context``, ``execute_code``, and ``close_context``. It measures the
-MCP surface that coding agents actually use, not the CLI daemon path.
+MCP surface that coding agents use.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import time
 
-from ..fixtures.server import BENCH_PASSWORD, BENCH_USER
 from .base import ArmResult, RunContext, terminate_matching, verify_mock_keychain
 from .mcp_modern import ModernMcpError, ModernStdioMcpClient
 from .openbrowser import (
+    _default_binary,
     _download,
+    _env,
     _fast_download,
+    _fast_login,
     _fast_modal,
     _fast_tabs,
     _fast_wizard,
@@ -27,8 +30,6 @@ from .openbrowser import (
     _tabs,
     _wizard,
     _write_config,
-    _default_binary,
-    _env,
 )
 
 
@@ -85,7 +86,8 @@ class OpenBrowserMcpArm:
         if task == "tabs":
             return _fast_tabs(url + "/tabs") if fast else _tabs(url + "/tabs")
         if task == "auth" and state_path is not None:
-            return _login(url + "/login", state_path)
+            login = _fast_login if fast else _login
+            return login(url + "/login", state_path)
         raise ValueError(f"unknown task {task}")
 
     def _mock_keychain_profile(self, ctx: RunContext) -> str:
@@ -162,10 +164,8 @@ class OpenBrowserMcpArm:
 
     def cleanup(self, ctx: RunContext) -> None:
         if self._client is not None and self._context_id is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._close_context(self._client, self._context_id)
-            except Exception:
-                pass
             self._context_id = None
         if self._client is not None:
             self._client.close()

@@ -446,7 +446,7 @@ class OpenBrowserArm:
                 login = _fast_login if self.fast_selectors else _login
                 self._invoke(ctx, login(url + "/login", str(ctx.root / "storage_state.json")), 120)
                 if restart_for_auth:
-                    self._stop_daemon(ctx)
+                    self._reset_browser(ctx)
                 self._invoke(ctx, _read_account(url + "/account"), 120)
             else:
                 raise ValueError(f"unknown task {ctx.task}")
@@ -481,6 +481,23 @@ class OpenBrowserArm:
         except json.JSONDecodeError as exc:
             raise RuntimeError(f"openbrowser-ai warm returned invalid JSON: {stdout[:600]}") from exc
         return payload, elapsed_ms
+
+    def _reset_browser(self, ctx: RunContext) -> None:
+        """Use the native reset command to close the browser and retain the daemon."""
+        returncode, stdout, stderr, _elapsed = run_process([self.binary, "daemon", "reset"], env=_env(ctx), timeout=60)
+        self._result.process_starts += 1
+        self._result.tool_calls += 1
+        self._result.stdout += stdout
+        self._result.stderr += stderr
+        if returncode != 0:
+            raise RuntimeError(f"openbrowser-ai daemon reset exited {returncode}: {stderr.strip()[:600]}")
+        try:
+            payload = json.loads(stdout)
+        except json.JSONDecodeError as error:
+            raise RuntimeError("daemon reset returned invalid JSON") from error
+        browser = payload.get("browser") if isinstance(payload, dict) else None
+        if not isinstance(browser, dict) or browser.get("phase") != "stopped":
+            raise RuntimeError("daemon reset did not confirm the stopped browser phase")
 
     def _stop_daemon(self, ctx: RunContext) -> None:
         pid_file = ctx.home / ".openbrowser" / "daemon.pid"

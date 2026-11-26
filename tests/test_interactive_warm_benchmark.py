@@ -10,6 +10,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from benchmarks.interactive import warm_benchmark
 from benchmarks.interactive.adapters.base import ArmResult, RunContext
 from benchmarks.interactive.adapters.openbrowser import OpenBrowserArm
@@ -298,3 +300,69 @@ def test_cli_warmup_writes_profile_before_starting_native_daemon(tmp_path, monke
     payload, _ = arm.warmup(ctx)
     assert payload["ok"] is True
     assert calls == [["/fake/openbrowser", "warm"]]
+
+
+def test_fast_mcp_auth_uses_selector_helpers_and_preserves_storage_export():
+    from benchmarks.interactive.adapters.openbrowser_mcp import OpenBrowserMcpArm
+
+    fast = OpenBrowserMcpArm(binary="/fake/openbrowser", fast_selectors=True)
+    indexed = OpenBrowserMcpArm(binary="/fake/openbrowser", fast_selectors=False)
+    code = fast._program("auth", "http://fixture.invalid", "/tmp/owned-state.json")
+    assert "fill_selector('#username'" in code
+    assert "fill_selector('#password'" in code
+    assert "click_selector('#login-submit')" in code
+    assert "browser.export_storage_state('/tmp/owned-state.json')" in code
+    assert "input_text(index=await find" not in code
+    assert "input_text(index=await find" in indexed._program("auth", "http://fixture.invalid", "/tmp/owned-state.json")
+
+
+def test_cli_auth_restarts_browser_through_official_reset(monkeypatch):
+    from benchmarks.interactive.adapters import openbrowser
+    from benchmarks.interactive.fixtures.server import ACCOUNT_SECRET
+
+    arm = OpenBrowserArm(binary="/fake/openbrowser", fast_selectors=True)
+    context = _ctx()
+    context.task = "auth"
+    events = []
+
+    def invoke(ctx, code, timeout):
+        stage = "login" if "#username" in code else "account"
+        events.append(stage)
+        arm._result.stdout += json.dumps({"secret": ACCOUNT_SECRET}) + "\n"
+        arm._result.process_starts += 1
+        arm._result.tool_calls += 1
+
+    def control(command, **kwargs):
+        assert command == ["/fake/openbrowser", "daemon", "reset"]
+        events.append("reset")
+        return 0, '{"browser":{"phase":"stopped"}}', "", 0.0
+
+    def forbidden_stop(ctx):
+        raise AssertionError("auth restarted the whole daemon")
+
+    monkeypatch.setattr(arm, "_invoke", invoke)
+    monkeypatch.setattr(arm, "_stop_daemon", forbidden_stop)
+    monkeypatch.setattr(openbrowser, "run_process", control)
+    monkeypatch.setattr(openbrowser, "_write_config", lambda *args, **kwargs: None)
+    monkeypatch.setattr(openbrowser, "verify_mock_keychain", lambda *args, **kwargs: True)
+    result = arm.run(context, cleanup=False)
+    assert result.ok is True, result.error
+    assert events == ["login", "reset", "account"]
+    assert result.reported["secret"] == ACCOUNT_SECRET
+    assert result.process_starts == 3
+    assert result.tool_calls == 3
+
+
+@pytest.mark.parametrize(
+    "returncode,stdout",
+    [(1, ""), (0, "bad json"), (0, '{"browser":null}'), (0, '{"browser":{"phase":"running"}}')],
+)
+def test_cli_reset_rejects_failure_and_unconfirmed_browser_shutdown(monkeypatch, returncode, stdout):
+    from benchmarks.interactive.adapters import openbrowser
+
+    arm = OpenBrowserArm(binary="/fake/openbrowser", fast_selectors=True)
+    monkeypatch.setattr(openbrowser, "run_process", lambda *args, **kwargs: (returncode, stdout, "failed", 0.0))
+    with pytest.raises(RuntimeError):
+        arm._reset_browser(_ctx())
+    assert arm._result.process_starts == 1
+    assert arm._result.tool_calls == 1
