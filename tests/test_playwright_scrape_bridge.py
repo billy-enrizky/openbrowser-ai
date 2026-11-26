@@ -31,7 +31,7 @@ def _no_native_io(monkeypatch):
     monkeypatch.setattr(socket, "create_connection", forbidden)
 
 
-STATIC_CONTENT = "\n".join(f"Item {index}" for index in range(STATIC_ROWS))
+STATIC_CONTENT = "\n".join(f"Item {index}\nValue {index * 7}" for index in range(STATIC_ROWS))
 ASSET_CONTENT = "\n".join(f"Headline {index}" for index in range(1, ASSET_COUNT + 1))
 
 

@@ -50,28 +50,30 @@ TABLE_COLS = 6
 ASSET_COUNT = 20
 
 EXPECTED_JS_SKUS = [f"SKU-{index:03d}" for index in range(JS_ITEMS)]
-EXPECTED_PAGINATION_IDS = [
-    f"page-{page}-row-{row}" for page in range(1, PAGE_COUNT + 1) for row in range(PAGE_SIZE)
-]
+EXPECTED_PAGINATION_IDS = [f"page-{page}-row-{row}" for page in range(1, PAGE_COUNT + 1) for row in range(PAGE_SIZE)]
 EXPECTED_TABLE_CELLS = [
-    [str(index)] + [f"cell-{index}-{column}" for column in range(1, TABLE_COLS)]
-    for index in range(TABLE_ROWS)
+    [str(index)] + [f"cell-{index}-{column}" for column in range(1, TABLE_COLS)] for index in range(TABLE_ROWS)
 ]
-EXPECTED_TABLE_ROWS = [
-    [f"table-{index}", *EXPECTED_TABLE_CELLS[index]] for index in range(TABLE_ROWS)
-]
+EXPECTED_TABLE_ROWS = [[f"table-{index}", *EXPECTED_TABLE_CELLS[index]] for index in range(TABLE_ROWS)]
 
 
 def exact_static(content: str) -> bool:
-    """Require every static item in order and no decoy text."""
-    items = [int(value) for value in re.findall(r"Item (\d+)", content)]
-    return items == list(range(STATIC_ROWS)) and "DO NOT INCLUDE" not in content
+    """Require every article label and value in order, with no decoy text."""
+    if not isinstance(content, str):
+        return False
+    fields = re.findall(r"\b(Item|Value)\s+([0-9]+)(?![\w.+-])", content)
+    expected = [
+        (label, str(value)) for index in range(STATIC_ROWS) for label, value in (("Item", index), ("Value", index * 7))
+    ]
+    return fields == expected and "DO NOT INCLUDE" not in content
 
 
 def exact_assets(content: str) -> bool:
     """Require every rendered headline exactly once in order."""
-    headlines = [int(value) for value in re.findall(r"Headline (\d+)", content)]
-    return headlines == list(range(1, ASSET_COUNT + 1))
+    if not isinstance(content, str):
+        return False
+    headlines = re.findall(r"\bHeadline\s+([0-9]+)(?![\w.+-])", content)
+    return headlines == [str(index) for index in range(1, ASSET_COUNT + 1)]
 
 
 def exact_js_list(skus: list[str]) -> bool:
