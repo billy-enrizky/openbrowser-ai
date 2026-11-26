@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import importlib
 import json
+import math
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -1074,6 +1076,97 @@ def test_sampler_unknown_fence_resolution_is_fatal():
     detail = result["read_error_details"][0]
     assert detail["operation"] == "cmdline"
     assert detail["resolution"] == "unknown"
+
+
+@pytest.mark.parametrize("pid", [True, False, 0, -1, 20.5, "20", None])
+def test_identity_resolution_rejects_malformed_pid(pid: Any):
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    sampler = fake_sampler(module, {10: root})
+
+    resolution, error = sampler._identity_resolution((pid, 2.0))  # type: ignore[arg-type]
+
+    assert resolution == "unknown"
+    assert isinstance(error, ValueError)
+
+
+@pytest.mark.parametrize(
+    "created",
+    [0.0, 0, -1.0, math.nan, math.inf, -math.inf, True, False, "2.0", None],
+)
+def test_identity_resolution_rejects_malformed_expected_create_time(created: Any):
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    child = FakeProcess(20, 2.0)
+    sampler = fake_sampler(module, {10: root, 20: child})
+
+    resolution, error = sampler._identity_resolution((20, created))  # type: ignore[arg-type]
+
+    assert resolution == "unknown"
+    assert isinstance(error, ValueError)
+
+
+@pytest.mark.parametrize(
+    "created",
+    [0.0, 0, -1.0, math.nan, math.inf, -math.inf, True, False, "2.0", None],
+)
+def test_identity_resolution_rejects_malformed_current_create_time(created: Any):
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    child = FakeProcess(20, 2.0)
+    child.create_time = lambda: created
+    sampler = fake_sampler(module, {10: root, 20: child})
+
+    resolution, error = sampler._identity_resolution((20, 2.0))
+
+    assert resolution == "unknown"
+    assert isinstance(error, ValueError)
+
+
+@pytest.mark.parametrize(
+    "created",
+    [0.0, 0, -1.0, math.nan, math.inf, -math.inf, True, False, "2.0", None],
+)
+def test_sampler_malformed_current_create_time_is_fatal(created: Any):
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    child = FakeProcess(20, 2.0)
+    root.descendants = [child]
+
+    def denied():
+        child.create_time = lambda: created
+        raise module.psutil.AccessDenied(20)
+
+    child.memory_info = denied
+    sampler = fake_sampler(module, {10: root, 20: child})
+
+    sampler.sample()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    assert result["expected_exit_races"] == 0
+    detail = result["read_error_details"][0]
+    assert detail["resolution"] == "unknown"
+    assert detail["resolution_error_type"] == "ValueError"
+
+
+def test_sampler_child_identity_failure_keeps_sentinel_unknown():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    child = FakeProcess(20, 2.0)
+    child.create_time = lambda: (_ for _ in ()).throw(module.psutil.AccessDenied(20))
+    root.descendants = [child]
+    sampler = fake_sampler(module, {10: root, 20: child})
+
+    sampler.sample()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    assert result["expected_exit_races"] == 0
+    detail = result["read_error_details"][0]
+    assert detail["operation"] == "child_identity"
+    assert detail["resolution"] == "unknown"
+    assert detail["resolution_error_type"] == "ValueError"
 
 
 def test_browser_cmdline_failure_is_fatal_and_unverified():

@@ -250,6 +250,20 @@ def make_footprint_reader(*, platform_name: str | None = None) -> Callable[[int]
     return read
 
 
+def _valid_pid(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def _valid_create_time(value: object) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        number = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return False
+    return math.isfinite(number) and number > 0
+
+
 class ProcessTreeSampler:
     """Retain owned descendants after reparenting without following reused PIDs."""
 
@@ -282,10 +296,13 @@ class ProcessTreeSampler:
 
     def _identity_resolution(self, identity: tuple[int, float]) -> tuple[str, BaseException | None]:
         """Classify a failed read using an immediate PID, create-time, and status fence."""
-        if identity[1] < 0:
-            return "unknown", None
+        pid, expected = identity
+        if not _valid_pid(pid):
+            return "unknown", ValueError("invalid identity pid")
+        if not _valid_create_time(expected):
+            return "unknown", ValueError("invalid expected create time")
         try:
-            process = self._process(identity[0])
+            process = self._process(pid)
         except psutil.ZombieProcess as error:
             return "zombie", error
         except psutil.NoSuchProcess as error:
@@ -295,7 +312,10 @@ class ProcessTreeSampler:
         try:
             if not process.is_running():
                 return "gone", None
-            if process.create_time() != identity[1]:
+            current = process.create_time()
+            if not _valid_create_time(current):
+                return "unknown", ValueError("invalid current create time")
+            if current != expected:
                 return "replaced", None
             if process.status() == psutil.STATUS_ZOMBIE:
                 return "zombie", None
