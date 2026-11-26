@@ -98,6 +98,9 @@ class ResourceLedger:
     ) -> bool:
         self.read_errors += 1
         name = type(error).__name__
+        errno_value = getattr(error, "errno", None)
+        if isinstance(errno_value, bool) or not isinstance(errno_value, int):
+            errno_value = None
         self.read_error_types[name] = self.read_error_types.get(name, 0) + 1
         if len(self.read_error_details) < MAX_READ_ERROR_DETAILS:
             self.read_error_details.append(
@@ -108,7 +111,7 @@ class ResourceLedger:
                     "phase": phase,
                     "sample_index": sample_index,
                     "error_type": name,
-                    "error": str(error).replace("\n", " ")[:300],
+                    "errno": errno_value,
                 }
             )
         else:
@@ -369,24 +372,23 @@ class ProcessTreeSampler:
                     ProcessReading(process.pid, identity[1], rss, cpu.user + cpu.system, footprint, name, browser_main)
                 )
             except (psutil.Error, OSError) as error:
-                fatal = self._ledger.note_read_error(
+                self._ledger.note_read_error(
                     error,
                     identity=identity,
                     operation=operation,
                     phase=phase,
                     sample_index=self._ledger.samples,
                 )
-                if fatal:
-                    self._unverified.add(identity)
         self._ledger.observe(readings, phase=phase)
 
     def result(self) -> dict:
-        unknown = (
-            {pid for pid, _ in self._unverified}
-            | self._marker_unverified
-            | {pid for pid, _ in self._ledger.fatal_read_identities}
-        )
-        return {**self._ledger.result(), "unverified_processes": len(unknown)}
+        live_unknown = {pid for pid, _ in self._unverified} | self._marker_unverified
+        observation_unknown = live_unknown | {pid for pid, _ in self._ledger.fatal_read_identities}
+        return {
+            **self._ledger.result(),
+            "unverified_processes": len(observation_unknown),
+            "cleanup_unverified_processes": len(live_unknown),
+        }
 
 
 def sample_plan(arms: list[str], tasks: list[str], samples: int):
@@ -513,16 +515,35 @@ def run_worker(task: str, arm: str, sample: int, workdir: Path, output: Path) ->
     output.write_text(json.dumps(record) + "\n")
 
 
+def observation_ok(resources: dict, cleanup: dict) -> bool:
+    """Return whether the resource observation is comparable and cleanup is verified."""
+    return bool(
+        resources.get("peak_tree_rss_bytes") is not None
+        and resources.get("fatal_read_errors") == 0
+        and resources.get("observed_child_processes", 0) > 0
+        and resources.get("observed_browser_during_native_run", 0) > 0
+        and cleanup["verified"]
+    )
+
+
 def cleanup_owned(sampler: ProcessTreeSampler, *, interval: float = 0.02, timeout: float = 4.0) -> dict:
     started = time.monotonic()
     deadline = started + timeout
     terminate_sent: set[tuple[int, float]] = set()
     kill_sent: set[tuple[int, float]] = set()
     errors = []
+
+    def cleanup_uncertainty() -> int:
+        result = sampler.result()
+        value = result.get("cleanup_unverified_processes")
+        if value is None:
+            value = result.get("unverified_processes", 0)
+        return int(value)
+
     sampler.discover_orphans()
     live = sampler.live_processes(phase="cleanup")
     initial = len(live)
-    while live or sampler.result().get("unverified_processes", 0):
+    while live or cleanup_uncertainty():
         now = time.monotonic()
         for identity, process in live.items():
             try:
@@ -541,7 +562,7 @@ def cleanup_owned(sampler: ProcessTreeSampler, *, interval: float = 0.02, timeou
         sampler.discover_orphans()
         live = sampler.live_processes(phase="cleanup")
         remaining = deadline - time.monotonic()
-        if not live and not sampler.result().get("unverified_processes", 0):
+        if not live and not cleanup_uncertainty():
             break
         if remaining <= 0:
             break
@@ -549,7 +570,7 @@ def cleanup_owned(sampler: ProcessTreeSampler, *, interval: float = 0.02, timeou
     sampler.discover_orphans()
     sampler.sample(phase="cleanup")
     live = sampler.live_processes(phase="cleanup")
-    uncertain = sampler.result().get("unverified_processes", 0)
+    uncertain = cleanup_uncertainty()
     return {
         "initial_leftovers": initial,
         "remaining": [{"pid": pid, "created_at": created} for pid, created in sorted(live)],
@@ -669,11 +690,7 @@ def run_sample(task: str, arm: str, sample: int, *, workdir: Path, interval: flo
             {
                 "resources": resources,
                 "resource_window_seconds": elapsed,
-                "resource_ok": resources.get("peak_tree_rss_bytes") is not None
-                and resources.get("fatal_read_errors") == 0
-                and resources.get("observed_child_processes", 0) > 0
-                and resources.get("observed_browser_during_native_run", 0) > 0
-                and cleanup["verified"],
+                "resource_ok": observation_ok(resources, cleanup),
                 "cleanup": cleanup,
                 "diagnostics": worker_diagnostics(root),
                 "worker_timed_out": timed_out,

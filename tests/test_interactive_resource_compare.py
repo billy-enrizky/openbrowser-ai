@@ -881,6 +881,9 @@ def test_browser_cmdline_failure_is_fatal_and_unverified():
     assert detail["operation"] == "cmdline"
     assert detail["phase"] == "native_run"
     assert detail["error_type"] == "AccessDenied"
+    assert "error" not in detail
+    assert detail["errno"] is None
+    assert result["cleanup_unverified_processes"] == 0
 
 
 def test_required_read_failure_records_operation_and_unverified():
@@ -969,6 +972,7 @@ def test_fatal_access_denied_is_not_reclassified_after_exit():
     second = sampler.result()
 
     assert first["fatal_read_errors"] == second["fatal_read_errors"] == 1
+    assert second["cleanup_unverified_processes"] == 0
     assert second["expected_exit_races"] == 0
     assert second["unverified_processes"] == 1
     assert second["read_error_details"][0]["operation"] == "cmdline"
@@ -1021,3 +1025,64 @@ def test_lane_writes_strict_terminal_metadata(monkeypatch, tmp_path):
     assert raw[-1]["cleanup_verified"] is True
     assert raw[-1]["fixture_errors"] == []
     assert raw[-1]["failures"] == 0
+
+
+def test_oserror_errno_is_closed_and_recorded():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    root.executable = "python3.12"
+
+    def denied():
+        raise OSError(0, "Undefined error: 0 (originated from sysctl(KERN_PROCARGS2))")
+
+    root.memory_info = denied
+    sampler = fake_sampler(module, {10: root})
+
+    sampler.sample()
+
+    detail = sampler.result()["read_error_details"][0]
+    assert detail["error_type"] == "OSError"
+    assert detail["errno"] == 0
+    assert "error" not in detail
+
+
+def test_cleanup_verifies_after_fatal_read_identity_is_gone():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    root.executable = "python3.12"
+    browser = FakeProcess(20, 2.0)
+    browser.executable = "Google Chrome"
+
+    def denied():
+        raise module.psutil.AccessDenied(20)
+
+    browser.cmdline = denied
+    root.descendants = [browser]
+    processes = {10: root, 20: browser}
+    sampler = fake_sampler(module, processes)
+
+    sampler.sample()
+    processes.pop(10)
+    processes.pop(20)
+    cleanup = module.cleanup_owned(sampler, interval=0.1, timeout=1.0)
+    resources = sampler.result()
+
+    assert resources["fatal_read_errors"] == 1
+    assert resources["unverified_processes"] == 1
+    assert resources["cleanup_unverified_processes"] == 0
+    assert cleanup["verified"] is True
+    assert cleanup["unverified_processes"] == 0
+    assert module.observation_ok(resources, cleanup) is False
+
+
+def test_observation_ok_rejects_fatal_read_even_with_verified_cleanup():
+    module = resource_module()
+    resources = {
+        "peak_tree_rss_bytes": 100,
+        "fatal_read_errors": 1,
+        "observed_child_processes": 1,
+        "observed_browser_during_native_run": 1,
+    }
+
+    assert module.observation_ok(resources, {"verified": True}) is False
+    assert module.observation_ok({**resources, "fatal_read_errors": 0}, {"verified": True}) is True
