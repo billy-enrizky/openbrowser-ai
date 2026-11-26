@@ -47,11 +47,21 @@ def test_namespace_import_does_not_import_requests(tmp_path: Path) -> None:
 
     script = """
 import sys
+blocked_events = []
+def guard(event, arguments):
+    if event in {
+        'socket.__new__', 'socket.connect', 'socket.bind', 'socket.listen',
+        'socket.getaddrinfo', 'subprocess.Popen',
+    }:
+        blocked_events.append(event)
+        raise AssertionError('namespace import attempted native I/O: ' + event)
+sys.addaudithook(guard)
 import openbrowser.code_use.namespace as namespace
 assert 'requests' not in sys.modules, 'requests imported during namespace import'
+assert not blocked_events, blocked_events
 getattr(namespace.requests, 'get')
 assert 'requests' in sys.modules, 'requests was not resolved on first use'
-print('lazy-ok')
+sys.stdout.write('lazy-ok\\n')
 """
     result = subprocess.run(
         [sys.executable, "-B", "-c", script],
@@ -96,6 +106,42 @@ def test_lazy_binding_attribute_patch_uses_resolved_module(monkeypatch: pytest.M
         assert binding.get() == "patched"
 
     assert binding.get() == "original"
+
+
+def test_lazy_binding_attribute_writes_and_deletes_reach_the_real_module(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    real_module = SimpleNamespace()
+
+    def load(name):
+        calls.append(name)
+        return real_module
+
+    monkeypatch.setattr(namespace.importlib, "import_module", load)
+    binding = namespace._LazyModuleBinding("requests")
+    binding.temporary = "value"
+    assert real_module.temporary == "value"
+    del binding.temporary
+    assert not hasattr(real_module, "temporary")
+    assert calls == ["requests"]
+
+
+def test_lazy_binding_can_resolve_after_an_import_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    real_module = SimpleNamespace(get=lambda: "resolved")
+
+    def load(name):
+        calls.append(name)
+        if len(calls) == 1:
+            raise ImportError("requests unavailable")
+        return real_module
+
+    monkeypatch.setattr(namespace.importlib, "import_module", load)
+    binding = namespace._LazyModuleBinding("requests")
+    with pytest.raises(ImportError, match="requests unavailable"):
+        binding.get()
+    assert binding._resolved is None
+    assert binding.get() == "resolved"
+    assert calls == ["requests", "requests"]
 
 
 @pytest.mark.asyncio
