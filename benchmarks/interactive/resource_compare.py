@@ -35,7 +35,7 @@ MODULE = "benchmarks.interactive.resource_compare"
 LOGGER = logging.getLogger(__name__)
 DEFAULT_WORKDIR = Path("/tmp") if os.name != "nt" else Path(tempfile.gettempdir())
 SAMPLE_PREFIX = "r-"
-SAMPLER_METHOD_VERSION = 3
+SAMPLER_METHOD_VERSION = 4
 MAX_READ_ERROR_DETAILS = 32
 
 DEFAULT_ARMS = list(CANONICAL_ARMS)
@@ -83,6 +83,7 @@ class ResourceLedger:
         self.fatal_read_errors = 0
         self.expected_exit_races = 0
         self.read_error_types: dict[str, int] = {}
+        self.read_resolutions: dict[str, int] = {}
         self.read_error_details: list[dict] = []
         self.read_error_details_truncated = 0
         self.fatal_read_identities: set[tuple[int, float]] = set()
@@ -95,6 +96,8 @@ class ResourceLedger:
         operation: str,
         phase: str,
         sample_index: int,
+        resolution: str = "unknown",
+        resolution_error: BaseException | None = None,
     ) -> bool:
         self.read_errors += 1
         name = type(error).__name__
@@ -102,6 +105,11 @@ class ResourceLedger:
         if isinstance(errno_value, bool) or not isinstance(errno_value, int):
             errno_value = None
         self.read_error_types[name] = self.read_error_types.get(name, 0) + 1
+        self.read_resolutions[resolution] = self.read_resolutions.get(resolution, 0) + 1
+        resolution_error_type = type(resolution_error).__name__ if resolution_error is not None else None
+        resolution_errno = getattr(resolution_error, "errno", None) if resolution_error is not None else None
+        if isinstance(resolution_errno, bool) or not isinstance(resolution_errno, int):
+            resolution_errno = None
         if len(self.read_error_details) < MAX_READ_ERROR_DETAILS:
             self.read_error_details.append(
                 {
@@ -112,11 +120,14 @@ class ResourceLedger:
                     "sample_index": sample_index,
                     "error_type": name,
                     "errno": errno_value,
+                    "resolution": resolution,
+                    "resolution_error_type": resolution_error_type,
+                    "resolution_errno": resolution_errno,
                 }
             )
         else:
             self.read_error_details_truncated += 1
-        if isinstance(error, (psutil.NoSuchProcess, psutil.ZombieProcess)):
+        if resolution in {"gone", "zombie", "replaced"}:
             self.expected_exit_races += 1
             return False
         self.fatal_read_errors += 1
@@ -186,6 +197,7 @@ class ResourceLedger:
             "fatal_read_errors": self.fatal_read_errors,
             "expected_exit_races": self.expected_exit_races,
             "read_error_types": dict(sorted(self.read_error_types.items())),
+            "read_resolutions": dict(sorted(self.read_resolutions.items())),
             "sampler_method_version": SAMPLER_METHOD_VERSION,
             "read_error_details": list(self.read_error_details),
             "read_error_details_truncated": self.read_error_details_truncated,
@@ -262,9 +274,57 @@ class ProcessTreeSampler:
             root_identity = root_pid, -1.0
         self._known = {root_identity}
         self._unverified: set[tuple[int, float]] = set()
+        self._browser_roles: dict[tuple[int, float], bool] = {}
         self._ledger = ResourceLedger(
             root_identity,
             footprint_supported=self._footprint is not None if footprint_supported is None else footprint_supported,
+        )
+
+    def _identity_resolution(self, identity: tuple[int, float]) -> tuple[str, BaseException | None]:
+        """Classify a failed read using an immediate PID, create-time, and status fence."""
+        if identity[1] < 0:
+            return "unknown", None
+        try:
+            process = self._process(identity[0])
+        except psutil.ZombieProcess as error:
+            return "zombie", error
+        except psutil.NoSuchProcess as error:
+            return "gone", error
+        except (psutil.Error, OSError) as error:
+            return "unknown", error
+        try:
+            if not process.is_running():
+                return "gone", None
+            if process.create_time() != identity[1]:
+                return "replaced", None
+            if process.status() == psutil.STATUS_ZOMBIE:
+                return "zombie", None
+            return "alive", None
+        except psutil.ZombieProcess as error:
+            return "zombie", error
+        except psutil.NoSuchProcess as error:
+            return "gone", error
+        except (psutil.Error, OSError) as error:
+            return "unknown", error
+
+    def _note_read_error(
+        self,
+        error: BaseException,
+        *,
+        identity: tuple[int, float],
+        operation: str,
+        phase: str,
+        sample_index: int,
+    ) -> None:
+        resolution, resolution_error = self._identity_resolution(identity)
+        self._ledger.note_read_error(
+            error,
+            identity=identity,
+            operation=operation,
+            phase=phase,
+            sample_index=sample_index,
+            resolution=resolution,
+            resolution_error=resolution_error,
         )
 
     def discover_orphans(self) -> None:
@@ -318,7 +378,7 @@ class ProcessTreeSampler:
                         continue
                     except (psutil.Error, OSError) as error:
                         child_identity = (child.pid, -1.0)
-                        self._ledger.note_read_error(
+                        self._note_read_error(
                             error,
                             identity=child_identity,
                             operation="child_identity",
@@ -332,7 +392,7 @@ class ProcessTreeSampler:
             except (psutil.NoSuchProcess, psutil.ZombieProcess):
                 continue
             except (psutil.Error, OSError) as error:
-                self._ledger.note_read_error(
+                self._note_read_error(
                     error,
                     identity=identity,
                     operation=operation,
@@ -353,16 +413,26 @@ class ProcessTreeSampler:
                 operation = "name"
                 name = process.name()
                 lowered = name.lower()
-                browser_like = (
-                    any(token in lowered for token in ("chrome", "chromium", "headless_shell", "brave", "msedge"))
-                    and "helper" not in lowered
-                    and "crashpad" not in lowered
-                )
-                command: list[str] = []
-                if browser_like:
-                    operation = "cmdline"
-                    command = process.cmdline()
-                browser_main = browser_like and not any(argument.startswith("--type=") for argument in command)
+                role = self._browser_roles.get(identity)
+                if role is None:
+                    if "helper" in lowered or "crashpad" in lowered:
+                        role = False
+                        self._browser_roles[identity] = role
+                    elif any(token in lowered for token in ("chrome", "chromium", "headless_shell", "brave", "msedge")):
+                        if len(name) >= 15:
+                            operation = "exe"
+                            executable_name = Path(process.exe()).name.lower()
+                            if "helper" in executable_name or "crashpad" in executable_name:
+                                role = False
+                                self._browser_roles[identity] = role
+                        if role is None:
+                            operation = "cmdline"
+                            command = process.cmdline()
+                            role = not any(argument.startswith("--type=") for argument in command)
+                            self._browser_roles[identity] = role
+                    else:
+                        role = False
+                browser_main = role is True
                 operation = "footprint"
                 footprint = self._footprint(process.pid) if self._footprint is not None else None
                 operation = "identity_recheck"
@@ -372,7 +442,7 @@ class ProcessTreeSampler:
                     ProcessReading(process.pid, identity[1], rss, cpu.user + cpu.system, footprint, name, browser_main)
                 )
             except (psutil.Error, OSError) as error:
-                self._ledger.note_read_error(
+                self._note_read_error(
                     error,
                     identity=identity,
                     operation=operation,
@@ -470,7 +540,8 @@ def source_manifest() -> dict:
             "Includes common Python worker and task-driver overhead.",
             "Summed RSS can double-count shared pages.",
             "Sampling can miss short-lived processes and final CPU increments.",
-            "Expected process-exit read races are counted separately; access and other read failures remain fatal.",
+            "Expected process-exit read races require an immediate identity fence that proves the same PID is "
+            "gone, zombie, or replaced. Access failures on a live identity remain fatal.",
             "Child footprint is null when unsupported or unavailable.",
             "Resource-instrumented wall time is not a latency benchmark.",
         ],

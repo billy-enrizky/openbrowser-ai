@@ -20,6 +20,23 @@ def resource_module():
         raise
 
 
+@pytest.fixture(autouse=True)
+def _no_native_io(monkeypatch):
+    import socket
+
+    module = resource_module()
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("fake test attempted native I/O")
+
+    monkeypatch.setattr(module.psutil, "Process", forbidden)
+    monkeypatch.setattr(module.psutil, "process_iter", forbidden)
+    monkeypatch.setattr(module.subprocess, "Popen", forbidden)
+    monkeypatch.setattr(module.subprocess, "run", forbidden)
+    monkeypatch.setattr(socket, "socket", forbidden)
+    monkeypatch.setattr(socket, "create_connection", forbidden)
+
+
 def test_accounting_keeps_simultaneous_peaks_and_exited_child_cpu():
     module = resource_module()
     ledger = module.ResourceLedger((10, 1.0), footprint_supported=True)
@@ -93,6 +110,7 @@ class FakeProcess:
         self.descendants = []
         self.state = "running"
         self.executable = "python"
+        self.name_value: str | None = None
         self.terminate: Callable[[], object] = lambda: pytest.fail("Unexpected fake terminate")
         self.kill: Callable[[], object] = lambda: pytest.fail("Unexpected fake kill")
 
@@ -106,6 +124,9 @@ class FakeProcess:
         return self.state
 
     def name(self):
+        return self.name_value or self.executable
+
+    def exe(self):
         return self.executable
 
     def cmdline(self):
@@ -726,7 +747,7 @@ def test_source_manifest_separates_harness_and_application_content(monkeypatch, 
     assert first["harness_digest"] == second["harness_digest"]
     assert first["expected_app_digest"] != second["expected_app_digest"]
     assert first["source_digest"] != second["source_digest"]
-    assert first["sampler_method_version"] == module.SAMPLER_METHOD_VERSION == 3
+    assert first["sampler_method_version"] == module.SAMPLER_METHOD_VERSION == 4
     assert first["configuration_digest"] == second["configuration_digest"]
 
 
@@ -776,16 +797,21 @@ def test_cleanup_finds_a_marked_orphan_created_as_its_parent_exits(monkeypatch):
 
 
 @pytest.mark.parametrize("exception_name", ["NoSuchProcess", "ZombieProcess"])
-def test_expected_process_exit_race_is_visible_but_not_a_fatal_access_error(exception_name):
+def test_expected_process_exit_race_is_proven_by_immediate_identity_fence(exception_name):
     module = resource_module()
     root = FakeProcess(10, 1.0)
     child = FakeProcess(20, 2.0, rss=200, cpu=0.2)
     child.executable = "Google Chrome"
     root.descendants = [child]
-    sampler = fake_sampler(module, {10: root, 20: child})
+    processes = {10: root, 20: child}
+    sampler = fake_sampler(module, processes)
     sampler.sample()
 
     def exited():
+        if exception_name == "NoSuchProcess":
+            processes.pop(20)
+        else:
+            child.state = module.psutil.STATUS_ZOMBIE
         raise getattr(module.psutil, exception_name)(20)
 
     child.memory_info = exited
@@ -796,6 +822,7 @@ def test_expected_process_exit_race_is_visible_but_not_a_fatal_access_error(exce
     assert result["expected_exit_races"] == 1
     assert result["fatal_read_errors"] == 0
     assert result["read_error_types"] == {exception_name: 1}
+    assert result["read_error_details"][0]["resolution"] in {"gone", "zombie"}
     assert result["peak_tree_rss_bytes"] == 300
     assert result["observed_browser_during_native_run"] == 1
     assert result["cpu_accounting"] == "sampled_lower_bound"
@@ -837,7 +864,7 @@ def test_sampler_skips_cmdline_for_non_browser_processes():
     result = sampler.result()
     assert calls == []
     assert result["fatal_read_errors"] == 0
-    assert result["sampler_method_version"] == module.SAMPLER_METHOD_VERSION == 3
+    assert result["sampler_method_version"] == module.SAMPLER_METHOD_VERSION == 4
 
 
 def test_sampler_skips_cmdline_for_helper_and_crashpad():
@@ -858,6 +885,195 @@ def test_sampler_skips_cmdline_for_helper_and_crashpad():
     result = sampler.result()
     assert result["fatal_read_errors"] == 0
     assert result["observed_browser_processes"] == 0
+
+
+def test_sampler_caches_helper_role_across_transient_name_flip():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    helper = FakeProcess(20, 2.0)
+    helper.name_value = "Google Chrome Helper (Aperitif)"
+    helper.cmdline = lambda: pytest.fail("cached helper cmdline must not be read")
+    root.descendants = [helper]
+    sampler = fake_sampler(module, {10: root, 20: helper})
+
+    sampler.sample()
+    helper.name_value = "Google Chrome"
+    sampler.sample()
+
+    result = sampler.result()
+    assert result["read_errors"] == 0
+    assert result["fatal_read_errors"] == 0
+    assert result["observed_browser_processes"] == 0
+
+
+def test_sampler_caches_main_role_across_transient_cmdline_denial():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    browser = FakeProcess(20, 2.0)
+    browser.executable = "Google Chrome"
+    browser.cmdline = lambda: ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]
+    root.descendants = [browser]
+    sampler = fake_sampler(module, {10: root, 20: browser})
+
+    sampler.sample()
+    browser.cmdline = lambda: (_ for _ in ()).throw(module.psutil.AccessDenied(20))
+    sampler.sample()
+
+    result = sampler.result()
+    assert result["read_errors"] == 0
+    assert result["fatal_read_errors"] == 0
+    assert result["observed_browser_during_native_run"] == 1
+
+
+def test_sampler_classifies_truncated_helper_with_exe_before_cmdline():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    helper = FakeProcess(20, 2.0)
+    helper.name_value = "Google Chrome He"
+    helper.executable = "/Applications/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper"
+    helper.cmdline = lambda: pytest.fail("truncated helper cmdline must not be read")
+    root.descendants = [helper]
+    sampler = fake_sampler(module, {10: root, 20: helper})
+
+    sampler.sample()
+
+    result = sampler.result()
+    assert result["read_errors"] == 0
+    assert result["fatal_read_errors"] == 0
+    assert result["observed_browser_processes"] == 0
+
+
+def test_sampler_classifies_truncated_main_with_exe_then_cmdline():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    browser = FakeProcess(20, 2.0)
+    browser.name_value = "Google Chrome Be"
+    browser.executable = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    browser.cmdline = lambda: ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]
+    root.descendants = [browser]
+    sampler = fake_sampler(module, {10: root, 20: browser})
+
+    sampler.sample()
+
+    result = sampler.result()
+    assert result["read_errors"] == 0
+    assert result["fatal_read_errors"] == 0
+    assert result["observed_browser_during_native_run"] == 1
+
+
+def test_sampler_exe_access_denied_on_live_identity_is_fatal():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    helper = FakeProcess(20, 2.0)
+    helper.name_value = "Google Chrome He"
+    helper.executable = "/Applications/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper"
+    helper.exe = lambda: (_ for _ in ()).throw(module.psutil.AccessDenied(20))
+    helper.cmdline = lambda: pytest.fail("cmdline must not run after exe denial")
+    root.descendants = [helper]
+    sampler = fake_sampler(module, {10: root, 20: helper})
+
+    sampler.sample()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    assert result["expected_exit_races"] == 0
+    detail = result["read_error_details"][0]
+    assert detail["operation"] == "exe"
+    assert detail["error_type"] == "AccessDenied"
+    assert detail["resolution"] == "alive"
+
+
+def test_sampler_does_not_reuse_role_after_pid_reuse():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    browser = FakeProcess(20, 2.0)
+    browser.executable = "Google Chrome"
+    browser.cmdline = lambda: ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]
+    processes = {10: root, 20: browser}
+    root.descendants = [browser]
+    sampler = fake_sampler(module, processes)
+    sampler.sample()
+
+    replacement = FakeProcess(20, 99.0)
+    replacement.executable = "Google Chrome"
+    replacement.cmdline = lambda: (_ for _ in ()).throw(module.psutil.AccessDenied(20))
+    processes[20] = replacement
+    root.descendants = [replacement]
+    sampler.sample()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    detail = result["read_error_details"][0]
+    assert detail["pid"] == 20
+    assert detail["created_at"] == 99.0
+    assert detail["resolution"] == "alive"
+
+
+def test_sampler_does_not_cache_generic_non_browser_name():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    root.executable = "python3.12"
+    root.cmdline = lambda: (_ for _ in ()).throw(module.psutil.AccessDenied(10))
+    sampler = fake_sampler(module, {10: root})
+    sampler.sample()
+
+    root.name_value = "Google Chrome"
+    root.executable = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    sampler.sample()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    assert result["read_error_details"][0]["resolution"] == "alive"
+
+
+def test_sampler_replaced_pid_after_access_denied_is_expected():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    browser = FakeProcess(20, 2.0)
+    browser.executable = "Google Chrome"
+    processes = {10: root, 20: browser}
+    root.descendants = [browser]
+    sampler = fake_sampler(module, processes)
+
+    replacement = FakeProcess(20, 99.0)
+    replacement.executable = "Google Chrome"
+
+    def denied():
+        processes[20] = replacement
+        raise module.psutil.AccessDenied(20)
+
+    browser.cmdline = denied
+    sampler.sample()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 0
+    assert result["expected_exit_races"] == 1
+    detail = result["read_error_details"][0]
+    assert detail["error_type"] == "AccessDenied"
+    assert detail["resolution"] == "replaced"
+
+
+def test_sampler_unknown_fence_resolution_is_fatal():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    browser = FakeProcess(20, 2.0)
+    browser.executable = "Google Chrome"
+
+    def denied_cmdline():
+        browser.create_time = lambda: (_ for _ in ()).throw(module.psutil.AccessDenied(20))
+        raise module.psutil.AccessDenied(20)
+
+    browser.cmdline = denied_cmdline
+    root.descendants = [browser]
+    sampler = fake_sampler(module, {10: root, 20: browser})
+
+    sampler.sample()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    detail = result["read_error_details"][0]
+    assert detail["operation"] == "cmdline"
+    assert detail["resolution"] == "unknown"
 
 
 def test_browser_cmdline_failure_is_fatal_and_unverified():
@@ -886,6 +1102,7 @@ def test_browser_cmdline_failure_is_fatal_and_unverified():
     assert detail["operation"] == "cmdline"
     assert detail["phase"] == "native_run"
     assert detail["error_type"] == "AccessDenied"
+    assert detail["resolution"] == "alive"
     assert "error" not in detail
     assert detail["errno"] is None
     assert result["cleanup_unverified_processes"] == 0
@@ -981,6 +1198,7 @@ def test_fatal_access_denied_is_not_reclassified_after_exit():
     assert second["expected_exit_races"] == 0
     assert second["unverified_processes"] == 1
     assert second["read_error_details"][0]["operation"] == "cmdline"
+    assert second["read_error_details"][0]["resolution"] == "alive"
 
 
 def test_lane_writes_strict_terminal_metadata(monkeypatch, tmp_path):
