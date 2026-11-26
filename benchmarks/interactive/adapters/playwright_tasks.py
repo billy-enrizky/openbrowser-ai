@@ -55,7 +55,7 @@ def modal_program(base_url: str) -> str:
   await page.click('#open-modal');
   await page.waitForSelector('#modal:not([hidden])');
   await page.keyboard.press('Escape');
-  await page.waitForSelector('#modal[hidden]');
+  await page.waitForSelector('#modal', {{state: 'hidden' }});
   await page.click('#open-modal');
   await page.fill('#project-search', 'Atlas');
   await page.waitForFunction(() => [...document.querySelectorAll('#project-list [role=option]')]

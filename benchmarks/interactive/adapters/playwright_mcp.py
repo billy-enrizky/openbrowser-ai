@@ -2,7 +2,9 @@
 
 The arm drives the official ``@playwright/mcp`` server over stdio. The primary
 scripted path is one ``browser_run_code_unsafe`` program per task. Downloads
-use the native automatic save with ``--output-dir`` set to the run directory.
+use the native automatic save with the run output directory. Browser launch is
+pinned to the benchmark Chrome with an explicit mock keychain, 1280x800
+viewport, and the same native config the CLI surface uses.
 """
 
 from __future__ import annotations
@@ -19,10 +21,12 @@ from .playwright_common import (
     MCP_VERSION,
     PLAYWRIGHT_VERSION,
     assert_no_secret,
+    chrome_version,
     keychain,
     last_json,
     result_text,
     wait_for_download,
+    write_browser_config,
     write_secrets,
 )
 from .playwright_tasks import SECRET_PASSWORD, account_program, login_program, task_program
@@ -51,6 +55,7 @@ class PlaywrightMcpArm:
         self.binary = str(binary or os.environ.get("PLAYWRIGHT_MCP_BIN") or DEFAULT_MCP_BINARY)
         self.secrets_file = Path(secrets_file) if secrets_file else None
         self.timeout = timeout
+        self.browser_version = chrome_version()
         self._result = ArmResult(ok=False)
         self._client: StdioMcpClient | None = None
 
@@ -66,11 +71,23 @@ class PlaywrightMcpArm:
             str(ctx.downloads),
             "--secrets",
             str(secrets),
+            "--config",
+            str(write_browser_config(ctx)),
+            "--viewport-size",
+            "1280x800",
             "--codegen",
             "none",
             "--snapshot-mode",
             "none",
         ]
+
+    def _archive_stderr(self, client: StdioMcpClient) -> None:
+        lines = getattr(client, "stderr_lines", [])
+        archived = int(getattr(client, "_bench_stderr_archived", 0))
+        fresh = "\n".join(lines[archived:])
+        vars(client)["_bench_stderr_archived"] = len(lines)
+        if fresh:
+            self._result.stderr = (self._result.stderr + "\n" + fresh).strip("\n")
 
     def _start(self, ctx: RunContext) -> StdioMcpClient:
         if self._client is not None:
@@ -80,9 +97,11 @@ class PlaywrightMcpArm:
         try:
             client.initialize()
         except Exception:
+            self._archive_stderr(client)
             self._client = None
             with contextlib.suppress(Exception):
                 client.close()
+            self._archive_stderr(client)
             raise
         self._result.process_starts += 1
         return client
@@ -97,8 +116,10 @@ class PlaywrightMcpArm:
 
     def _restart(self, ctx: RunContext) -> None:
         if self._client is not None:
+            self._archive_stderr(self._client)
             with contextlib.suppress(Exception):
                 self._client.close()
+            self._archive_stderr(self._client)
             self._client = None
         self._start(ctx)
 
@@ -109,7 +130,15 @@ class PlaywrightMcpArm:
         self._start(ctx)
         text = self._call(ctx, "browser_run_code_unsafe", {"code": READINESS_PROGRAM})
         payload = last_json(text)
-        payload.update({"server": "playwright-mcp", "package": MCP_VERSION, "playwright": PLAYWRIGHT_VERSION})
+        payload["user_agent"] = payload.pop("browser_version", "")
+        payload.update(
+            {
+                "server": "playwright-mcp",
+                "package": MCP_VERSION,
+                "playwright": PLAYWRIGHT_VERSION,
+                "browser_version": self.browser_version,
+            }
+        )
         return payload, (time.monotonic() - started) * 1000.0
 
     def execute_program(self, ctx: RunContext, code: str, *, timeout: float | None = None) -> ArmResult:
@@ -120,11 +149,12 @@ class PlaywrightMcpArm:
             text = self._call(ctx, "browser_run_code_unsafe", {"code": code}, timeout=timeout)
             result.stdout = text
             result.reported = last_json(text)
+            result.browser_version = self.browser_version
             result.ok = True
         except Exception as exc:
             result.error = str(exc)
             result.stdout = self._result.stdout
-            result.stderr = self._stderr()
+            result.stderr = self._result.stderr
         result.tool_calls = self._result.tool_calls - calls
         result.process_starts = self._result.process_starts - starts
         return result
@@ -157,10 +187,10 @@ class PlaywrightMcpArm:
                     self._result.reported = {"download": path.name}
                 else:
                     self._result.reported = last_json(self._result.stdout)
+            self._result.browser_version = self.browser_version
             self._result.keychain_verified = keychain(ctx)
             if self._result.keychain_verified is False:
                 raise RuntimeError("Playwright Chrome launched without --use-mock-keychain")
-            assert_no_secret(self._result.stdout, self._result.stderr)
             self._result.ok = True
         except Exception as exc:
             self._result.ok = False
@@ -168,20 +198,22 @@ class PlaywrightMcpArm:
         finally:
             if cleanup:
                 self.cleanup(ctx)
-            self._result.stderr = self._stderr()
+        try:
+            assert_no_secret(self._result.stdout, self._result.stderr)
+        except RuntimeError as exc:
+            self._result.ok = False
+            self._result.error = str(exc)
         return self._result
-
-    def _stderr(self) -> str:
-        if self._client is None:
-            return ""
-        return "\n".join(getattr(self._client, "stderr_lines", []))
 
     def cleanup(self, ctx: RunContext) -> None:
         if self._client is not None:
+            self._archive_stderr(self._client)
             with contextlib.suppress(Exception):
                 self._client.call_tool("browser_close", {}, timeout=30)
+            self._archive_stderr(self._client)
             with contextlib.suppress(Exception):
                 self._client.close()
+            self._archive_stderr(self._client)
             self._client = None
         terminate_matching(str(ctx.profile))
         terminate_matching(str(ctx.downloads))
