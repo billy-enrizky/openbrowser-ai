@@ -218,6 +218,7 @@
             "pages": [
               "customize/integrations/mcp-server",
               "customize/integrations/cli-daemon",
+              "customize/integrations/native-cli",
               "development/n8n-integration"
             ]
           }
