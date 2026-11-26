@@ -43,6 +43,8 @@ def _no_native_io(monkeypatch):
     monkeypatch.setattr(playwright_cli, "chrome_version", lambda: "Guarded/1.0")
     monkeypatch.setattr(playwright_mcp, "terminate_matching", lambda marker: [])
     monkeypatch.setattr(playwright_cli, "terminate_matching", lambda marker: [])
+    monkeypatch.setattr(playwright_mcp, "keychain", lambda ctx: True)
+    monkeypatch.setattr(playwright_cli, "keychain", lambda ctx: True)
 
 
 def make_context(tmp_path: Path, *, task: str = "wizard") -> RunContext:
@@ -168,6 +170,7 @@ def test_mcp_server_command_and_execute_program(tmp_path, monkeypatch):
     monkeypatch.setattr(playwright_mcp, "keychain", lambda ctx: True)
 
     arm = playwright_mcp.PlaywrightMcpArm(binary="/bin/playwright-mcp")
+    arm.warmup(ctx)
     result = arm.execute_program(ctx, 'async (page) => { return {quote: "Q-1"}; }')
     assert result.ok is True
     assert result.reported == {"ok": True} or result.reported == {"quote": "Q-1"}
@@ -221,6 +224,7 @@ def test_mcp_warmup_payload(tmp_path, monkeypatch):
     payload, elapsed = arm.warmup(ctx)
     assert payload["user_agent"] == "TestUA"
     assert payload["server"] == "playwright-mcp"
+    assert payload["keychain_verified"] is True
     assert elapsed >= 0
 
 
@@ -253,6 +257,7 @@ def test_cli_commands_and_execute_program(tmp_path, monkeypatch):
     monkeypatch.setattr(playwright_cli, "keychain", lambda ctx: True)
 
     arm = playwright_cli.PlaywrightCliArm(binary="/bin/playwright-cli")
+    arm.warmup(ctx)
     result = arm.execute_program(ctx, 'async (page) => { return {quote: "Q-1"}; }')
     assert result.ok is True
     open_command = FakeProcess.commands[0]
@@ -519,3 +524,129 @@ def test_mcp_restart_closes_browser_before_transport(tmp_path, monkeypatch):
 def test_scraping_program_reports_oracle_key(task, key):
     code = task_program(task, "http://x", None)
     assert f"{key}" in code.split("return", 1)[1]
+
+
+def test_mcp_warmup_caches_keychain_for_warm_runs(tmp_path, monkeypatch):
+    ctx = make_context(tmp_path)
+    calls: list[int] = []
+    monkeypatch.setattr(playwright_mcp, "StdioMcpClient", FakeMcpClient)
+    monkeypatch.setattr(playwright_mcp, "keychain", lambda ctx: calls.append(1) or True)
+    arm = playwright_mcp.PlaywrightMcpArm(binary="/bin/playwright-mcp")
+    arm.warmup(ctx)
+    assert calls == [1]
+    first = arm.run(ctx, cleanup=False)
+    second = arm.run(ctx, cleanup=False)
+    assert first.ok is True and first.keychain_verified is True
+    assert second.ok is True and second.keychain_verified is True
+    assert calls == [1]
+    arm.cleanup(ctx)
+    assert arm._keychain_verified is None
+
+
+def test_cli_warmup_caches_keychain_for_warm_runs(tmp_path, monkeypatch):
+    ctx = make_context(tmp_path)
+    calls: list[int] = []
+    monkeypatch.setattr(playwright_cli, "run_process", FakeProcess.run)
+    monkeypatch.setattr(playwright_cli, "keychain", lambda ctx: calls.append(1) or True)
+    arm = playwright_cli.PlaywrightCliArm(binary="/bin/playwright-cli")
+    arm.warmup(ctx)
+    assert calls == [1]
+    first = arm.run(ctx, cleanup=False)
+    second = arm.run(ctx, cleanup=False)
+    assert first.ok is True and first.keychain_verified is True
+    assert second.ok is True and second.keychain_verified is True
+    assert calls == [1]
+    arm.cleanup(ctx)
+    assert arm._keychain_verified is None
+
+
+@pytest.mark.parametrize("value", [False, None])
+def test_mcp_warmup_rejects_failed_or_unknown_keychain(tmp_path, monkeypatch, value):
+    ctx = make_context(tmp_path)
+    monkeypatch.setattr(playwright_mcp, "StdioMcpClient", FakeMcpClient)
+    monkeypatch.setattr(playwright_mcp, "keychain", lambda ctx: value)
+    arm = playwright_mcp.PlaywrightMcpArm(binary="/bin/playwright-mcp")
+    with pytest.raises(RuntimeError, match="keychain"):
+        arm.warmup(ctx)
+    assert arm._keychain_verified is None
+
+
+@pytest.mark.parametrize("value", [False, None])
+def test_cli_warmup_rejects_failed_or_unknown_keychain(tmp_path, monkeypatch, value):
+    ctx = make_context(tmp_path)
+    monkeypatch.setattr(playwright_cli, "run_process", FakeProcess.run)
+    monkeypatch.setattr(playwright_cli, "keychain", lambda ctx: value)
+    arm = playwright_cli.PlaywrightCliArm(binary="/bin/playwright-cli")
+    with pytest.raises(RuntimeError, match="keychain"):
+        arm.warmup(ctx)
+    assert arm._keychain_verified is None
+
+
+def test_mcp_cold_run_still_scans_keychain(tmp_path, monkeypatch):
+    ctx = make_context(tmp_path)
+    calls: list[int] = []
+    monkeypatch.setattr(playwright_mcp, "StdioMcpClient", FakeMcpClient)
+    monkeypatch.setattr(playwright_mcp, "keychain", lambda ctx: calls.append(1) or True)
+    arm = playwright_mcp.PlaywrightMcpArm(binary="/bin/playwright-mcp")
+    result = arm.run(ctx, cleanup=False)
+    assert result.ok is True and result.keychain_verified is True
+    assert calls == [1]
+
+
+def test_cli_cold_run_still_scans_keychain(tmp_path, monkeypatch):
+    ctx = make_context(tmp_path)
+    calls: list[int] = []
+    monkeypatch.setattr(playwright_cli, "run_process", FakeProcess.run)
+    monkeypatch.setattr(playwright_cli, "keychain", lambda ctx: calls.append(1) or True)
+    arm = playwright_cli.PlaywrightCliArm(binary="/bin/playwright-cli")
+    result = arm.run(ctx, cleanup=False)
+    assert result.ok is True and result.keychain_verified is True
+    assert calls == [1]
+
+
+def test_mcp_restart_invalidates_cached_keychain(tmp_path, monkeypatch):
+    ctx = make_context(tmp_path)
+    calls: list[int] = []
+    monkeypatch.setattr(playwright_mcp, "StdioMcpClient", FakeMcpClient)
+    monkeypatch.setattr(playwright_mcp, "keychain", lambda ctx: calls.append(1) or True)
+    arm = playwright_mcp.PlaywrightMcpArm(binary="/bin/playwright-mcp")
+    arm.warmup(ctx)
+    assert calls == [1]
+    arm._restart(ctx)
+    assert arm._keychain_verified is None
+    result = arm.run(ctx, cleanup=False)
+    assert result.ok is True
+    assert calls == [1, 1]
+
+
+def test_cli_restart_invalidates_cached_keychain(tmp_path, monkeypatch):
+    ctx = make_context(tmp_path)
+    calls: list[int] = []
+    monkeypatch.setattr(playwright_cli, "run_process", FakeProcess.run)
+    monkeypatch.setattr(playwright_cli, "keychain", lambda ctx: calls.append(1) or True)
+    arm = playwright_cli.PlaywrightCliArm(binary="/bin/playwright-cli")
+    arm.warmup(ctx)
+    assert calls == [1]
+    arm._restart(ctx)
+    assert arm._keychain_verified is None
+    result = arm.run(ctx, cleanup=False)
+    assert result.ok is True
+    assert calls == [1, 1]
+
+
+def test_mcp_execute_program_requires_verified_launch(tmp_path, monkeypatch):
+    ctx = make_context(tmp_path)
+    monkeypatch.setattr(playwright_mcp, "StdioMcpClient", FakeMcpClient)
+    arm = playwright_mcp.PlaywrightMcpArm(binary="/bin/playwright-mcp")
+    result = arm.execute_program(ctx, "async (page) => { return {ok: true}; }")
+    assert result.ok is False
+    assert "readiness" in result.error
+
+
+def test_cli_execute_program_requires_verified_launch(tmp_path, monkeypatch):
+    ctx = make_context(tmp_path)
+    monkeypatch.setattr(playwright_cli, "run_process", FakeProcess.run)
+    arm = playwright_cli.PlaywrightCliArm(binary="/bin/playwright-cli")
+    result = arm.execute_program(ctx, "async (page) => { return {ok: true}; }")
+    assert result.ok is False
+    assert "readiness" in result.error

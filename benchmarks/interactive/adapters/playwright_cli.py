@@ -57,6 +57,7 @@ class PlaywrightCliArm:
         self.timeout = timeout
         self.browser_version = browser_version or chrome_version()
         self._result = ArmResult(ok=False)
+        self._keychain_verified: bool | None = None
         self._opened = False
         self._attempted_open = False
         self._config_path: Path | None = None
@@ -89,6 +90,7 @@ class PlaywrightCliArm:
         if self._opened:
             return
         self._attempted_open = True
+        self._keychain_verified = None
         self._run(
             ctx,
             "open",
@@ -117,12 +119,25 @@ class PlaywrightCliArm:
         )
 
     def _restart(self, ctx: RunContext) -> None:
+        self._keychain_verified = None
         if self._opened or self._attempted_open:
             with contextlib.suppress(Exception):
                 self._run(ctx, "close", timeout=60)
             self._opened = False
             self._attempted_open = False
         self._open(ctx)
+
+    def _ensure_keychain(self, ctx: RunContext) -> bool:
+        """Verify the mock keychain once per launched browser."""
+        if self._keychain_verified is True:
+            return True
+        value = keychain(ctx)
+        if value is None:
+            raise RuntimeError("Playwright keychain verification unavailable")
+        if value is not True:
+            raise RuntimeError("Playwright Chrome launched without --use-mock-keychain")
+        self._keychain_verified = True
+        return True
 
     # -- benchmark surface -------------------------------------------------
     def warmup(self, ctx: RunContext) -> tuple[dict, float]:
@@ -139,17 +154,23 @@ class PlaywrightCliArm:
                 "browser_version": self.browser_version,
             }
         )
+        self._ensure_keychain(ctx)
+        payload["keychain_verified"] = True
         return payload, (time.monotonic() - started) * 1000.0
 
     def execute_program(self, ctx: RunContext, code: str, *, timeout: float | None = None) -> ArmResult:
         """Run one native program. Seam for the scraping bridge."""
         result = ArmResult(ok=False)
+        if self._keychain_verified is not True:
+            result.error = "Playwright launch readiness was not verified; call warmup first"
+            return result
         calls, starts = self._result.tool_calls, self._result.process_starts
         try:
             text = self._code(ctx, code, timeout=timeout)
             result.stdout = text
             result.reported = last_json(text)
             result.browser_version = self.browser_version
+            result.keychain_verified = True
             result.ok = True
         except Exception as exc:
             result.error = str(exc)
@@ -186,9 +207,7 @@ class PlaywrightCliArm:
                 else:
                     self._result.reported = last_json(self._result.stdout)
             self._result.browser_version = self.browser_version
-            self._result.keychain_verified = keychain(ctx)
-            if self._result.keychain_verified is False:
-                raise RuntimeError("Playwright Chrome launched without --use-mock-keychain")
+            self._result.keychain_verified = self._ensure_keychain(ctx)
             self._result.ok = True
         except Exception as exc:
             self._result.ok = False
@@ -209,5 +228,6 @@ class PlaywrightCliArm:
                 self._run(ctx, "close", timeout=60)
             self._opened = False
             self._attempted_open = False
+        self._keychain_verified = None
         terminate_matching(str(ctx.profile))
         terminate_matching(str(ctx.downloads))
