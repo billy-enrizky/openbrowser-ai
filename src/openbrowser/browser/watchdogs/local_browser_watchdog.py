@@ -461,7 +461,10 @@ class LocalBrowserWatchdog(BaseWatchdog):
 	def _profile_lease_path(self) -> Path:
 		if self._profile_lease:
 			return self._profile_lease.profile_dir
-		return Path(self.browser_session.browser_profile.user_data_dir).expanduser().resolve()
+		profile_dir = self.browser_session.browser_profile.user_data_dir
+		if profile_dir is None:
+			raise TypeError('Browser profile user_data_dir is required')
+		return Path(profile_dir).expanduser().resolve()
 
 	async def _release_profile_lease(self) -> None:
 		lease = self._profile_lease
@@ -717,8 +720,12 @@ class LocalBrowserWatchdog(BaseWatchdog):
 		try:
 			current_pid = int(process.pid)
 			current_start_time = float(process.create_time())
-			expected_pid = int(record.get('pid'))
-			expected_start_time = float(record.get('start_time'))
+			recorded_pid = record.get('pid')
+			recorded_start = record.get('start_time')
+			if recorded_pid is None or recorded_start is None:
+				return 'unknown'
+			expected_pid = int(recorded_pid)
+			expected_start_time = float(recorded_start)
 		except psutil.NoSuchProcess:
 			return 'gone'
 		except (psutil.AccessDenied, psutil.ZombieProcess, TypeError, ValueError, OSError):
@@ -1156,8 +1163,11 @@ class LocalBrowserWatchdog(BaseWatchdog):
 				return False
 			if browser.get('profile_dir') != resolved_dir:
 				return False
+			recorded_pid = browser.get('pid')
+			if recorded_pid is None:
+				return False
 			try:
-				browser_pid = int(browser.get('pid'))
+				browser_pid = int(recorded_pid)
 				proc = psutil.Process(browser_pid)
 			except psutil.NoSuchProcess:
 				descendants, scan_succeeded = cls._find_owned_descendants(
