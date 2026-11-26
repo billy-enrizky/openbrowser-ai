@@ -15,6 +15,8 @@ from pathlib import Path
 
 import psutil
 
+from ..measurement import validation_only
+
 _HOST_HOME = Path.home()
 DEFAULT_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
@@ -175,6 +177,7 @@ def process_commands_matching(marker: str) -> list[str]:
     return [command for _pid, command in _process_table() if marker in command]
 
 
+@validation_only
 def verify_mock_keychain(profile_marker: str, *, timeout: float = 10.0) -> bool | None:
     """Return True when the main browser process carries --use-mock-keychain.
 

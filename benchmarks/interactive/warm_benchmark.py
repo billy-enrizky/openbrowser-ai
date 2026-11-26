@@ -24,10 +24,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .arms import CANONICAL_ARMS, SUPPORTED_ARMS, WARM_METHOD_ID, WARM_METHOD_LABEL
 from .adapters.base import RunContext
 from .adapters.openbrowser import _write_config
+from .arms import CANONICAL_ARMS, SUPPORTED_ARMS, WARM_METHOD_ID, WARM_METHOD_LABEL
 from .fixtures.server import FixtureServer
+from .measurement import MEASUREMENT_METHOD, TaskTimer
 from .run_benchmark import _loads, make_arm
 from .tasks import ORACLES
 
@@ -250,9 +251,10 @@ def main() -> int:
                     if task == "download":
                         clean_downloads(ctx.downloads)
                     try:
-                        started = time.monotonic()
-                        result = arm.run(ctx, cleanup=False)
-                        latency_ms = (time.monotonic() - started) * 1000.0
+                        with TaskTimer() as timer:
+                            result = arm.run(ctx, cleanup=False)
+                        measurement = timer.public()
+                        latency_ms = measurement["task_ns"] / 1_000_000
                         state = server.state.snapshot()
                         oracle = ORACLES[task](state, result.reported, ctx.downloads)
                     finally:
@@ -273,6 +275,8 @@ def main() -> int:
                         "oracle_detail": oracle.detail,
                         "error": result.error,
                         "latency_ms": latency_ms,
+                        "measurement_method": MEASUREMENT_METHOD,
+                        "measurement": measurement,
                         "warmup_ms": warmup_ms,
                         "warmup_payload": warmup_payload,
                         "tool_calls": result.tool_calls,

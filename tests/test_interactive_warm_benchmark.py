@@ -253,6 +253,9 @@ def _fake_warm_cli(tmp_path, monkeypatch, *, cold_file=None):
 
     clock = iter([1000.0, 1000.25])
     monkeypatch.setattr(warm_benchmark, "time", SimpleNamespace(monotonic=lambda: next(clock), time_ns=lambda: 1))
+    from benchmarks.interactive.measurement import TaskTimer
+
+    monkeypatch.setattr(warm_benchmark, "TaskTimer", lambda: TaskTimer(clock=lambda: int(next(clock) * 1_000_000_000)))
     monkeypatch.setattr(warm_benchmark, "platform", SimpleNamespace(platform=lambda: "fake", machine=lambda: "fake"))
     monkeypatch.setattr(warm_benchmark, "_loads", lambda: (0, 0, 0))
     monkeypatch.setattr(warm_benchmark, "make_arm", lambda name: FakeArm())

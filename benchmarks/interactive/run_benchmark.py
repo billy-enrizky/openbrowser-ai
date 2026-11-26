@@ -35,6 +35,7 @@ from .adapters.openbrowser import OpenBrowserArm
 from .adapters.openbrowser_mcp import OpenBrowserMcpArm
 from .arms import CANONICAL_ARMS
 from .fixtures.server import FixtureServer
+from .measurement import MEASUREMENT_METHOD, TaskTimer
 from .tasks import ORACLES, TASKS
 
 HERE = Path(__file__).resolve().parent
@@ -153,10 +154,11 @@ def run_one(
     server, thread = start_fixture()
     ctx = make_context(task, arm_name, sample, server.base_url, workdir)
     arm = None
-    started = time.monotonic()
+    timer = TaskTimer()
     try:
-        arm = make_arm(arm_name, openbrowser_extensions=openbrowser_extensions)
-        result = arm.run(ctx, cleanup=False)
+        with timer:
+            arm = make_arm(arm_name, openbrowser_extensions=openbrowser_extensions)
+            result = arm.run(ctx, cleanup=False)
     except FileNotFoundError as exc:
         result = None
         error = f"unavailable: {exc}"
@@ -164,7 +166,8 @@ def run_one(
         result = None
         error = f"adapter crashed: {exc}"
     finally:
-        elapsed_ms = (time.monotonic() - started) * 1000.0
+        measurement = timer.public()
+        elapsed_ms = measurement["task_ns"] / 1_000_000
         if arm is not None:
             with contextlib.suppress(Exception):
                 arm.cleanup(ctx)
@@ -231,6 +234,8 @@ def run_one(
         }
     if not keep:
         shutil.rmtree(ctx.root, ignore_errors=True)
+    record["measurement_method"] = MEASUREMENT_METHOD
+    record["measurement"] = measurement
     return record
 
 

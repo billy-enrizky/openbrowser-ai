@@ -16,6 +16,7 @@ from typing import Any
 
 import psutil
 
+from ..measurement import validation_only
 from .base import _process_table
 
 ProcessFactory = Callable[[int], Any]
@@ -203,6 +204,7 @@ def capture_launch_proof(
     )
 
 
+@validation_only
 def proof_status(
     proof: LaunchProof,
     *,
