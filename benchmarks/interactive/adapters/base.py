@@ -178,6 +178,15 @@ def process_commands_matching(marker: str) -> list[str]:
 
 
 @validation_only
+def _keychain_commands(profile_marker: str) -> list[str]:
+    """Read benchmark launch metadata while retaining native readiness waits."""
+    return [
+        command
+        for command in process_commands_matching(profile_marker)
+        if "--user-data-dir=" in command and "--type=" not in command
+    ]
+
+
 def verify_mock_keychain(profile_marker: str, *, timeout: float = 10.0) -> bool | None:
     """Return True when the main browser process carries --use-mock-keychain.
 
@@ -186,11 +195,7 @@ def verify_mock_keychain(profile_marker: str, *, timeout: float = 10.0) -> bool 
     """
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        commands = [
-            command
-            for command in process_commands_matching(profile_marker)
-            if "--user-data-dir=" in command and "--type=" not in command
-        ]
+        commands = _keychain_commands(profile_marker)
         if commands:
             return all("--use-mock-keychain" in command for command in commands)
         time.sleep(0.2)

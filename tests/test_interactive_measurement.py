@@ -161,7 +161,31 @@ def test_unknown_keychain_proof_remains_unknown():
     clock = Clock()
     with measurement.TaskTimer(clock=clock) as timer:
         assert base.verify_mock_keychain("/profile-marker", timeout=0) is None
-    assert timer.public()["validation_calls"] == 1
+    assert timer.public()["validation_calls"] == 0
+
+
+def test_keychain_polling_keeps_browser_startup_wait_inside_the_task(monkeypatch):
+    from benchmarks.interactive.adapters import base
+
+    clock = Clock()
+    deadlines = iter([0.0, 0.0, 0.21])
+
+    def commands(marker):
+        clock.advance(22_000_000)
+        return []
+
+    monkeypatch.setattr(base, "process_commands_matching", commands)
+    monkeypatch.setattr(
+        base,
+        "time",
+        SimpleNamespace(
+            monotonic=lambda: next(deadlines), sleep=lambda seconds: clock.advance(int(seconds * 1_000_000_000))
+        ),
+    )
+    with measurement.TaskTimer(clock=clock) as timer:
+        assert base.verify_mock_keychain("/profile-marker", timeout=0.1) is None
+    assert timer.public()["validation_ns"] == 22_000_000
+    assert timer.public()["task_ns"] == 200_000_000
 
 
 def test_cold_runner_preserves_native_task_time_and_separates_proof(monkeypatch, tmp_path):
