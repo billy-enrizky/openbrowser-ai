@@ -314,6 +314,7 @@ async def test_sdk_handler_preserves_invalid_argument_text(monkeypatch, isolated
         assert expected <= names
         result = await client.call_tool("execute_code", {"context_id": "ctx", "code": 5})
         assert result.is_error
+        assert result.content[0].type == "text"
         assert result.content[0].text == "Invalid arguments at $.code: 5 is not of type 'string'"
 
 
