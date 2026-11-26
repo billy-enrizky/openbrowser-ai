@@ -158,6 +158,19 @@ def spawn_session(arm: str, workdir: Path, diagnostics: Path) -> ProcessSession:
     return ProcessSession(command, cwd=HERE.parent.parent, stderr_path=diagnostics / f"{arm}.stderr.log", env=env)
 
 
+def _task_downloads(message: dict, ctx) -> Path:
+    """Return the task download directory only when it matches the warmed one.
+
+    Warmed adapters cache the output directory at warmup. Echoing a different
+    per-task path would make the audit trail describe a directory the worker
+    never writes to, so the worker rejects the mismatch before it starts.
+    """
+    value = message.get("downloads")
+    if not isinstance(value, str) or Path(value).resolve() != ctx.downloads.resolve():
+        raise ValueError("task downloads path does not match the warmed session")
+    return Path(value)
+
+
 def _emit(message: dict) -> None:
     sys.stdout.write(json.dumps(message, separators=(",", ":")) + "\n")
     sys.stdout.flush()
@@ -202,6 +215,11 @@ def run_worker(arm_name: str, workdir: Path) -> int:
                 sample=int(message["sample"]),
                 base_url=message["base_url"],
             )
+            try:
+                _task_downloads(message, ctx)
+            except ValueError as error:
+                _emit({"type": "fatal", "error": str(error)})
+                return 2
             _emit(
                 {
                     "type": "started",
@@ -448,7 +466,10 @@ def run_warm_lane(
                         ):
                             raise RuntimeError("worker completion does not match the task")
                         _sample_tree(sampler)
-                        record = json.loads(Path(done["record"]).read_text())
+                        emitted = done.get("record")
+                        if not isinstance(emitted, str) or Path(emitted).resolve() != record_path.resolve():
+                            raise ValueError("worker record path does not match the task")
+                        record = json.loads(record_path.read_text())
                         if (
                             record.get("arm") != entry.arm
                             or record.get("task") != entry.task
