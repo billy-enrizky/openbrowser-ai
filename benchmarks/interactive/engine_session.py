@@ -113,6 +113,12 @@ class EngineSession:
         proof = observation.proof
         return (proof.profile_marker, proof.binding.pid, proof.binding.created_at, proof.binding.executable_basename)
 
+    @staticmethod
+    def _browser_identity(observation: SessionObservation) -> tuple | None:
+        if observation.proof is None:
+            return None
+        return (observation.proof.binding.pid, observation.proof.binding.created_at)
+
     def stamp(
         self,
         record: dict,
@@ -129,7 +135,7 @@ class EngineSession:
         if record.get("task") == "auth" and not self._captured:
             if len(self.launches) != 1:
                 auth_failure = "auth_launch_proof_missing"
-            elif self._identity(self.launches[0]) == self._identity(after):
+            elif self._browser_identity(self.launches[0]) == self._browser_identity(after):
                 auth_failure = "auth_browser_not_replaced"
             valid = valid and auth_failure is None
         if self._captured:

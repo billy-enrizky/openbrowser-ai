@@ -249,6 +249,18 @@ def test_auth_without_a_browser_identity_change_stays_ineligible(harness):
     assert "auth_browser_not_replaced" in row["error"]
 
 
+def test_auth_profile_change_alone_cannot_prove_a_browser_restart(harness):
+    session = engine_session.EngineSession(harness.pin)
+    with session.task_scope():
+        browser_launch_checkpoint(harness.marker)
+    after = deepcopy(harness.valid)
+    after.proof.profile_marker += "-different-context"
+    row = {"task": "auth", "ok": True, "error": "", "browser_version": "old"}
+    session.stamp(row, after)
+    assert row["ok"] is False
+    assert "auth_browser_not_replaced" in row["error"]
+
+
 def test_initial_browser_unknown_is_retained_and_cannot_be_repaired(harness, monkeypatch):
     session = engine_session.EngineSession(harness.pin)
     monkeypatch.setattr(engine_session, "observe_session", lambda *a: harness.failed)

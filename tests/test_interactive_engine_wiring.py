@@ -122,6 +122,7 @@ def test_warm_resource_worker_preserves_the_same_engine_policy(monkeypatch, tmp_
     root = tmp_path.resolve()
     task = {
         "type": "task",
+        "arm": "openbrowser-fast",
         "task": "wizard",
         "sample": 0,
         "nonce": "fake-nonce",
@@ -129,8 +130,11 @@ def test_warm_resource_worker_preserves_the_same_engine_policy(monkeypatch, tmp_
         "downloads": str(root / "downloads"),
         "record": str(tmp_path / "record.json"),
     }
-    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(task) + "\n" + json.dumps({"type": "finish"}) + "\n"))
+    binding = {key: task[key] for key in ("arm", "task", "sample", "nonce")}
+    messages = [task, {"type": "capture", **binding}, {"type": "verify", **binding}, {"type": "finish"}]
+    monkeypatch.setattr(sys, "stdin", io.StringIO("".join(json.dumps(message) + "\n" for message in messages)))
     assert module.run_worker("openbrowser-fast", root) == 0
     assert probe.events == ["warmup", "capture_warm", "verify_warm", "native_task", "verify_warm", "stamp", "cleanup"]
     assert records[0]["engine"]["verified"] is True
     assert emitted[0]["payload"]["engine"] == {"eligible": True}
+    assert [message["type"] for message in emitted] == ["ready", "started", "native_done", "done", "finished"]
