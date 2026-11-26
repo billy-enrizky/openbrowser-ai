@@ -16,6 +16,17 @@ from pathlib import Path
 import psutil
 
 _HOST_HOME = Path.home()
+DEFAULT_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+
+def matched_chrome() -> str:
+    """Return the current declared browser path without a process or file probe."""
+    value = os.environ.get("CHROME_BIN")
+    if value is None:
+        return DEFAULT_CHROME
+    if not value.strip():
+        raise ValueError("CHROME_BIN must name a browser executable")
+    return value
 
 
 def host_playwright_cache() -> Path | None:

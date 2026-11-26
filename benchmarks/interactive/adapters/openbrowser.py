@@ -15,6 +15,7 @@ from .base import (
     ArmResult,
     RunContext,
     kill_pidfile,
+    matched_chrome,
     processes_matching,
     run_process,
     terminate_matching,
@@ -356,6 +357,10 @@ def _write_config(ctx: RunContext, *, extensions: bool) -> None:
         "llm": {"bench": {"id": "bench", "default": True}},
         "agent": {"bench": {"id": "bench", "default": True}},
     }
+    if "CHROME_BIN" in os.environ:
+        profile = config["browser_profile"]["bench"]
+        profile["executable_path"] = matched_chrome()
+        profile.pop("channel")
     if ctx.task == "auth":
         state_path = ctx.root / "storage_state.json"
         state_path.write_text('{"cookies": [], "origins": []}')
