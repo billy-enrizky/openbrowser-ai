@@ -22,10 +22,12 @@ jobs:
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install build
+          python -m pip install "build==1.3.0" "hatchling==1.33.0" "hatch-vcs==0.5.0"
 
       - name: Build package
-        run: python -m build
+        env:
+          OPENBROWSER_BUILD_NATIVE: "0"
+        run: python -m build --no-isolation
 
       - name: Store distribution packages
         uses: actions/upload-artifact@v4
@@ -33,9 +35,87 @@ jobs:
           name: python-package-distributions
           path: dist/
 
+  build-native:
+    name: Build verified native wheels
+    uses: ./.github/workflows/native-wheels.yml
+    permissions:
+      contents: read
+
+  assemble:
+    name: Verify complete release distributions
+    needs: [build, build-native]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Download pure distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+      - name: Download verified native wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: native-wheel-*
+          path: dist/
+          merge-multiple: true
+      - name: Verify complete distribution cohort
+        run: |
+          python - <<'PY'
+          import email.parser
+          import hashlib
+          import logging
+          import tarfile
+          import zipfile
+          from pathlib import Path, PurePosixPath
+          logging.basicConfig(level=logging.INFO, format="%(message)s")
+          def require(condition):
+              if not condition:
+                  raise ValueError("incomplete_or_inconsistent_release_distributions")
+          dist = Path("dist")
+          wheels = list(dist.glob("*.whl"))
+          sdists = list(dist.glob("*.tar.gz"))
+          require(len(wheels) == 5 and len(sdists) == 1 and len(list(dist.iterdir())) == 6)
+          expected_tags = {
+              "py3-none-any", "py3-none-macosx_11_0_arm64", "py3-none-macosx_10_13_x86_64",
+              "py3-none-manylinux_2_17_x86_64", "py3-none-manylinux_2_17_aarch64",
+          }
+          require({"-".join(path.stem.split("-")[-3:]) for path in wheels} == expected_tags)
+          versions = set()
+          for path in wheels:
+              require(path.name.startswith("openbrowser_ai-") and not path.is_symlink())
+              with zipfile.ZipFile(path) as archive:
+                  metadata, = [name for name in archive.namelist() if name.endswith(".dist-info/METADATA")]
+                  info = email.parser.BytesParser().parsebytes(archive.read(metadata))
+              require(info["Name"] == "openbrowser-ai" and info["Version"])
+              version = info["Version"]
+              require(path.name.startswith(f"openbrowser_ai-{version}-"))
+              versions.add(version)
+          require(len(versions) == 1)
+          version, = versions
+          sdist, = sdists
+          require(sdist.name == f"openbrowser_ai-{version}.tar.gz" and not sdist.is_symlink())
+          with tarfile.open(sdist) as archive:
+              metadata, = [entry for entry in archive.getmembers() if len(PurePosixPath(entry.name).parts) == 2 and entry.name.endswith("/PKG-INFO")]
+              stream = archive.extractfile(metadata)
+              require(stream is not None)
+              info = email.parser.BytesParser().parsebytes(stream.read())
+              require(info["Name"] == "openbrowser-ai" and info["Version"] == version)
+          for path in sorted(dist.iterdir()):
+              logging.info("%s %s", hashlib.sha256(path.read_bytes()).hexdigest(), path.name)
+          PY
+      - name: Store complete verified distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-verified-distributions
+          path: dist/
+          if-no-files-found: error
+
   publish-to-pypi:
     name: Publish to PyPI
-    needs: build
+    needs: assemble
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
     environment:
@@ -48,7 +128,7 @@ jobs:
       - name: Download distribution packages
         uses: actions/download-artifact@v4
         with:
-          name: python-package-distributions
+          name: python-verified-distributions
           path: dist/
 
       - name: Publish to PyPI
@@ -56,7 +136,7 @@ jobs:
 
   publish-to-testpypi:
     name: Publish to TestPyPI
-    needs: build
+    needs: assemble
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
     environment:
@@ -69,7 +149,7 @@ jobs:
       - name: Download distribution packages
         uses: actions/download-artifact@v4
         with:
-          name: python-package-distributions
+          name: python-verified-distributions
           path: dist/
 
       - name: Publish to TestPyPI
