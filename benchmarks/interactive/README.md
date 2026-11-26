@@ -258,6 +258,10 @@ mkdir -p ~/.cache/openbrowser-interactive-bench/npm
 npm install --prefix ~/.cache/openbrowser-interactive-bench/npm \
   chrome-devtools-mcp@1.13.0 agent-browser@0.43.0
 
+npm install --prefix \
+  ~/.cache/openbrowser-interactive-bench/playwright-native-0.0.86-0.1.25 \
+  @playwright/mcp@0.0.86 @playwright/cli@0.1.25
+
 uv venv ~/.cache/openbrowser-interactive-bench/browser-use-venv --python 3.12
 uv pip install --python ~/.cache/openbrowser-interactive-bench/browser-use-venv/bin/python \
   browser-use==1.0.8
@@ -270,24 +274,72 @@ The local `chrome-devtools-mcp` binary is the same 1.13.0 package that
 `npx -y chrome-devtools-mcp@1.13.0` would download. The harness uses the local
 install to remove network and npx startup jitter from the measurement.
 
+The Playwright adapters use these pinned local binaries. Override their paths
+with `PLAYWRIGHT_MCP_BIN` and `PLAYWRIGHT_CLI_BIN` when needed. Both adapters
+use the same system Chrome, 1280x800 viewport, and mock-keychain flag.
+The shared configuration sets `timeouts.settle` to zero. Each task waits for
+its exact readiness condition.
+
+This setup uses a source installation. To measure the native frontend, set
+`OPENBROWSER_BIN` to a verified platform-wheel installation. Keep that
+installation and every other input fixed across all four lanes.
+
 ## 11. Run
 
+Select the Python environment from the setup step. Read the Chrome version
+before any observation so fresh resource workers reuse the same metadata.
+
 ```sh
-uv run --no-project python -m benchmarks.interactive.run_benchmark \
-  --samples 5 \
-  --output benchmarks/interactive/results/results-cold-interactive.jsonl
+BENCH_PYTHON="$HOME/.cache/openbrowser-interactive-bench/openbrowser-env/bin/python"
+export OPENBROWSER_BIN="$HOME/.cache/openbrowser-interactive-bench/openbrowser-env/bin/openbrowser-ai"
+export CHROME_BIN="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+export PLAYWRIGHT_BENCH_BROWSER_VERSION="$("$CHROME_BIN" --version)"
 ```
+
+Run the four lanes in sequence. Each command includes both Playwright
+interfaces. Cold lanes include all five tasks. Warm lanes include the four
+tasks that preserve the browser session.
+
+```sh
+uv run --no-project --python "$BENCH_PYTHON" python -m benchmarks.interactive.run_benchmark \
+  --arms openbrowser-fast openbrowser-mcp-fast chrome-devtools agent-browser \
+    browser-use playwright-mcp playwright-cli \
+  --tasks wizard modal download tabs auth --samples 7 --rotate-arms \
+  --workdir /tmp/ob-cold --output /tmp/ob-cold-latency.jsonl
+
+uv run --no-project --python "$BENCH_PYTHON" python -m benchmarks.interactive.warm_benchmark \
+  --arms openbrowser-fast openbrowser-mcp-fast chrome-devtools agent-browser \
+    browser-use playwright-mcp playwright-cli \
+  --tasks wizard modal download tabs --samples 7 --rotate-arms \
+  --workdir /tmp/ob-warm --output /tmp/ob-warm-latency.jsonl
+
+uv run --no-project --python "$BENCH_PYTHON" python -m benchmarks.interactive.resource_compare \
+  --arms openbrowser-fast openbrowser-mcp-fast chrome-devtools agent-browser \
+    browser-use playwright-mcp playwright-cli \
+  --tasks wizard modal download tabs auth --samples 7 \
+  --workdir /tmp/ob-resource --output /tmp/ob-cold-resource.jsonl
+
+uv run --no-project --python "$BENCH_PYTHON" python -m benchmarks.interactive.warm_resource_compare \
+  --arms openbrowser-fast openbrowser-mcp-fast chrome-devtools agent-browser \
+    browser-use playwright-mcp playwright-cli \
+  --tasks wizard modal download tabs --samples 7 \
+  --run-workdir /tmp/ob-wr --output /tmp/ob-warm-resource.jsonl
+```
+
+Require complete task grids, exact oracles, verified cleanup, and unchanged
+source and installation identities before publishing. Resource records include
+sampler provenance. Resource-instrumented wall time stays in the resource lane.
 
 A focused task:
 
 ```sh
-uv run --no-project python -m benchmarks.interactive.run_benchmark \
+uv run --no-project --python "$BENCH_PYTHON" python -m benchmarks.interactive.run_benchmark \
   --tasks tabs --arms openbrowser-fast agent-browser --samples 1
 ```
 
 Useful flags:
 
-- `--arms openbrowser chrome-devtools-mcp agent-browser browser-use`
+- `--arms openbrowser-fast openbrowser-mcp-fast chrome-devtools agent-browser browser-use playwright-mcp playwright-cli`
 - `--tasks wizard modal download tabs auth`
 - `--samples N`
 - `--warmups N`
@@ -308,9 +360,17 @@ OpenBrowser daemon socket path stays below the macOS `AF_UNIX` limit.
 | `adapters/chrome_devtools.py` | chrome-devtools-mcp stdio adapter |
 | `adapters/agent_browser.py` | agent-browser CLI adapter |
 | `adapters/browser_use.py` | browser-use piped Python adapter |
+| `adapters/playwright_mcp.py` | Pinned Playwright MCP adapter and persistent session |
+| `adapters/playwright_cli.py` | Pinned Playwright CLI adapter and persistent session |
+| `adapters/playwright_common.py` | Shared Chrome configuration, secrets, and download checks |
+| `adapters/playwright_tasks.py` | Interactive and scraping programs for both Playwright interfaces |
+| `adapters/playwright_scrape_bridge.py` | Five-task scraping bridge with exact output oracles |
 | `adapters/mcp_stdio.py` | Minimal newline-delimited JSON-RPC MCP client |
 | `adapters/base.py` | Run context, process hygiene, dedicated Chrome, keychain verification |
-| `run_benchmark.py` | Runner, JSONL writer, summary table |
+| `run_benchmark.py` | Cold latency runner, JSONL writer, summary table |
+| `warm_benchmark.py` | Warm latency runner with a persistent session |
+| `resource_compare.py` | Cold resource runner with identity-fenced process attribution |
+| `warm_resource_compare.py` | Warm resource runner with task CPU deltas and persistent workers |
 | [results](https://github.com/billy-enrizky/openbrowser-ai/tree/main/benchmarks/interactive/results) | Raw JSONL and summary JSON |
 
 ## 13. Safety and cleanup

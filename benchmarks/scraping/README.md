@@ -139,6 +139,9 @@ Raw evidence:
 | `openbrowser-no-render` | Chromium, `engine=auto` | no-render |
 | `firecrawl-local` | Firecrawl Local 0.1.1, native per-task wait | not applicable |
 | `firecrawl-local-auto` | Firecrawl Local 0.1.1, no `waitFor` override | not applicable |
+| `lightpanda` | Pinned Lightpanda binary, one process per sample | native headless engine |
+| `playwright-mcp` | Playwright MCP 0.0.86, native code tool | system Chrome |
+| `playwright-cli` | Playwright CLI 0.1.25, native `run-code` | system Chrome |
 
 `engine=auto` uses HTTP when the server-rendered text is substantial, and
 falls back to Chromium when the page is a thin JavaScript shell.
@@ -172,6 +175,29 @@ arm once and keeps it running until the task set finishes. Use
 `--raw-jsonl <path>` to write a run record and one record per measured sample.
 Warmup samples are not included in the JSONL file. The summary JSON remains at
 `--output`.
+
+The Playwright bridge supports all five scraping tasks. Install the pinned
+binaries with the [interactive setup](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/README.md#10-setup).
+Set `CHROME_BIN` to the same browser selected by `--chrome`. Read its version
+before the run so both interfaces use the same browser metadata.
+
+```sh
+export CHROME_BIN="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+export PLAYWRIGHT_BENCH_BROWSER_VERSION="$("$CHROME_BIN" --version)"
+
+uv run --locked python -m benchmarks.scraping.scrape_compare \
+  --arms playwright-mcp playwright-cli \
+  --tasks static_article js_list pagination table asset_heavy \
+  --samples 10 --warmups 1 --interleave --chrome "$CHROME_BIN" \
+  --output /tmp/ob-playwright-scraping.json \
+  --raw-jsonl /tmp/ob-playwright-scraping.jsonl
+```
+
+Each Playwright arm keeps one session across the scraping task set. The
+bridge checks each returned payload with the exact task oracle. Compare
+reports only when task boundaries, browser configuration, source identities,
+and warmup rules match. Firecrawl Local and Lightpanda retain their explicit
+service and process boundaries from section 2.
 
 ## 6. Batch harness
 
