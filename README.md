@@ -654,6 +654,8 @@ Section 13.1 reports the current native local baseline. For a local, no-LLM comp
 
 Local deterministic fixtures, no LLM, and interleaved samples with exact oracles. The full method, raw JSONL, and host-load caveats are in [benchmarks/scraping/README.md](benchmarks/scraping/README.md) and [benchmarks/interactive/README.md](benchmarks/interactive/README.md). Build and host are recorded in each raw artifact. The figures below are the last clean tracked N=5 run.
 
+These interactive figures describe the configured native workflows. OpenBrowser permits automatic local engine selection, while the other framework adapters select system Chrome explicitly. Complete executable bindings are required for a matched-engine comparison.
+
 Sequential scraping, N=10, OpenBrowser lightweight against Firecrawl Local `0.1.1`:
 
 | Task | OpenBrowser p50 | Firecrawl Local p50 | Result | Pairs won |

@@ -130,12 +130,14 @@ Raw data: [results-interactive-resources-2026-11-25-n5-final.jsonl](https://gith
 
 ## 4. Arms
 
+These interactive figures describe the configured native workflows. OpenBrowser permits automatic local engine selection, while the other framework adapters select system Chrome explicitly. Complete executable bindings are required for a matched-engine comparison.
+
 The harness registers seven interfaces. Native frontend selection and the explicit Python command are described in the [CLI frontend reference](https://docs.openbrowser.me/customize/integrations/native-cli). Each artifact records the installed build used for its observations.
 
 | Arm | Native scripted surface | Browser |
 | --- | --- | --- |
-| `openbrowser-fast` | One `openbrowser-ai -c` Python cell with CSS helpers for fixture ids | System Chrome through `channel=chrome` |
-| `openbrowser-mcp-fast` | MCP stdio `2026-07-28`: `create_context`, `execute_code`, `close_context`, with CSS helpers for fixture ids | System Chrome through `channel=chrome` |
+| `openbrowser-fast` | One `openbrowser-ai -c` Python cell with CSS helpers for fixture ids | Automatic local engine with `channel=chrome` |
+| `openbrowser-mcp-fast` | MCP stdio `2026-07-28`: `create_context`, `execute_code`, `close_context`, with CSS helpers for fixture ids | Automatic local engine with `channel=chrome` |
 | `chrome-devtools-mcp` | MCP stdio, `pageId` routing | System Chrome |
 | `agent-browser` | CLI commands, one process per command | System Chrome |
 | `browser-use` | Piped Python in one CLI process | Dedicated system Chrome |
@@ -169,9 +171,9 @@ are killed after every run.
 
 ## 6. Fair-run procedure
 
-1. Pin every version and record the browser executable. The historical
-   2026-11-24 runs used Chrome `158.0.8127.36`. The current brief does not
-   record a browser version string.
+1. Pin every version, the canonical browser executable, and its SHA-256.
+   Verify the actual browser process for every arm. A `channel=chrome` setting
+   alone leaves executable selection to the package.
 2. Use the same viewport, 1280x800, for all arms: OpenBrowser `window_size`,
    chrome-devtools-mcp `--viewport 1280x800`, agent-browser
    `set viewport 1280 800`, browser-use `--window-size=1280,800`.
