@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import struct
 import subprocess
 import tempfile
 from pathlib import Path
@@ -57,6 +58,59 @@ def source_hashes(root: Path) -> dict[str, str]:
     if not {"Cargo.toml", "Cargo.lock", "src/main.rs"}.issubset(sources):
         raise ValueError("Native crate sources are incomplete")
     return sources
+
+
+def validate_binary_tag(data: bytes, target: str) -> str:
+    """Validate executable architecture and ABI constraints before choosing a tag."""
+    tag = TARGET_TAGS[target]
+    arm = target.startswith("aarch64-")
+    if target.endswith("-apple-darwin"):
+        if len(data) < 32 or data[:4] != b"\xcf\xfa\xed\xfe":
+            raise ValueError("Native target requires a 64-bit Mach-O executable")
+        cpu, _, file_type, commands, command_bytes = struct.unpack_from("<IIIII", data, 4)
+        if cpu != (0x0100000C if arm else 0x01000007) or file_type != 2:
+            raise ValueError("Native executable architecture differs from its target")
+        end = 32 + command_bytes
+        if end > len(data):
+            raise ValueError("Invalid Mach-O command table")
+        offset = 32
+        minimum = None
+        for _ in range(commands):
+            if offset + 8 > end:
+                raise ValueError("Invalid Mach-O load command")
+            command, size = struct.unpack_from("<II", data, offset)
+            if size < 8 or offset + size > end:
+                raise ValueError("Invalid Mach-O load command size")
+            version = None
+            if command == 0x32 and size >= 24:
+                platform, version = struct.unpack_from("<II", data, offset + 8)
+                if platform != 1:
+                    raise ValueError("Native executable requires the macOS platform")
+            elif command == 0x24 and size >= 16:
+                version = struct.unpack_from("<I", data, offset + 8)[0]
+            if version is not None:
+                parsed = (version >> 16, (version >> 8) & 255, version & 255)
+                minimum = max(minimum, parsed) if minimum is not None else parsed
+            offset += size
+        supported = (11, 0, 0) if arm else (10, 13, 0)
+        if offset != end or minimum is None or minimum > supported:
+            raise ValueError("Native macOS deployment target exceeds the wheel tag")
+    else:
+        if len(data) < 64 or data[:7] != b"\x7fELF\x02\x01\x01":
+            raise ValueError("Native target requires a little-endian 64-bit ELF executable")
+        file_type, machine = struct.unpack_from("<HH", data, 16)
+        if file_type not in {2, 3} or machine != (183 if arm else 62):
+            raise ValueError("Native executable architecture differs from its target")
+        table = struct.unpack_from("<Q", data, 32)[0]
+        size, count = struct.unpack_from("<HH", data, 54)
+        if size < 56 or count == 0 or table + size * count > len(data):
+            raise ValueError("Invalid ELF program table")
+        kinds = {struct.unpack_from("<I", data, table + size * index)[0] for index in range(count)}
+        if 3 in kinds:
+            raise ValueError("Native musl executable has a dynamic interpreter")
+        if 1 not in kinds:
+            raise ValueError("Native executable has no loadable segments")
+    return f"py3-none-{tag}"
 
 
 class CustomMetadataHook(MetadataHookInterface):
@@ -116,6 +170,8 @@ class CustomBuildHook(BuildHookInterface):
             binary = Path(env["CARGO_TARGET_DIR"]) / target / "release/openbrowser-ai"
             if not binary.is_file() or not os.access(binary, os.X_OK) or binary.stat().st_size == 0:
                 raise RuntimeError("Native compiler produced no executable")
+            binary_data = binary.read_bytes()
+            tag = validate_binary_tag(binary_data, target)
             manifest = Path(scratch.name) / "openbrowser-ai.native.json"
             manifest.write_text(
                 json.dumps(
@@ -128,7 +184,7 @@ class CustomBuildHook(BuildHookInterface):
                         "target": target,
                         "compiler": compiler,
                         "source_files": sources,
-                        "entry_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+                        "entry_sha256": hashlib.sha256(binary_data).hexdigest(),
                     },
                     indent=2,
                     sort_keys=True,
@@ -138,9 +194,8 @@ class CustomBuildHook(BuildHookInterface):
             )
             build_data["pure_python"] = False
             build_data["tag"] = tag
-            build_data.setdefault("shared_scripts", {}).update(
-                {str(binary): "openbrowser-ai", str(manifest): "openbrowser-ai.native.json"}
-            )
+            build_data.setdefault("shared_scripts", {})[str(binary)] = "openbrowser-ai"
+            build_data.setdefault("extra_metadata", {})[str(manifest)] = "openbrowser-native.json"
         except (OSError, subprocess.SubprocessError, RuntimeError) as error:
             scratch.cleanup()
             self._native_scratch = None

@@ -110,7 +110,7 @@ def fake_cargo(hooks, monkeypatch, *, fail=False, binary=True, host="aarch64-app
         if binary:
             output = Path(kwargs["env"]["CARGO_TARGET_DIR"]) / target / "release/openbrowser-ai"
             output.parent.mkdir(parents=True)
-            output.write_bytes(b"\xcf\xfa\xed\xfeNATIVE-FIXTURE")
+            output.write_bytes(macho_fixture())
             output.chmod(0o755)
         return SimpleNamespace(stdout="", stderr="", returncode=0)
 
@@ -128,8 +128,10 @@ def test_native_build_pins_artifacts_sources_and_platform(hooks, crate, monkeypa
     assert data["pure_python"] is False
     assert data["tag"] == "py3-none-macosx_11_0_arm64"
     scripts = {destination: Path(source) for source, destination in data["shared_scripts"].items()}
-    assert set(scripts) == {"openbrowser-ai", "openbrowser-ai.native.json"}
-    manifest = json.loads(scripts["openbrowser-ai.native.json"].read_text())
+    assert set(scripts) == {"openbrowser-ai"}
+    extra = {destination: Path(source) for source, destination in data["extra_metadata"].items()}
+    assert set(extra) == {"openbrowser-native.json"}
+    manifest = json.loads(extra["openbrowser-native.json"].read_text())
     assert manifest["schema_version"] == 1
     assert manifest["frontend"] == "openbrowser-native-v1"
     assert manifest["backend_name"] == "openbrowser-ai-py"
@@ -141,7 +143,7 @@ def test_native_build_pins_artifacts_sources_and_platform(hooks, crate, monkeypa
     cargo = next(kwargs for command, kwargs in calls if command[0] == "cargo")
     assert not Path(cargo["env"]["CARGO_TARGET_DIR"]).is_relative_to(root)
     hook.finalize("standard", data, str(root / "fixture.whl"))
-    assert all(not source.exists() for source in scripts.values())
+    assert all(not source.exists() for source in [*scripts.values(), *extra.values()])
 
 
 @pytest.mark.parametrize("fail,binary", [(True, True), (False, False)])
@@ -206,3 +208,53 @@ def test_source_mutation_during_compile_rejects_manifest(hooks, crate, monkeypat
     monkeypatch.setattr(hooks.subprocess, "run", mutate)
     with pytest.raises(RuntimeError, match="Native CLI build failed"):
         hooks.CustomBuildHook(root).initialize("standard", {})
+
+
+def test_project_metadata_wires_standard_hook_contract():
+    import tomllib
+
+    config = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    assert {"version", "scripts"}.issubset(config["project"]["dynamic"])
+    assert "scripts" not in config["project"]
+    assert config["tool"]["hatch"]["version"]["source"] == "vcs"
+    assert config["tool"]["hatch"]["metadata"]["hooks"]["custom"]["path"] == "hatch_native.py"
+    assert config["tool"]["hatch"]["build"]["hooks"]["custom"]["path"] == "hatch_native.py"
+    assert "hatchling>=1.33.0,<2" in config["build-system"]["requires"]
+
+
+def macho_fixture(*, cpu=0x0100000C, minimum=(11, 0, 0)):
+    import struct
+
+    version = minimum[0] << 16 | minimum[1] << 8 | minimum[2]
+    header = struct.pack("<IiiIIIII", 0xFEEDFACF, cpu, 0, 2, 1, 24, 0, 0)
+    return header + struct.pack("<IIIIII", 0x32, 24, 1, version, version, 0)
+
+
+def elf_fixture(*, machine=62, interpreter=False):
+    import struct
+
+    ident = b"\x7fELF" + bytes([2, 1, 1, 0]) + bytes(8)
+    header = struct.pack("<16sHHIQQQIHHHHHH", ident, 2, machine, 1, 0, 64, 0, 0, 64, 56, 1, 0, 0, 0)
+    return header + struct.pack("<IIQQQQQQ", 3 if interpreter else 1, 5, 0, 0, 0, 0, 0, 1)
+
+
+def test_macos_tag_requires_matching_arch_and_supported_minimum(hooks):
+    assert hooks.validate_binary_tag(macho_fixture(), "aarch64-apple-darwin") == "py3-none-macosx_11_0_arm64"
+    with pytest.raises(ValueError, match="architecture"):
+        hooks.validate_binary_tag(macho_fixture(cpu=0x01000007), "aarch64-apple-darwin")
+    with pytest.raises(ValueError, match="deployment"):
+        hooks.validate_binary_tag(macho_fixture(minimum=(12, 0, 0)), "aarch64-apple-darwin")
+
+
+def test_linux_tag_requires_static_executable_and_matching_arch(hooks):
+    assert hooks.validate_binary_tag(elf_fixture(), "x86_64-unknown-linux-musl") == "py3-none-manylinux_2_17_x86_64"
+    with pytest.raises(ValueError, match="interpreter"):
+        hooks.validate_binary_tag(elf_fixture(interpreter=True), "x86_64-unknown-linux-musl")
+    with pytest.raises(ValueError, match="architecture"):
+        hooks.validate_binary_tag(elf_fixture(machine=183), "x86_64-unknown-linux-musl")
+
+
+@pytest.mark.parametrize("value", [b"", b"wrong", b"\x7fELF", b"\xcf\xfa\xed\xfe"])
+def test_invalid_binary_cannot_receive_platform_tag(hooks, value):
+    with pytest.raises(ValueError):
+        hooks.validate_binary_tag(value, "aarch64-apple-darwin")
