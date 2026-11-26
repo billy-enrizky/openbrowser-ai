@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from types import MappingProxyType
 
-WARM_METHOD_ID = "native-session-readiness-v3"
+WARM_METHOD_ID = "native-session-readiness-v4"
 WARM_METHOD_LABEL = "Warm-session readiness"
 
 
