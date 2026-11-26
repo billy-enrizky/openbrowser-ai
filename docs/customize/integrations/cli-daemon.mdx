@@ -28,13 +28,13 @@ mode: "wide"
 
 ## 1. Overview
 
-The CLI daemon provides a persistent browser session over a Unix socket. Use the `-c` flag to execute Python code directly from Bash -- no MCP server, no LLM, just code and a browser.
+The CLI daemon provides a persistent browser session over a Unix socket. Use `-c` to execute Python code directly from Bash.
 
 The daemon starts automatically on first use, persists variables across calls, and shuts down after 10 minutes of inactivity.
 
 ## 2. Quick Start
 
-Before a sequence of `-c` calls, run `openbrowser-ai warm` once to start the daemon and browser. A warm `-c` call uses a standard-library thin client, so it does not import the full CLI or agent stack. A cold call falls back to the full client and starts the daemon.
+Before a sequence of `-c` calls, run `openbrowser-ai warm` once to start the daemon and browser. OpenBrowser 0.1.61 compatible wheels use the native frontend for the exact form `openbrowser-ai -c CODE`. Source and editable installs use the Python thin client. Cold startup and the remaining CLI commands use the Python backend. The [CLI frontend reference](/customize/integrations/native-cli) describes platform tags and output limits.
 
 ```bash
 # Navigate to a page
@@ -57,7 +57,7 @@ print(f'{len(state.dom_state.selector_map)} interactive elements')
 Use `openbrowser-ai web-search` to find source URLs without starting Chromium. The command prints a compact table by default.
 
 <Note>
-The canonical `web-search` command is on the current source branch. PyPI `0.1.60` exposes the same feature as `openbrowser-ai search`. To install the canonical CLI from source, run `uv tool install --force "openbrowser-ai @ git+https://github.com/billy-enrizky/openbrowser-ai.git@main"`. To run it once without changing the installed CLI, use `uvx --from git+https://github.com/billy-enrizky/openbrowser-ai.git@main openbrowser-ai web-search "OpenBrowser MCP docs"`.
+Use `openbrowser-ai web-search` for CLI source discovery, `openbrowser.web_search` in Python, and `web_search` in MCP or CodeAgent. These are the canonical names in OpenBrowser 0.1.61 and later.
 </Note>
 
 ```bash
@@ -137,7 +137,7 @@ openbrowser-ai --text-only -c "await navigate('https://example.com')"
 
 Blocking external CSS exposes content that the page hides with `display:none` or `visibility:hidden`. Use `lightweight` when visibility matters. Asset flags reduce requests and bytes while Chromium process memory stays the same. Use `--engine http` or the static path for low memory.
 
-The `scrape` browser fallback uses the installed Playwright headless shell by default. The shell has no browser UI or extension support and uses about half the process memory of full Chrome. Set `OPENBROWSER_USE_HEADLESS_SHELL=0` to force full Chrome.
+The `scrape` browser fallback uses the installed Playwright headless shell by default. The shell supports headless browsing and has no extension support. Set `OPENBROWSER_USE_HEADLESS_SHELL=0` to force full Chrome.
 
 ### 4.3. Batch scraping
 
@@ -266,7 +266,7 @@ graph LR
     end
 ```
 
-- The **CLI** is a thin client (about 50 to 60 ms warm startup in the paired benchmark) that sends code over the Unix socket
+- The **CLI frontend** sends code over the Unix socket. Eligible platform-wheel calls use the native frontend. The Python command remains available as `openbrowser-ai-py`.
 - The **daemon** holds the browser session, CodeExecutor, and persistent namespace in memory
 - The **browser** connects via Chrome DevTools Protocol (CDP)
 
@@ -291,7 +291,7 @@ graph LR
 |---------|-------------------|---------------------|
 | **Use case** | Bash scripts, shell pipelines, manual exploration | AI assistants (Claude, Codex) |
 | **Intelligence** | You write the code | LLM writes the code |
-| **Startup** | ~50 to 60 ms warm (thin client) | ~150ms (full MCP init) |
+| **Entry** | Native or Python client, selected by installation and arguments | Python stdio server |
 | **Protocol** | Unix socket (JSON lines) | MCP over stdio |
 | **Persistence** | Variables persist across `-c` calls | Variables persist across tool calls |
 | **Idle timeout** | Daemon exits after 10 idle minutes | Browser closes after 10 idle minutes; the context remains until `close_context` or server exit |
@@ -299,6 +299,12 @@ graph LR
 Both use the same `CodeExecutor` engine and browser automation functions.
 
 ## 12. Troubleshooting
+
+**Large native response or transport failure**
+- The client can return `daemon_response_too_large` after code has already run.
+- Run `openbrowser-ai daemon status` and inspect the page before retrying.
+- Reduce printed output, or select `openbrowser-ai-py -c CODE` for an intentional new call.
+- See the [CLI frontend reference](/customize/integrations/native-cli) for the exact response limit and delegation rules.
 
 **Config blocks the browser**
 - Run `uvx openbrowser-ai config status`. A legacy, invalid, or unreadable file stays on disk and blocks browser startup.

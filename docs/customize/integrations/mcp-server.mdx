@@ -35,6 +35,8 @@ The MCP server exposes OpenBrowser to Claude Desktop, Claude Code, and other MCP
 
 The default stdio transport is a lean JSON-RPC loop. It answers `server/discover` and `tools/list` from a static catalog before it imports the MCP SDK. Set `OPENBROWSER_MCP_TRANSPORT=sdk` to use the MCP SDK 2.3 escape hatch. Invalid values exit with code 2. Both transports share the same context registry and tool implementations. The MCP client supplies the model, so users do not need an external LLM API key.
 
+A native CLI entry delegates `--mcp` to this Python server. The selected stdio transport and tool behavior are shared across frontends. See the [CLI frontend reference](/customize/integrations/native-cli).
+
 ## 2. Quick Start
 
 ### 2.1. Start MCP Server

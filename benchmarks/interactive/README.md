@@ -130,6 +130,8 @@ Raw data: [results-interactive-resources-2026-11-25-n5-final.jsonl](https://gith
 
 ## 4. Arms
 
+The harness registers seven interfaces. Native frontend selection and the explicit Python command are described in the [CLI frontend reference](https://docs.openbrowser.me/customize/integrations/native-cli). Each artifact records the installed build used for its observations.
+
 | Arm | Native scripted surface | Browser |
 | --- | --- | --- |
 | `openbrowser-fast` | One `openbrowser-ai -c` Python cell with CSS helpers for fixture ids | System Chrome through `channel=chrome` |
@@ -137,6 +139,8 @@ Raw data: [results-interactive-resources-2026-11-25-n5-final.jsonl](https://gith
 | `chrome-devtools-mcp` | MCP stdio, `pageId` routing | System Chrome |
 | `agent-browser` | CLI commands, one process per command | System Chrome |
 | `browser-use` | Piped Python in one CLI process | Dedicated system Chrome |
+| `playwright-mcp` | Pinned Playwright MCP native code tool | System Chrome |
+| `playwright-cli` | Pinned Playwright CLI `run-code` | System Chrome |
 
 Package and browser versions are recorded in each result artifact. They are not listed here because they change between runs. Cold runs use a fresh profile per run. Warm runs start each arm once and keep the browser open. All current lanes use a 1280x800 viewport and local fixtures only. Every Chrome launch includes `--use-mock-keychain`, and the harness checks the actual browser command line.
 
@@ -150,10 +154,7 @@ Package and browser versions are recorded in each result artifact. They are not 
 | `tabs` | `/tabs` | Detail tab loaded with `window.opener`, approve clicked once, original tab received `approved:42`, detail tab close observed, original title `Tabs Bench` |
 | `auth` | `/login` | Exactly one login POST, at least two account views across a browser restart, account secret `ACCOUNT-SECRET-42` read in phase 2, password absent from output |
 
-The `openbrowser` and `openbrowser-fast` arms poll a JavaScript predicate every
-25 ms and notice a modal filter result within about 155 ms of the fixture's
-150 ms debounce. The `auth` fast script fills the login form through CSS ids,
-matching the other fast scripts.
+The modal scripts wait for the page's filter result before selecting the option. The `auth` fast script fills the login form through CSS ids.
 
 Per-run reset: each run starts a new `ThreadingHTTPServer` on an ephemeral
 loopback port with new state, a new profile, a new download directory, and a
