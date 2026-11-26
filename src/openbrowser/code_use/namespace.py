@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 from urllib.parse import unquote, urlparse
 
-import requests
 from pydantic import ValidationError
 
 from openbrowser.browser import BrowserSession
@@ -97,6 +96,26 @@ class _LazyOptionalBinding:
 		target = f'{self._module_name}.{self._attribute}' if self._attribute else self._module_name
 		return f'<lazy optional binding {target}>'
 
+
+class _LazyModuleBinding(_LazyOptionalBinding):
+	"""Lazy module binding that forwards attribute writes to the real module."""
+
+	__slots__ = ()
+
+	def __setattr__(self, name: str, value: Any) -> None:
+		if name in _LazyOptionalBinding.__slots__:
+			object.__setattr__(self, name, value)
+			return
+		setattr(self._resolve(), name, value)
+
+	def __delattr__(self, name: str) -> None:
+		if name in _LazyOptionalBinding.__slots__:
+			object.__delattr__(self, name)
+			return
+		delattr(self._resolve(), name)
+
+
+requests = _LazyModuleBinding('requests')
 
 # Optional data-science bindings are resolved on first use.
 NUMPY_AVAILABLE = _optional_module_available('numpy')
