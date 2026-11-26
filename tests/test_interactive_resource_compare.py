@@ -362,7 +362,7 @@ def test_parent_preserves_oracles_and_rejects_unobserved_product_work(
         def sample(self, *, phase="native_run"):
             return None
 
-        def live_processes(self):
+        def live_processes(self, *, phase="native_run"):
             return {}
 
         def discover_orphans(self):
@@ -435,7 +435,7 @@ def test_worker_deadline_is_a_failed_observation_and_kills_only_its_worker(monke
         def sample(self, *, phase="native_run"):
             return None
 
-        def live_processes(self):
+        def live_processes(self, *, phase="native_run"):
             return {}
 
         def discover_orphans(self):
@@ -611,6 +611,12 @@ def test_lane_persists_a_parent_failure_and_stops_if_cleanup_is_unverified(monke
     assert raw[-1]["record_type"] == "end"
     assert raw[-1]["aborted"] is True
     assert raw[-1]["abort_reason"] == "cleanup_unverified"
+    assert raw[0]["expected_observations"] == 2
+    assert raw[-1]["expected_observations"] == 2
+    assert raw[-1]["valid"] is False
+    assert raw[-1]["terminal"] is True
+    assert raw[-1]["cleanup_verified"] is False
+    assert raw[-1]["fixture_errors"] == []
 
 
 def test_spawn_failure_is_a_durable_failed_attempt_without_live_measurements(monkeypatch, tmp_path):
@@ -715,6 +721,8 @@ def test_source_manifest_separates_harness_and_application_content(monkeypatch, 
     assert first["harness_digest"] == second["harness_digest"]
     assert first["expected_app_digest"] != second["expected_app_digest"]
     assert first["source_digest"] != second["source_digest"]
+    assert first["sampler_method_version"] == module.SAMPLER_METHOD_VERSION == 3
+    assert first["configuration_digest"] == second["configuration_digest"]
 
 
 def test_cleanup_finds_a_marked_orphan_created_as_its_parent_exits(monkeypatch):
@@ -804,3 +812,212 @@ def test_short_worker_layout_stays_inside_macos_socket_budget_for_all_pilot_task
                 else (context_root / "home" / ".openbrowser" / "daemon.sock")
             )
             assert len(str(socket).encode()) <= 103, (task, arm, socket)
+
+
+def test_sampler_skips_cmdline_for_non_browser_processes():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    root.executable = "python3.12"
+    calls = []
+
+    def denied():
+        calls.append(True)
+        raise module.psutil.AccessDenied(10)
+
+    root.cmdline = denied
+    sampler = fake_sampler(module, {10: root})
+
+    sampler.sample()
+
+    result = sampler.result()
+    assert calls == []
+    assert result["fatal_read_errors"] == 0
+    assert result["sampler_method_version"] == module.SAMPLER_METHOD_VERSION == 3
+
+
+def test_sampler_skips_cmdline_for_helper_and_crashpad():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    root.executable = "python3.12"
+    helper = FakeProcess(20, 2.0)
+    helper.executable = "Google Chrome Helper (Aperitif)"
+    crashpad = FakeProcess(30, 3.0)
+    crashpad.executable = "chrome_crashpad_handler"
+    helper.cmdline = lambda: pytest.fail("helper cmdline must not be read")
+    crashpad.cmdline = lambda: pytest.fail("crashpad cmdline must not be read")
+    root.descendants = [helper, crashpad]
+    sampler = fake_sampler(module, {10: root, 20: helper, 30: crashpad})
+
+    sampler.sample()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 0
+    assert result["observed_browser_processes"] == 0
+
+
+def test_browser_cmdline_failure_is_fatal_and_unverified():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    root.executable = "python3.12"
+    browser = FakeProcess(20, 2.0)
+    browser.executable = "Google Chrome"
+
+    def denied():
+        raise module.psutil.AccessDenied(20)
+
+    browser.cmdline = denied
+    root.descendants = [browser]
+    sampler = fake_sampler(module, {10: root, 20: browser})
+
+    sampler.sample()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    assert result["expected_exit_races"] == 0
+    assert result["unverified_processes"] == 1
+    detail = result["read_error_details"][0]
+    assert detail["pid"] == 20
+    assert detail["created_at"] == 2.0
+    assert detail["operation"] == "cmdline"
+    assert detail["phase"] == "native_run"
+    assert detail["error_type"] == "AccessDenied"
+
+
+def test_required_read_failure_records_operation_and_unverified():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    root.executable = "python3.12"
+
+    def denied():
+        raise module.psutil.AccessDenied(10)
+
+    root.memory_info = denied
+    sampler = fake_sampler(module, {10: root})
+
+    sampler.sample()
+
+    result = sampler.result()
+    assert result["peak_tree_rss_bytes"] is None
+    assert result["fatal_read_errors"] == 1
+    assert result["unverified_processes"] == 1
+    detail = result["read_error_details"][0]
+    assert detail["operation"] == "memory_info"
+    assert detail["pid"] == 10
+    assert detail["created_at"] == 1.0
+
+
+def test_live_process_lookup_failure_records_operation():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    root.executable = "python3.12"
+
+    def denied():
+        raise module.psutil.AccessDenied(10)
+
+    root.is_running = denied
+    sampler = fake_sampler(module, {10: root})
+
+    sampler.sample()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    assert result["unverified_processes"] == 1
+    detail = result["read_error_details"][0]
+    assert detail["operation"] == "is_running"
+    assert detail["pid"] == 10
+    assert detail["created_at"] == 1.0
+
+
+def test_read_error_details_are_bounded():
+    module = resource_module()
+    ledger = module.ResourceLedger((10, 1.0), footprint_supported=False)
+
+    for index in range(module.MAX_READ_ERROR_DETAILS + 5):
+        ledger.note_read_error(
+            module.psutil.AccessDenied(10),
+            identity=(10, 1.0),
+            operation="cmdline",
+            phase="native_run",
+            sample_index=index,
+        )
+
+    result = ledger.result()
+    assert len(result["read_error_details"]) == module.MAX_READ_ERROR_DETAILS
+    assert result["read_error_details_truncated"] == 5
+    assert result["fatal_read_errors"] == module.MAX_READ_ERROR_DETAILS + 5
+
+
+def test_fatal_access_denied_is_not_reclassified_after_exit():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    root.executable = "python3.12"
+    browser = FakeProcess(20, 2.0)
+    browser.executable = "Google Chrome"
+
+    def denied():
+        raise module.psutil.AccessDenied(20)
+
+    browser.cmdline = denied
+    root.descendants = [browser]
+    processes = {10: root, 20: browser}
+    sampler = fake_sampler(module, processes)
+
+    sampler.sample()
+    first = sampler.result()
+    processes.pop(10)
+    processes.pop(20)
+    second = sampler.result()
+
+    assert first["fatal_read_errors"] == second["fatal_read_errors"] == 1
+    assert second["expected_exit_races"] == 0
+    assert second["unverified_processes"] == 1
+    assert second["read_error_details"][0]["operation"] == "cmdline"
+
+
+def test_lane_writes_strict_terminal_metadata(monkeypatch, tmp_path):
+    module = resource_module()
+    output = tmp_path / "results.jsonl"
+
+    monkeypatch.setattr(module, "source_manifest", lambda: {"source_digest": "stable"})
+    monkeypatch.setattr(
+        module,
+        "binding_snapshot",
+        lambda arms: {
+            "verified": True,
+            "entry_sha256": "entry",
+            "actual_app_digest": "app",
+            "expected_app_digest": "app",
+            "dist_version": "v",
+        },
+    )
+
+    def run_sample(task, arm, sample, **kwargs):
+        return {
+            "task": task,
+            "arm": arm,
+            "sample": sample,
+            "ok": True,
+            "resource_ok": True,
+            "resources": {"peak_tree_rss_bytes": 100},
+            "cleanup": {
+                "verified": True,
+                "remaining": [],
+                "unverified_processes": 0,
+                "errors": [],
+            },
+            "worker_timed_out": False,
+        }
+
+    monkeypatch.setattr(module, "run_sample", run_sample)
+
+    module.run_lane(["a", "b"], ["tabs"], 2, output, workdir=tmp_path / "runs", interval=0.02, worker_timeout=10)
+    raw = [json.loads(line) for line in output.read_text().splitlines()]
+
+    assert raw[0]["expected_observations"] == 4
+    assert raw[-1]["expected_observations"] == 4
+    assert raw[-1]["observations"] == 4
+    assert raw[-1]["valid"] is True
+    assert raw[-1]["terminal"] is True
+    assert raw[-1]["cleanup_verified"] is True
+    assert raw[-1]["fixture_errors"] == []
+    assert raw[-1]["failures"] == 0
