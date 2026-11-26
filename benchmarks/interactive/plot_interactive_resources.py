@@ -38,6 +38,7 @@ from benchmarks.interactive.plot_common import (
     format_mib,
     has_metric_rows,
     interactive_styles,
+    provenance_text,
     resource_counts,
     resource_values,
     sample_label,
@@ -149,11 +150,7 @@ def main() -> int:
 
     styles = interactive_styles(tuple(args.arms))
     cold_rows = _load_json_rows(args.input)
-    verified = sum(1 for row in cold_rows if row.get("provenance_verified") is True)
-    cold_note = (
-        "Cold start. Medians of resource-eligible observations. "
-        f"Provenance: {verified}/{len(cold_rows)} cells verified."
-    )
+    cold_note = "Cold start. Medians of resource-eligible observations. " + provenance_text(cold_rows, TASKS, styles)
     _plot_lane(
         cold_rows,
         tasks=TASKS,

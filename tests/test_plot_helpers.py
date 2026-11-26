@@ -34,9 +34,9 @@ def test_bar_layout_scales_for_two_and_five_arms():
     assert five.legend_rows == 2
 
 
-def test_memory_labels_drop_decimals_above_one_hundred():
-    assert plot.format_mib(1205.04) == "1205"
-    assert plot.format_mib(132.94) == "133"
+def test_memory_labels_keep_one_decimal():
+    assert plot.format_mib(1205.04) == "1205.0"
+    assert plot.format_mib(132.94) == "132.9"
     assert plot.format_mib(9.94) == "9.9"
 
 
@@ -233,6 +233,14 @@ def test_warm_resource_rows_exclude_ineligible_observations():
     missing = by_cell[("wizard", "playwright-cli")]
     assert missing["runs"] == 0
     assert missing["metrics"]["peak_tree_rss_bytes"]["median"] is None
+
+
+def test_provenance_denominator_covers_required_missing_arms():
+    rows = [{"task": "wizard", "arm": arm, "provenance_verified": True} for arm in plot.CANONICAL_INTERACTIVE_ARMS[:5]]
+    styles = plot.interactive_styles()
+    text = plot.provenance_text(rows, ("wizard", "modal"), styles)
+    assert text == "Provenance: 5/14 required cells verified."
+    assert "5/5" not in text
 
 
 def test_has_metric_rows_detects_summary_and_raw_inputs():
