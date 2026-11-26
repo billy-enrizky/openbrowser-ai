@@ -690,7 +690,7 @@ def arm_versions(arms: list[str]) -> dict:
 def run_worker(task: str, arm: str, sample: int, workdir: Path, output: Path) -> None:
     from .run_benchmark import run_one
 
-    record = run_one(task, arm, sample, workdir, False)
+    record = run_one(task, arm, sample, workdir, False, record_binary_version=False)
     output.write_text(json.dumps(record) + "\n")
 
 
@@ -927,7 +927,17 @@ def run_lane(
                     "resources": {},
                     "cleanup": {"verified": False, "errors": [type(error).__name__]},
                 }
-            record.update({"record_type": "sample", "order": position, "arm_order": order, "provisional": True})
+            version = metadata["arm_versions"].get(arm, {}).get("version")
+            record.update(
+                {
+                    "record_type": "sample",
+                    "order": position,
+                    "arm_order": order,
+                    "provisional": True,
+                    "binary_version": version,
+                    "binary_version_source": "preflight",
+                }
+            )
             records.append(record)
             handle.write(json.dumps(record) + "\n")
             handle.flush()

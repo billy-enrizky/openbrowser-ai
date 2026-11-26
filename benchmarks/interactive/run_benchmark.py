@@ -148,6 +148,7 @@ def run_one(
     keep: bool,
     *,
     openbrowser_extensions: bool = False,
+    record_binary_version: bool = True,
 ) -> dict:
     server, thread = start_fixture()
     ctx = make_context(task, arm_name, sample, server.base_url, workdir)
@@ -224,7 +225,9 @@ def run_one(
             "keychain_flag": "--use-mock-keychain",
             "keychain_verified": result.keychain_verified,
             "openbrowser_extensions": openbrowser_extensions if arm_name == "openbrowser" else None,
-            "binary_version": _binary_version(getattr(arm, "binary", "")) if arm is not None else "",
+            "binary_version": (_binary_version(getattr(arm, "binary", "")) if arm is not None else "")
+            if record_binary_version
+            else None,
         }
     if not keep:
         shutil.rmtree(ctx.root, ignore_errors=True)

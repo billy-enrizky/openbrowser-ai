@@ -315,7 +315,7 @@ def test_worker_uses_the_existing_native_runner_without_changing_its_result(monk
     module.run_worker("tabs", "browser-use", 2, tmp_path / "runs", destination)
 
     assert json.loads(destination.read_text()) == native
-    assert calls == [(("tabs", "browser-use", 2, tmp_path / "runs", False), {})]
+    assert calls == [(("tabs", "browser-use", 2, tmp_path / "runs", False), {"record_binary_version": False})]
 
 
 def test_lane_writes_every_attempt_and_never_overwrites_evidence(monkeypatch, tmp_path):
