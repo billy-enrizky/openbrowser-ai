@@ -293,3 +293,44 @@ def test_mcp_run_fails_when_native_output_leaks_password(tmp_path, monkeypatch):
     result = arm.run(ctx, cleanup=True)
     assert result.ok is False
     assert "leaked" in result.error
+
+
+def test_mcp_initialize_failure_closes_partial_server(tmp_path, monkeypatch):
+    ctx = make_context(tmp_path)
+
+    class FailingInitClient(FakeMcpClient):
+        def initialize(self):
+            raise RuntimeError("initialize failed")
+
+    monkeypatch.setattr(playwright_mcp, "StdioMcpClient", FailingInitClient)
+    FailingInitClient.instances.clear()
+    arm = playwright_mcp.PlaywrightMcpArm(binary="/bin/playwright-mcp")
+    with pytest.raises(RuntimeError):
+        arm._start(ctx)
+    assert FailingInitClient.instances[0].closed is True
+    assert arm._client is None
+
+
+def test_mcp_cleanup_is_idempotent_and_ctx_scoped(tmp_path, monkeypatch):
+    ctx = make_context(tmp_path)
+    markers: list[str] = []
+    monkeypatch.setattr(playwright_mcp, "terminate_matching", lambda marker: markers.append(marker) or [])
+    arm = playwright_mcp.PlaywrightMcpArm(binary="/bin/playwright-mcp")
+    arm.cleanup(ctx)
+    arm.cleanup(ctx)
+    assert markers == [str(ctx.profile), str(ctx.downloads), str(ctx.profile), str(ctx.downloads)]
+
+
+def test_cli_cleanup_closes_after_partial_open_and_is_idempotent(tmp_path, monkeypatch):
+    ctx = make_context(tmp_path)
+    FakeProcess.commands.clear()
+    monkeypatch.setattr(playwright_cli, "run_process", FakeProcess.run)
+    monkeypatch.setattr(playwright_cli, "terminate_matching", lambda marker: [])
+    arm = playwright_cli.PlaywrightCliArm(binary="/bin/playwright-cli")
+    arm._attempted_open = True
+    arm.cleanup(ctx)
+    closes = [command for command in FakeProcess.commands if len(command) > 3 and command[3] == "close"]
+    assert len(closes) == 1
+    arm.cleanup(ctx)
+    closes = [command for command in FakeProcess.commands if len(command) > 3 and command[3] == "close"]
+    assert len(closes) == 1
