@@ -207,6 +207,64 @@ def test_observe_ignores_helper_processes(tmp_path):
     assert observation.pid == 4242
 
 
+def test_observe_ignores_node_launcher_with_same_marker(tmp_path):
+    pin = make_pin(tmp_path)
+    marker = str(profile_marker(tmp_path))
+    rows = [
+        (4243, ["/opt/homebrew/bin/node", f"--user-data-dir={marker}", "--use-mock-keychain"]),
+        (4242, argv(marker)),
+    ]
+    observation = observe(pin, tmp_path, rows=rows)
+    assert observation.status == "valid"
+    assert observation.pid == 4242
+
+
+def test_observe_ignores_python_and_agent_launchers_with_same_marker(tmp_path):
+    pin = make_pin(tmp_path)
+    marker = str(profile_marker(tmp_path))
+    rows = [
+        (4243, ["/usr/bin/python3.12", f"--user-data-dir={marker}", "--use-mock-keychain"]),
+        (4244, ["/usr/local/bin/agent-browser", f"--user-data-dir={marker}", "--use-mock-keychain"]),
+        (4245, ["/usr/local/bin/chrome-devtools-mcp", f"--user-data-dir={marker}", "--use-mock-keychain"]),
+        (4242, argv(marker)),
+    ]
+    observation = observe(pin, tmp_path, rows=rows)
+    assert observation.status == "valid"
+    assert observation.pid == 4242
+
+
+def test_observe_launchers_only_are_process_missing(tmp_path):
+    pin = make_pin(tmp_path)
+    marker = str(profile_marker(tmp_path))
+    rows = [
+        (4243, ["/opt/homebrew/bin/node", f"--user-data-dir={marker}", "--use-mock-keychain"]),
+        (4244, ["/usr/bin/python3.12", f"--user-data-dir={marker}", "--use-mock-keychain"]),
+    ]
+    observation = observe(pin, tmp_path, rows=rows)
+    assert observation.status == "process_missing"
+
+
+def test_observe_rejects_true_duplicate_browser_with_launchers(tmp_path):
+    pin = make_pin(tmp_path)
+    marker = str(profile_marker(tmp_path))
+    rows = [
+        (4243, ["/opt/homebrew/bin/node", f"--user-data-dir={marker}", "--use-mock-keychain"]),
+        (4242, argv(marker)),
+        (4245, argv(marker)),
+    ]
+    observation = observe(pin, tmp_path, rows=rows)
+    assert observation.status == "duplicate_main"
+
+
+def test_observe_rejects_wrong_engine_browser_family(tmp_path):
+    pin = make_pin(tmp_path)
+    marker = str(profile_marker(tmp_path))
+    rows = [(4242, ["/usr/bin/chromium", f"--user-data-dir={marker}", "--use-mock-keychain"])]
+    observation = observe(pin, tmp_path, rows=rows, process=FakeProcess("/usr/bin/true"))
+    assert observation.status == "executable_changed"
+    assert observation.proof is None
+
+
 def test_observe_rejects_malformed_pin_without_exception(tmp_path):
     observation = session_guard.observe_session(object(), profile_marker(tmp_path))  # pyright: ignore[reportArgumentType]
     assert observation.status == "malformed"

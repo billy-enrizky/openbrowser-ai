@@ -27,6 +27,30 @@ from benchmarks.interactive.engine_binding import (
 SESSION_SCHEMA = "openbrowser-session-observation-v1"
 PROOF_SCHEMA = "openbrowser-session-proof-v1"
 _USER_DATA_DIR_PREFIX = "--user-data-dir="
+_BROWSER_BASENAMES = frozenset(
+    {
+        "brave",
+        "brave browser",
+        "brave-browser",
+        "chrome",
+        "chrome canary",
+        "chrome-headless-shell",
+        "chromium",
+        "chromium-browser",
+        "google chrome",
+        "google chrome canary",
+        "google chrome for testing",
+        "google-chrome",
+        "google-chrome-beta",
+        "google-chrome-canary",
+        "google-chrome-dev",
+        "google-chrome-stable",
+        "google-chrome-unstable",
+        "headless_shell",
+        "microsoft edge",
+        "msedge",
+    }
+)
 
 STATUS_VALID = "valid"
 STATUS_PIN_CHANGED = "pin_changed"
@@ -360,7 +384,7 @@ def _scan_main(rows: Any, expected_marker: str) -> _Scan:
         return _Scan(STATUS_MALFORMED)
     candidates: list[_Candidate] = []
     for pid, argv in normalized:
-        if _is_helper(argv):
+        if _is_helper(argv) or not _is_browser_process(argv):
             continue
         present, marker, malformed = _marker_from_argv(argv)
         if not present:
@@ -431,12 +455,19 @@ def _is_helper(argv: Sequence[str]) -> bool:
     return "helper" in name or "crashpad" in name
 
 
+def _is_browser_process(argv: Sequence[str]) -> bool:
+    name = Path(argv[0]).name.lower()
+    if name.endswith(".exe"):
+        name = name[:-4]
+    return name in _BROWSER_BASENAMES
+
+
 def _pid_is_main(rows: Any, pid: int) -> bool:
     try:
         normalized = _normalize_table(rows)
     except ValueError:
         return False
-    return any(row_pid == pid and not _is_helper(argv) for row_pid, argv in normalized)
+    return any(row_pid == pid and not _is_helper(argv) and _is_browser_process(argv) for row_pid, argv in normalized)
 
 
 def _main_marker_for_pid(rows: Any, pid: int) -> str | None:
@@ -445,7 +476,7 @@ def _main_marker_for_pid(rows: Any, pid: int) -> str | None:
     except ValueError:
         return None
     for row_pid, argv in normalized:
-        if row_pid != pid or _is_helper(argv):
+        if row_pid != pid or _is_helper(argv) or not _is_browser_process(argv):
             continue
         present, marker, malformed = _marker_from_argv(argv)
         if present and not malformed:
