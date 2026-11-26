@@ -689,10 +689,7 @@ def run_warm_lane(
                 after_source = {}
                 after_binding = {"verified": False, "reason": f"postflight_{type(error).__name__}"}
             source_unchanged = before_source.get("source_digest") == after_source.get("source_digest")
-            binding_unchanged = all(
-                before_binding.get(name) == after_binding.get(name)
-                for name in ("entry_sha256", "actual_app_digest", "expected_app_digest", "dist_version")
-            )
+            binding_unchanged = before_binding == after_binding
             verified = bool(
                 before_binding.get("verified")
                 and after_binding.get("verified")

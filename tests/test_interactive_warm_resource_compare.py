@@ -973,3 +973,25 @@ def test_non_default_sampler_failure_does_not_retry():
     with pytest.raises(RuntimeError, match="persistent"):
         warm._make_owned_sampler(123, "/tmp/owned-marker", broken)
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    "changed_key", ["backend_entry_sha256", "native_manifest_sha256", "native_source_digest", "native_target"]
+)
+def test_warm_lane_rejects_any_native_binding_change(monkeypatch, tmp_path, changed_key):
+    before = {
+        "verified": True,
+        "entry_sha256": "entry",
+        "actual_app_digest": "app",
+        "expected_app_digest": "app",
+        "dist_version": "v",
+        changed_key: "before",
+    }
+    bindings = iter([before, {**before, changed_key: "after"}])
+    monkeypatch.setattr(warm, "binding_snapshot", lambda arms: next(bindings))
+    output, records, _ = run_lane(tmp_path, arms=("a",))
+    end = json.loads(output.read_text().splitlines()[-1])
+    assert end["binding_unchanged"] is False
+    assert end["provenance_verified"] is False
+    assert end["valid"] is False
+    assert all(row["provenance_verified"] is False for row in records)

@@ -1086,3 +1086,42 @@ def test_observation_ok_rejects_fatal_read_even_with_verified_cleanup():
 
     assert module.observation_ok(resources, {"verified": True}) is False
     assert module.observation_ok({**resources, "fatal_read_errors": 0}, {"verified": True}) is True
+
+
+@pytest.mark.parametrize(
+    "changed_key", ["backend_entry_sha256", "native_manifest_sha256", "native_source_digest", "native_target"]
+)
+def test_lane_rejects_any_native_binding_change(monkeypatch, tmp_path, changed_key):
+    module = resource_module()
+    before = {
+        "verified": True,
+        "entry_sha256": "entry",
+        "actual_app_digest": "app",
+        "expected_app_digest": "app",
+        "dist_version": "v",
+        changed_key: "before",
+    }
+    after = {**before, changed_key: "after"}
+    bindings = iter([before, after])
+    monkeypatch.setattr(module, "source_manifest", lambda: {"source_digest": "stable"})
+    monkeypatch.setattr(module, "binding_snapshot", lambda arms: next(bindings))
+    monkeypatch.setattr(module, "arm_versions", lambda arms: {})
+    monkeypatch.setattr(
+        module,
+        "run_sample",
+        lambda task, arm, sample, **kw: {
+            "task": task,
+            "arm": arm,
+            "sample": sample,
+            "ok": True,
+            "resource_ok": True,
+            "cleanup": {"verified": True, "remaining": [], "unverified_processes": 0, "errors": []},
+            "resources": {"peak_tree_rss_bytes": 100},
+        },
+    )
+    output = tmp_path / "native-drift.jsonl"
+    rows = module.run_lane(["a"], ["tabs"], 1, output, workdir=tmp_path / "runs", interval=0.02, worker_timeout=1)
+    end = json.loads(output.read_text().splitlines()[-1])
+    assert end["binding_unchanged"] is False
+    assert end["provenance_verified"] is False
+    assert rows[0]["provenance_verified"] is False
