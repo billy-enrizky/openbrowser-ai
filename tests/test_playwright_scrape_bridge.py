@@ -184,3 +184,30 @@ def test_unknown_factory_name_is_rejected(tmp_path):
 def test_native_bridge_declares_the_observed_browser_engine():
     arm, _ = make_arm({"content": STATIC_CONTENT})
     assert arm.last_engine == "browser"
+
+
+@pytest.mark.asyncio
+async def test_bridge_uses_a_short_private_native_temp_base():
+    import os
+    import stat
+
+    arm, _ = make_arm({"content": STATIC_CONTENT})
+    await arm.start()
+    allocated = arm._workdir
+    assert allocated is not None
+    try:
+        if os.name != "nt":
+            assert allocated.parent == Path("/tmp")
+        assert stat.S_IMODE(allocated.stat().st_mode) == 0o700
+    finally:
+        await arm.stop()
+    assert not allocated.exists()
+
+
+@pytest.mark.asyncio
+async def test_bridge_cleanup_preserves_a_caller_owned_directory(tmp_path):
+    arm, _ = make_arm({"content": STATIC_CONTENT}, workdir=tmp_path)
+    await arm.start()
+    await arm.prepare("static_article")
+    await arm.stop()
+    assert tmp_path.exists()

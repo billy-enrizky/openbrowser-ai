@@ -10,6 +10,8 @@ of the browser and service arms in the same lane.
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import tempfile
 from collections.abc import Callable
 from dataclasses import replace
@@ -55,13 +57,14 @@ class PlaywrightScrapeArm:
         self.name = name
         self.arm = arm
         self._workdir = Path(workdir) if workdir is not None else None
+        self._owns_workdir = workdir is None
         self._context_factory = context_factory
         self._ctx: Any = None
         self._prepared = False
 
     async def start(self) -> None:
         if self._workdir is None:
-            self._workdir = Path(tempfile.mkdtemp(prefix="ob-playwright-scrape-"))
+            self._workdir = Path(tempfile.mkdtemp(prefix="pws-", dir="/tmp" if os.name != "nt" else None))
 
     async def prepare(self, task_name: str) -> None:
         if self._ctx is None:
@@ -78,6 +81,9 @@ class PlaywrightScrapeArm:
             self.arm.cleanup(self._ctx)
             self._ctx = None
             self._prepared = False
+        if self._owns_workdir and self._workdir is not None:
+            shutil.rmtree(self._workdir)
+            self._workdir = None
 
     # -- scrape_compare task surface --------------------------------------
     async def run_static(self, base: str):
