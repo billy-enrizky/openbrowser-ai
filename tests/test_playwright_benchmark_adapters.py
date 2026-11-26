@@ -650,3 +650,83 @@ def test_cli_execute_program_requires_verified_launch(tmp_path, monkeypatch):
     result = arm.execute_program(ctx, "async (page) => { return {ok: true}; }")
     assert result.ok is False
     assert "readiness" in result.error
+
+
+class StartupLeakClient(FakeMcpClient):
+    def __init__(self, command, *, env=None, timeout=120.0):
+        super().__init__(command, env=env, timeout=timeout)
+        self.stderr_lines.append(f"startup debug {BENCH_PASSWORD}")
+
+
+class ProgramStderrLeakClient(FakeMcpClient):
+    def call_tool(self, name, arguments, *, timeout=None):
+        result = super().call_tool(name, arguments, timeout=timeout)
+        code = arguments.get("code", "")
+        if name == "browser_run_code_unsafe" and "navigator.userAgent" not in code:
+            self.stderr_lines.append(f"program debug {BENCH_PASSWORD}")
+        return result
+
+
+def test_mcp_warmup_rejects_startup_stderr_leak(tmp_path, monkeypatch):
+    ctx = make_context(tmp_path)
+    monkeypatch.setattr(playwright_mcp, "StdioMcpClient", StartupLeakClient)
+    arm = playwright_mcp.PlaywrightMcpArm(binary="/bin/playwright-mcp")
+    with pytest.raises(RuntimeError, match="leaked"):
+        arm.warmup(ctx)
+
+
+def test_cli_warmup_rejects_startup_stderr_leak(tmp_path, monkeypatch):
+    ctx = make_context(tmp_path)
+
+    def leaky(command, *, env=None, cwd=None, input_text=None, timeout=120.0):
+        if "run-code" in command and "--filename" in command:
+            return 0, '{"browser_version": "TestUA"}', f"startup debug {BENCH_PASSWORD}", 0.1
+        return 0, "", "", 0.1
+
+    monkeypatch.setattr(playwright_cli, "run_process", leaky)
+    arm = playwright_cli.PlaywrightCliArm(binary="/bin/playwright-cli")
+    with pytest.raises(RuntimeError, match="leaked"):
+        arm.warmup(ctx)
+
+
+def test_mcp_execute_program_rejects_stderr_leak(tmp_path, monkeypatch):
+    ctx = make_context(tmp_path)
+    monkeypatch.setattr(playwright_mcp, "StdioMcpClient", ProgramStderrLeakClient)
+    arm = playwright_mcp.PlaywrightMcpArm(binary="/bin/playwright-mcp")
+    arm.warmup(ctx)
+    result = arm.execute_program(ctx, 'async (page) => { return {quote: "Q-1"}; }')
+    assert result.ok is False
+    assert "leaked" in result.error
+    assert BENCH_PASSWORD in result.stderr
+
+
+def test_cli_execute_program_rejects_stderr_leak(tmp_path, monkeypatch):
+    ctx = make_context(tmp_path)
+
+    def leaky(command, *, env=None, cwd=None, input_text=None, timeout=120.0):
+        if "run-code" in command and "--filename" in command:
+            path = Path(command[command.index("--filename") + 1])
+            code = path.read_text()
+            if "navigator.userAgent" in code:
+                return 0, '{"browser_version": "TestUA"}', "", 0.1
+            return 0, '{"quote": "Q-1"}', f"program debug {BENCH_PASSWORD}", 0.1
+        return 0, "", "", 0.1
+
+    monkeypatch.setattr(playwright_cli, "run_process", leaky)
+    arm = playwright_cli.PlaywrightCliArm(binary="/bin/playwright-cli")
+    arm.warmup(ctx)
+    result = arm.execute_program(ctx, 'async (page) => { return {quote: "Q-1"}; }')
+    assert result.ok is False
+    assert "leaked" in result.error
+    assert BENCH_PASSWORD in result.stderr
+
+
+def test_mcp_run_without_cleanup_rejects_stderr_leak(tmp_path, monkeypatch):
+    ctx = make_context(tmp_path)
+    monkeypatch.setattr(playwright_mcp, "StdioMcpClient", ProgramStderrLeakClient)
+    arm = playwright_mcp.PlaywrightMcpArm(binary="/bin/playwright-mcp")
+    arm.warmup(ctx)
+    result = arm.run(ctx, cleanup=False)
+    assert result.ok is False
+    assert "leaked" in result.error
+    assert BENCH_PASSWORD in result.stderr

@@ -147,7 +147,13 @@ class PlaywrightMcpArm:
         started = time.monotonic()
         self._result = ArmResult(ok=False)
         self._start(ctx)
-        text = self._call(ctx, "browser_run_code_unsafe", {"code": READINESS_PROGRAM})
+        try:
+            text = self._call(ctx, "browser_run_code_unsafe", {"code": READINESS_PROGRAM})
+        except Exception:
+            if self._client is not None:
+                self._archive_stderr(self._client)
+                assert_no_secret(self._result.stdout, self._result.stderr)
+            raise
         payload = last_json(text)
         payload["user_agent"] = payload.pop("browser_version", "")
         payload.update(
@@ -160,6 +166,9 @@ class PlaywrightMcpArm:
         )
         self._ensure_keychain(ctx)
         payload["keychain_verified"] = True
+        if self._client is not None:
+            self._archive_stderr(self._client)
+        assert_no_secret(self._result.stdout, self._result.stderr)
         return payload, (time.monotonic() - started) * 1000.0
 
     def execute_program(self, ctx: RunContext, code: str, *, timeout: float | None = None) -> ArmResult:
@@ -171,12 +180,18 @@ class PlaywrightMcpArm:
         calls, starts = self._result.tool_calls, self._result.process_starts
         try:
             text = self._call(ctx, "browser_run_code_unsafe", {"code": code}, timeout=timeout)
+            if self._client is not None:
+                self._archive_stderr(self._client)
             result.stdout = text
+            result.stderr = self._result.stderr
             result.reported = last_json(text)
             result.browser_version = self.browser_version
+            assert_no_secret(result.stdout, result.stderr)
             result.keychain_verified = True
             result.ok = True
         except Exception as exc:
+            if self._client is not None:
+                self._archive_stderr(self._client)
             result.error = str(exc)
             result.stdout = self._result.stdout
             result.stderr = self._result.stderr
@@ -221,6 +236,8 @@ class PlaywrightMcpArm:
         finally:
             if cleanup:
                 self.cleanup(ctx)
+        if self._client is not None:
+            self._archive_stderr(self._client)
         try:
             assert_no_secret(self._result.stdout, self._result.stderr)
         except RuntimeError as exc:
