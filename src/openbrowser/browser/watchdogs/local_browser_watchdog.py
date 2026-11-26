@@ -36,6 +36,30 @@ IS_WINDOWS = os.name == 'nt'
 OWNERSHIP_MARKER_PREFIX = '--openbrowser-instance-id='
 
 
+def _local_debugger_endpoint(value: Any, port: int) -> str | None:
+	"""Admit browser endpoints from the requested managed-loopback listener."""
+	if not isinstance(value, str) or not value.startswith(('ws://', 'wss://')):
+		return None
+	if any(char.isspace() for char in value) or '?' in value or '#' in value:
+		return None
+	try:
+		parsed = urlsplit(value)
+		if (
+			parsed.hostname not in {'localhost', '127.0.0.1', '::1'}
+			or parsed.port is None
+			or parsed.port != port
+			or parsed.username is not None
+			or parsed.password is not None
+		):
+			return None
+	except ValueError:
+		return None
+	prefix = '/devtools/browser/'
+	if not parsed.path.startswith(prefix) or not parsed.path.removeprefix(prefix):
+		return None
+	return value
+
+
 class LocalBrowserWatchdog(BaseWatchdog):
 	"""Manages local browser subprocess lifecycle."""
 
@@ -645,11 +669,9 @@ class LocalBrowserWatchdog(BaseWatchdog):
 					resp = await client.get(f'http://localhost:{port}/json/version')
 					if resp.status_code == 200:
 						version = resp.json()
-						endpoint = version.get('webSocketDebuggerUrl') if isinstance(version, dict) else None
-						if isinstance(endpoint, str) and endpoint.startswith(('ws://', 'wss://')):
-							parsed = urlsplit(endpoint)
-							if parsed.hostname and '#' not in endpoint and not any(char.isspace() for char in endpoint):
-								_ = parsed.port  # Validate an explicitly supplied port.
+						if isinstance(version, dict):
+							endpoint = _local_debugger_endpoint(version.get('webSocketDebuggerUrl'), port)
+							if endpoint is not None:
 								return endpoint
 				except Exception:
 					# Local discovery can be incomplete while Chrome starts.

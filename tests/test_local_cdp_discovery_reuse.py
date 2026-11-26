@@ -18,7 +18,17 @@ from openbrowser.browser.watchdogs import local_browser_watchdog as module
 
 @pytest.fixture
 def discovery(monkeypatch):
-    state = SimpleNamespace(now=0.0, responses=[], gets=[], constructors=0, enters=0, exits=0, sleeps=[])
+    state = SimpleNamespace(
+        now=0.0,
+        responses=[],
+        gets=[],
+        get_kwargs=[],
+        constructor_kwargs=[],
+        constructors=0,
+        enters=0,
+        exits=0,
+        sleeps=[],
+    )
 
     class Response:
         def __init__(self, payload, status=200):
@@ -41,6 +51,7 @@ def discovery(monkeypatch):
 
         async def get(self, url, **kwargs):
             state.gets.append(url)
+            state.get_kwargs.append(kwargs)
             response = state.responses.pop(0)
             if isinstance(response, BaseException):
                 raise response
@@ -48,6 +59,7 @@ def discovery(monkeypatch):
 
     def factory(**kwargs):
         state.constructors += 1
+        state.constructor_kwargs.append(kwargs)
         return Client()
 
     async def sleep(delay):
@@ -74,7 +86,8 @@ def discovery(monkeypatch):
     "url",
     [
         "ws://localhost:9222/devtools/browser/browser-id",
-        "wss://debug.example.test/devtools/browser/browser-id",
+        "wss://127.0.0.1:9222/devtools/browser/browser-id",
+        "ws://[::1]:9222/devtools/browser/browser-id",
     ],
 )
 async def test_readiness_returns_the_discovered_websocket_url(discovery, url):
@@ -100,6 +113,15 @@ async def test_readiness_returns_the_discovered_websocket_url(discovery, url):
         {"webSocketDebuggerUrl": " ws://localhost:9222/browser"},
         {"webSocketDebuggerUrl": "ws://localhost:bad/browser"},
         {"webSocketDebuggerUrl": "ws://localhost:9222/browser#fragment"},
+        {"webSocketDebuggerUrl": "ws://localhost/devtools/browser/foreign"},
+        {"webSocketDebuggerUrl": "ws://localhost:9223/devtools/browser/foreign"},
+        {"webSocketDebuggerUrl": "ws://debug.example.test:9222/devtools/browser/foreign"},
+        {"webSocketDebuggerUrl": "ws://user@localhost:9222/devtools/browser/foreign"},
+        {"webSocketDebuggerUrl": "ws://user:password@localhost:9222/devtools/browser/foreign"},
+        {"webSocketDebuggerUrl": "ws://localhost:9222/devtools/browser/foreign?token=test"},
+        {"webSocketDebuggerUrl": "ws://localhost:9222/devtools/browser/foreign?"},
+        {"webSocketDebuggerUrl": "ws://localhost:9222/devtools/browser/"},
+        {"webSocketDebuggerUrl": "ws://localhost:9222/devtools/page/foreign"},
         ValueError("invalid JSON"),
     ],
 )
@@ -192,4 +214,30 @@ async def test_plain_http_discovery_keeps_strict_tls_without_loading_ca_roots(di
     assert isinstance(context, ssl.SSLContext)
     assert context.verify_mode == ssl.CERT_REQUIRED
     assert context.check_hostname is True
+    assert context.cert_store_stats() == {"x509": 0, "crl": 0, "x509_ca": 0}
     assert configured[0]["trust_env"] is False
+
+
+async def test_explicit_remote_http_attach_preserves_headers_and_client_policy(discovery, monkeypatch):
+    class AdmissionProbe(RuntimeError):
+        pass
+
+    url = "wss://debug.example.test:9443/devtools/browser/remote"
+    discovery.responses.append(discovery.response({"webSocketDebuggerUrl": url}))
+    session = BrowserSession(cdp_url="https://debug.example.test:9443/", headers={"Authorization": "test-only"})
+    checks = []
+
+    def stop_after_resolution(**kwargs):
+        checks.append(kwargs)
+        if len(checks) == 2:
+            raise AdmissionProbe("remote metadata resolved")
+
+    monkeypatch.setattr(session, "_raise_if_connect_admission_closed", stop_after_resolution)
+    monkeypatch.setattr(session, "_await_connect_failure", AsyncMock())
+    with pytest.raises(AdmissionProbe):
+        await session._connect_locked()
+    assert session.cdp_url == url
+    assert discovery.gets == ["https://debug.example.test:9443/json/version"]
+    assert discovery.get_kwargs == [{"headers": {"Authorization": "test-only"}}]
+    assert "verify" not in discovery.constructor_kwargs[0]
+    assert "trust_env" not in discovery.constructor_kwargs[0]
