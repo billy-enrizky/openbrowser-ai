@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import shutil
+import ssl
 import tempfile
 import uuid
 from pathlib import Path
@@ -636,7 +637,9 @@ class LocalBrowserWatchdog(BaseWatchdog):
 
 		start_time = asyncio.get_event_loop().time()
 
-		async with httpx.AsyncClient(timeout=httpx.Timeout(2.0)) as client:
+		# Discovery uses HTTP on loopback; keep strict TLS settings without loading CA roots.
+		control_tls = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+		async with httpx.AsyncClient(timeout=httpx.Timeout(2.0), verify=control_tls, trust_env=False) as client:
 			while asyncio.get_event_loop().time() - start_time < timeout:
 				try:
 					resp = await client.get(f'http://localhost:{port}/json/version')

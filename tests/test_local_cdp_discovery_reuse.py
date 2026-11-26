@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import socket
+import ssl
 import subprocess
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -56,6 +57,7 @@ def discovery(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("local discovery tests require fake native I/O")
 
+    state.real_client_type = httpx.AsyncClient
     monkeypatch.setattr(httpx, "AsyncClient", factory)
     monkeypatch.setattr(
         module, "asyncio", SimpleNamespace(get_event_loop=lambda: SimpleNamespace(time=lambda: state.now), sleep=sleep)
@@ -165,3 +167,29 @@ async def test_local_discovery_skips_the_second_session_http_client(discovery, m
     assert session.cdp_url == url
     assert discovery.constructors == 1
     assert discovery.gets == ["http://localhost:9222/json/version"]
+
+
+async def test_plain_http_discovery_keeps_strict_tls_without_loading_ca_roots(discovery, monkeypatch):
+    url = "ws://localhost:9222/devtools/browser/ready"
+    configured = []
+
+    def ca_load_forbidden(*args, **kwargs):
+        raise AssertionError("plain HTTP discovery loaded a certificate store")
+
+    async def version_response(self, requested_url, **kwargs):
+        assert requested_url == "http://localhost:9222/json/version"
+        return httpx.Response(200, json={"webSocketDebuggerUrl": url})
+
+    def client_factory(**kwargs):
+        configured.append(kwargs)
+        return discovery.real_client_type(**kwargs)
+
+    monkeypatch.setattr(ssl, "create_default_context", ca_load_forbidden)
+    monkeypatch.setattr(discovery.real_client_type, "get", version_response)
+    monkeypatch.setattr(httpx, "AsyncClient", client_factory)
+    assert await module.LocalBrowserWatchdog._wait_for_cdp_url(9222) == url
+    context = configured[0]["verify"]
+    assert isinstance(context, ssl.SSLContext)
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname is True
+    assert configured[0]["trust_env"] is False
