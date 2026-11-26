@@ -143,7 +143,11 @@ class PlaywrightCliArm:
     def warmup(self, ctx: RunContext) -> tuple[dict, float]:
         started = time.monotonic()
         self._result = ArmResult(ok=False)
-        text = self._code(ctx, READINESS_PROGRAM)
+        try:
+            text = self._code(ctx, READINESS_PROGRAM)
+        except Exception:
+            assert_no_secret(self._result.stdout, self._result.stderr)
+            raise
         payload = last_json(text)
         payload["user_agent"] = payload.pop("browser_version", "")
         payload.update(
@@ -156,6 +160,7 @@ class PlaywrightCliArm:
         )
         self._ensure_keychain(ctx)
         payload["keychain_verified"] = True
+        assert_no_secret(self._result.stdout, self._result.stderr)
         return payload, (time.monotonic() - started) * 1000.0
 
     def execute_program(self, ctx: RunContext, code: str, *, timeout: float | None = None) -> ArmResult:
@@ -168,8 +173,10 @@ class PlaywrightCliArm:
         try:
             text = self._code(ctx, code, timeout=timeout)
             result.stdout = text
+            result.stderr = self._result.stderr
             result.reported = last_json(text)
             result.browser_version = self.browser_version
+            assert_no_secret(result.stdout, result.stderr)
             result.keychain_verified = True
             result.ok = True
         except Exception as exc:
