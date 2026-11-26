@@ -10,6 +10,7 @@ import time
 from contextlib import suppress
 from pathlib import Path
 
+from ..arms import WARM_METHOD_ID
 from ..fixtures.server import ACCOUNT_SECRET, BENCH_PASSWORD, BENCH_USER
 from .base import (
     ArmResult,
@@ -30,9 +31,9 @@ BINARY = os.environ.get(
     str(Path.home() / ".cache" / "openbrowser-interactive-bench" / "browser-use-venv" / "bin" / "browser-use"),
 )
 
-ADAPTER_VERSION = "browser-use-native-readiness-v2"
+ADAPTER_VERSION = WARM_METHOD_ID
 STDERR_TAIL_BYTES = 32768
-WARMUP_SENTINEL = "BROWSER_USE_NATIVE_READY_V2"
+WARMUP_SENTINEL = "NATIVE_SESSION_READY_V4"
 WARMUP_CODE = f"""
 import json
 tabs = list_tabs()
@@ -88,7 +89,8 @@ def ready_box(selector, target, timeout=20.0):
     deadline = _time.monotonic() + timeout
     box = None
     expression = (
-        '(()=>{const e=document.querySelector(' + _json.dumps(selector) + ');'
+        "(()=>{if(document.readyState==='loading')return null;"
+        'const e=document.querySelector(' + _json.dumps(selector) + ');'
         'if(!e)return null;'
         'const s=getComputedStyle(e);'
         'if(s.display===\"none\"||s.visibility===\"hidden\"||s.opacity===\"0\")return null;'
@@ -146,11 +148,23 @@ def _stderr_tail(stderr: str, ctx: RunContext) -> tuple[str, bool]:
     return marker.decode() + tail, True
 
 
-def _wizard(url: str) -> str:
+def _ready_header(url: str, selector: str) -> str:
     return (
         HEADER
+        + TABS_READINESS
         + f"""
-_tick(); new_tab({url!r})
+_tick(); initial_target = new_tab({url!r})
+if not isinstance(initial_target, str) or not initial_target:
+    raise RuntimeError('new_tab did not return a target ID')
+_tick(); ready_box({selector!r}, initial_target)
+"""
+    )
+
+
+def _wizard(url: str) -> str:
+    return (
+        _ready_header(url, "#name")
+        + """
 _tick(); fill_input('#name', 'Alice Bench')
 _tick(); fill_input('#email', 'alice@example.com')
 _tick(); js("document.querySelector('#country-ca').click()")
@@ -167,16 +181,15 @@ _tick(); js("document.querySelector('#submit').click()")
 wait_js("!!document.getElementById('quote')")
 quote = js("document.getElementById('quote').textContent")
 _tick(); close_current()
-emit({{'quote': quote}})
+emit({'quote': quote})
 """
     )
 
 
 def _modal(url: str) -> str:
     return (
-        HEADER
-        + f"""
-_tick(); new_tab({url!r})
+        _ready_header(url, "#open-modal")
+        + """
 _tick(); js("document.querySelector('#open-modal').click()")
 wait_js("!document.getElementById('modal').hidden")
 _tick(); press_key('Escape')
@@ -189,21 +202,20 @@ _tick(); js("document.querySelector('[data-value=\\"Project Atlas\\"]').click()"
 wait_js("document.getElementById('selected-value').textContent === 'Project Atlas'")
 selected = js("document.getElementById('selected-value').textContent")
 _tick(); close_current()
-emit({{'selected': selected}})
+emit({'selected': selected})
 """
     )
 
 
 def _download(url: str) -> str:
     return (
-        HEADER
-        + f"""
-_tick(); new_tab({url!r})
+        _ready_header(url, "#download-report")
+        + """
 _tick(); js("document.querySelector('#download-report').click()")
 _tick(); wait_js("document.getElementById('download-status').textContent === 'requested'")
 status = js("document.getElementById('download-status').textContent")
 _tick(); close_current()
-emit({{'status': status}})
+emit({'status': status})
 """
     )
 
@@ -249,9 +261,8 @@ emit({{'status': status, 'original_title': title,
 
 def _login(url: str) -> str:
     return (
-        HEADER
+        _ready_header(url, "#username")
         + f"""
-_tick(); new_tab({url!r})
 _tick(); fill_input('#username', {BENCH_USER!r})
 _tick(); fill_input('#password', {BENCH_PASSWORD!r})
 _tick(); js("document.querySelector('#login-submit').click()")
@@ -265,11 +276,10 @@ _tick(); cdp('Browser.close')
 
 def _read_account(url: str) -> str:
     return (
-        HEADER
-        + f"""
-_tick(); new_tab({url!r})
+        _ready_header(url, "#secret")
+        + """
 wait_js("!!document.getElementById('secret')")
-emit({{'secret': js("document.getElementById('secret').textContent")}})
+emit({'secret': js("document.getElementById('secret').textContent")})
 """
     )
 
@@ -394,14 +404,13 @@ class BrowserUseArm:
             elif ctx.task == "auth":
                 phase1 = self._script(ctx, _login(ctx.base_url + "/login"), 120)
                 if self._chrome is not None and self._chrome.process is not None:
-                    try:
+                    with suppress(Exception):
                         self._chrome.process.wait(timeout=10)
-                    except Exception:
-                        pass
                 self._stop_chrome()
                 self._start_chrome(ctx)
                 phase2 = self._script(ctx, _read_account(ctx.base_url + "/account"), 120)
                 self._result.reported = {
+                    **self._result.reported,
                     "secret": phase2.get("secret", ""),
                     "phase1_secret": phase1.get("secret", ""),
                 }

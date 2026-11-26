@@ -10,20 +10,30 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from benchmarks.interactive import warm_benchmark
-from benchmarks.interactive.adapters.base import ArmResult
+from benchmarks.interactive.adapters.base import ArmResult, RunContext
 from benchmarks.interactive.adapters.openbrowser import OpenBrowserArm
 from benchmarks.interactive.run_benchmark import make_arm
 from benchmarks.interactive.tasks import oracle_tabs
-from benchmarks.interactive.warm_benchmark import DEFAULT_ARMS, WARM_TASKS, cold_p50, redact, summarize
+from benchmarks.interactive.warm_benchmark import DEFAULT_ARMS, SUPPORTED_ARMS, WARM_TASKS, cold_p50, redact, summarize
 
 
-def _ctx() -> SimpleNamespace:
-    return SimpleNamespace(
+def _ctx() -> RunContext:
+    root = Path("/tmp/warm-test")
+    return RunContext(
         task="wizard",
+        arm="openbrowser-fast",
+        sample=0,
         base_url="http://127.0.0.1:1",
-        root=Path("/tmp/warm-test"),
-        config=Path("/tmp/warm-test/config"),
+        root=root,
+        downloads=root / "downloads",
+        profile=root / "profile",
+        home=root / "home",
+        tmp=root / "tmp",
+        config=root / "config",
+        session="bench",
     )
 
 
@@ -57,7 +67,8 @@ def test_openbrowser_fast_is_a_distinct_warm_arm():
     semantic_arm = make_arm("openbrowser")
     fast_arm = make_arm("openbrowser-fast")
 
-    assert "openbrowser" in DEFAULT_ARMS
+    assert "openbrowser" in SUPPORTED_ARMS
+    assert "openbrowser" not in DEFAULT_ARMS
     assert "openbrowser-fast" in DEFAULT_ARMS
     assert isinstance(semantic_arm, OpenBrowserArm)
     assert isinstance(fast_arm, OpenBrowserArm)
@@ -97,7 +108,20 @@ def test_openbrowser_warmup_parses_json():
     arm = OpenBrowserArm(binary="/bin/true")
     payload = {"ok": True, "elapsed_ms": 12.5, "url": "about:blank"}
     with (
+        patch("benchmarks.interactive.adapters.openbrowser._write_config"),
         patch("benchmarks.interactive.adapters.openbrowser._env", return_value={}),
+        patch(
+            "benchmarks.interactive.adapters.openbrowser.verify_mock_keychain",
+            return_value=True,
+        ),
+        patch(
+            "benchmarks.interactive.adapters.openbrowser.capture_launch_proof",
+            return_value=None,
+        ),
+        patch(
+            "benchmarks.interactive.adapters.openbrowser.read_pid_file",
+            return_value=None,
+        ),
         patch(
             "benchmarks.interactive.adapters.openbrowser.run_process",
             return_value=(0, json.dumps(payload), "", 1.0),
@@ -105,7 +129,11 @@ def test_openbrowser_warmup_parses_json():
     ):
         result, elapsed_ms = arm.warmup(_ctx())
 
-    assert result == payload
+    assert result["keychain_verified"] is True
+    assert result["launch_proof_captured"] is False
+    assert {
+        key: value for key, value in result.items() if key not in {"keychain_verified", "launch_proof_captured"}
+    } == payload
     assert elapsed_ms >= 0
 
 
@@ -268,3 +296,92 @@ def test_explicit_cold_reference_remains_opt_in(tmp_path, monkeypatch):
     assert report["rows"][0]["cold_p50_ms"] == 500.0
     assert report["rows"][0]["warm_p50_ms"] == 250.0
     assert report["rows"][0]["speedup"] == 2.0
+
+
+def test_cli_warmup_writes_profile_before_starting_native_daemon(tmp_path, monkeypatch):
+    from benchmarks.interactive.adapters import openbrowser
+
+    ctx = warm_benchmark.make_context(tmp_path, "openbrowser-fast")
+    arm = OpenBrowserArm(binary="/fake/openbrowser", fast_selectors=True)
+    calls = []
+
+    def run(command, **kwargs):
+        profile = json.loads((ctx.config / "config.json").read_text())["browser_profile"]["bench"]
+        assert profile["downloads_path"] == str(ctx.downloads)
+        assert profile["args"] == ["--use-mock-keychain"]
+        calls.append(command)
+        return 0, '{"ok":true}', "", 1.0
+
+    monkeypatch.setattr(openbrowser, "run_process", run)
+    monkeypatch.setattr(openbrowser, "verify_mock_keychain", lambda marker: True)
+    monkeypatch.setattr(openbrowser, "read_pid_file", lambda path: None)
+    monkeypatch.setattr(openbrowser, "capture_launch_proof", lambda *args, **kwargs: None)
+    payload, _ = arm.warmup(ctx)
+    assert payload["ok"] is True
+    assert calls == [["/fake/openbrowser", "warm"]]
+
+
+def test_fast_mcp_auth_uses_selector_helpers_and_preserves_storage_export():
+    from benchmarks.interactive.adapters.openbrowser_mcp import OpenBrowserMcpArm
+
+    fast = OpenBrowserMcpArm(binary="/fake/openbrowser", fast_selectors=True)
+    indexed = OpenBrowserMcpArm(binary="/fake/openbrowser", fast_selectors=False)
+    code = fast._program("auth", "http://fixture.invalid", "/tmp/owned-state.json")
+    assert "fill_selector('#username'" in code
+    assert "fill_selector('#password'" in code
+    assert "click_selector('#login-submit')" in code
+    assert "browser.export_storage_state('/tmp/owned-state.json')" in code
+    assert "input_text(index=await find" not in code
+    assert "input_text(index=await find" in indexed._program("auth", "http://fixture.invalid", "/tmp/owned-state.json")
+
+
+def test_cli_auth_restarts_browser_through_official_reset(monkeypatch):
+    from benchmarks.interactive.adapters import openbrowser
+    from benchmarks.interactive.fixtures.server import ACCOUNT_SECRET
+
+    arm = OpenBrowserArm(binary="/fake/openbrowser", fast_selectors=True)
+    context = _ctx()
+    context.task = "auth"
+    events = []
+
+    def invoke(ctx, code, timeout):
+        stage = "login" if "#username" in code else "account"
+        events.append(stage)
+        arm._result.stdout += json.dumps({"secret": ACCOUNT_SECRET}) + "\n"
+        arm._result.process_starts += 1
+        arm._result.tool_calls += 1
+
+    def control(command, **kwargs):
+        assert command == ["/fake/openbrowser", "daemon", "reset"]
+        events.append("reset")
+        return 0, '{"browser":{"phase":"stopped"}}', "", 0.0
+
+    def forbidden_stop(ctx):
+        raise AssertionError("auth restarted the whole daemon")
+
+    monkeypatch.setattr(arm, "_invoke", invoke)
+    monkeypatch.setattr(arm, "_stop_daemon", forbidden_stop)
+    monkeypatch.setattr(openbrowser, "run_process", control)
+    monkeypatch.setattr(openbrowser, "_write_config", lambda *args, **kwargs: None)
+    monkeypatch.setattr(openbrowser, "verify_mock_keychain", lambda *args, **kwargs: True)
+    result = arm.run(context, cleanup=False)
+    assert result.ok is True, result.error
+    assert events == ["login", "reset", "account"]
+    assert result.reported["secret"] == ACCOUNT_SECRET
+    assert result.process_starts == 3
+    assert result.tool_calls == 3
+
+
+@pytest.mark.parametrize(
+    "returncode,stdout",
+    [(1, ""), (0, "bad json"), (0, '{"browser":null}'), (0, '{"browser":{"phase":"running"}}')],
+)
+def test_cli_reset_rejects_failure_and_unconfirmed_browser_shutdown(monkeypatch, returncode, stdout):
+    from benchmarks.interactive.adapters import openbrowser
+
+    arm = OpenBrowserArm(binary="/fake/openbrowser", fast_selectors=True)
+    monkeypatch.setattr(openbrowser, "run_process", lambda *args, **kwargs: (returncode, stdout, "failed", 0.0))
+    with pytest.raises(RuntimeError):
+        arm._reset_browser(_ctx())
+    assert arm._result.process_starts == 1
+    assert arm._result.tool_calls == 1

@@ -27,7 +27,7 @@ EXPECTED_TEXT = ("OpenBrowser static content. " * 500).rstrip()
 
 
 class _StaticPageHandler(BaseHTTPRequestHandler):
-    def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler method
+    def do_GET(self):
         body = (
             b"<html><head><title>Memory page</title></head><body><article>"
             + (b"OpenBrowser static content. " * 500)
@@ -180,9 +180,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--samples", type=int, default=5)
     parser.add_argument("--concurrency", type=int, default=25)
-    parser.add_argument("--concurrency-samples", type=int, default=3)
+    parser.add_argument("--concurrency-samples", type=int, default=5)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args()
+    if min(args.samples, args.concurrency, args.concurrency_samples) < 1:
+        parser.error("samples, concurrency, and concurrency-samples must be positive")
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), _StaticPageHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -212,12 +214,14 @@ def main() -> int:
         "sequential": sequential,
         "concurrent": concurrent,
         "concurrency": args.concurrency,
+        "samples": args.samples,
+        "concurrency_samples": args.concurrency_samples,
         "limits": [
             "One local static fixture, not the live web.",
             "Peak RSS is process-tree resident set size in MiB and can count shared pages more than once.",
             "The Python MCP server process and any observed descendants are included.",
             "The no-browser mode cannot execute JavaScript, take screenshots, or use browser cookies.",
-            "Each concurrent row is one observation unless concurrency-samples is raised.",
+            "Each concurrent row is one independent observation with a fresh MCP server.",
             "Do not compare this RSS total to a PSS or per-process figure without stating the scope.",
         ],
     }

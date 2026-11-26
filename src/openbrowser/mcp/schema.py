@@ -1,10 +1,10 @@
-"""Strict JSON Schema subset for the stateless MCP tools.
+"""Strict JSON Schema subset for the advertised MCP input and output schemas.
 
-The lean stateless path must validate tool arguments without importing
-``jsonschema``. Draft 2020-12 validation pulls in referencing, rpds, attrs,
+The lean stateless path and the stateful server compile their schemas without
+importing ``jsonschema``. Draft 2020-12 validation pulls in referencing, rpds, attrs,
 and jsonschema-specifications, which costs about 10 MiB of resident memory on
-first use. The two advertised stateless schemas use a small fixed vocabulary,
-so this module compiles that vocabulary once and raises
+first use. The advertised MCP schemas use a small fixed vocabulary, so this
+module compiles that vocabulary once and raises
 ``UnsupportedSchemaError`` for any keyword it does not implement. An unknown
 keyword never silently bypasses a constraint.
 
@@ -37,6 +37,7 @@ _CONSTRAINTS = frozenset(
 )
 _SUPPORTED_KEYWORDS = _ANNOTATIONS | _CONSTRAINTS
 _SUPPORTED_TYPES = frozenset({"array", "boolean", "integer", "object", "string"})
+_NULL_TYPE = frozenset({"null"})
 
 
 class UnsupportedSchemaError(ValueError):
@@ -74,33 +75,41 @@ def _unsupported(detail: str) -> UnsupportedSchemaError:
     return UnsupportedSchemaError(f"Unsupported JSON Schema: {detail}")
 
 
-def _compile_types(value: Any) -> tuple[str, ...]:
-    if value is None:
+def _compile_types(schema: Mapping[str, Any], *, allow_null: bool) -> tuple[str, ...]:
+    if "type" not in schema:
         return ()
+    value = schema["type"]
     names: tuple[Any, ...]
     if isinstance(value, str):
         names = (value,)
     elif isinstance(value, list):
         names = tuple(value)
     else:
-        raise _unsupported(f"'type' must be a string or list of strings, got {value!r}")
+        raise _unsupported(f"'type' must be a string or non-empty list of strings, got {value!r}")
+    if not names:
+        raise _unsupported("'type' must not be empty")
+    supported = _SUPPORTED_TYPES | (_NULL_TYPE if allow_null else frozenset())
     for name in names:
-        if not isinstance(name, str) or name not in _SUPPORTED_TYPES:
+        if not isinstance(name, str) or name not in supported:
             raise _unsupported(f"'type' value {name!r} is not supported")
+    if len(set(names)) != len(names):
+        raise _unsupported("'type' values must be unique")
     return tuple(names)
 
 
-def _compile_bound(value: Any, keyword: str) -> int | float | None:
-    if value is None:
+def _compile_bound(schema: Mapping[str, Any], keyword: str) -> int | float | None:
+    if keyword not in schema:
         return None
+    value = schema[keyword]
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise _unsupported(f"{keyword!r} must be a number, got {value!r}")
     return value
 
 
-def _compile_count(value: Any, keyword: str) -> int | None:
-    if value is None:
+def _compile_count(schema: Mapping[str, Any], keyword: str) -> int | None:
+    if keyword not in schema:
         return None
+    value = schema[keyword]
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise _unsupported(f"{keyword!r} must be a non-negative integer, got {value!r}")
     return value
@@ -109,9 +118,10 @@ def _compile_count(value: Any, keyword: str) -> int | None:
 _SCALAR_ENUM_TYPES = (str, int, float, bool)
 
 
-def _compile_enum(value: Any) -> tuple[Any, ...] | None:
-    if value is None:
+def _compile_enum(schema: Mapping[str, Any]) -> tuple[Any, ...] | None:
+    if "enum" not in schema:
         return None
+    value = schema["enum"]
     if not isinstance(value, list):
         raise _unsupported(f"'enum' must be a list, got {value!r}")
     for entry in value:
@@ -120,9 +130,10 @@ def _compile_enum(value: Any) -> tuple[Any, ...] | None:
     return tuple(value)
 
 
-def _compile_properties(value: Any) -> tuple[tuple[str, CompiledSchema], ...]:
-    if value is None:
+def _compile_properties(schema: Mapping[str, Any], *, allow_null: bool) -> tuple[tuple[str, CompiledSchema], ...]:
+    if "properties" not in schema:
         return ()
+    value = schema["properties"]
     if not isinstance(value, Mapping):
         raise _unsupported(f"'properties' must be an object, got {value!r}")
     compiled: list[tuple[str, CompiledSchema]] = []
@@ -131,19 +142,28 @@ def _compile_properties(value: Any) -> tuple[tuple[str, CompiledSchema], ...]:
             raise _unsupported(f"'properties' name {name!r} is not a string")
         if not isinstance(subschema, Mapping):
             raise _unsupported(f"'properties.{name}' must be a schema object")
-        compiled.append((name, compile_schema(subschema)))
+        compiled.append((name, compile_schema(subschema, allow_null=allow_null)))
     return tuple(compiled)
 
 
-def _compile_required(value: Any) -> tuple[str, ...]:
-    if value is None:
+def _compile_required(schema: Mapping[str, Any]) -> tuple[str, ...]:
+    if "required" not in schema:
         return ()
+    value = schema["required"]
     if not isinstance(value, list) or any(not isinstance(name, str) for name in value):
         raise _unsupported(f"'required' must be a list of strings, got {value!r}")
+    if len(set(value)) != len(value):
+        raise _unsupported("'required' values must be unique")
     return tuple(value)
 
 
-def compile_schema(schema: Mapping[str, Any]) -> CompiledSchema:
+def _validate_annotations(schema: Mapping[str, Any]) -> None:
+    for keyword in ("title", "description"):
+        if keyword in schema and not isinstance(schema[keyword], str):
+            raise _unsupported(f"{keyword!r} must be a string, got {schema[keyword]!r}")
+
+
+def compile_schema(schema: Mapping[str, Any], *, allow_null: bool = False) -> CompiledSchema:
     """Compile a supported schema mapping or raise ``UnsupportedSchemaError``."""
     if not isinstance(schema, Mapping):
         raise _unsupported(f"schema must be an object, got {schema!r}")
@@ -151,27 +171,28 @@ def compile_schema(schema: Mapping[str, Any]) -> CompiledSchema:
     if unknown:
         raise _unsupported(f"keyword(s) {unknown}")
 
+    _validate_annotations(schema)
+
     additional = schema.get("additionalProperties", True)
     if not isinstance(additional, bool):
         raise _unsupported(f"'additionalProperties' only supports true or false, got {additional!r}")
 
-    items_value = schema.get("items")
-    if items_value is not None and not isinstance(items_value, Mapping):
+    if "items" in schema and not isinstance(schema["items"], Mapping):
         raise _unsupported("'items' must be a single schema object")
 
-    properties = _compile_properties(schema.get("properties"))
+    properties = _compile_properties(schema, allow_null=allow_null)
     return CompiledSchema(
-        types=_compile_types(schema.get("type")),
-        enum=_compile_enum(schema.get("enum")),
-        minimum=_compile_bound(schema.get("minimum"), "minimum"),
-        maximum=_compile_bound(schema.get("maximum"), "maximum"),
-        min_length=_compile_count(schema.get("minLength"), "minLength"),
-        max_length=_compile_count(schema.get("maxLength"), "maxLength"),
-        min_items=_compile_count(schema.get("minItems"), "minItems"),
-        max_items=_compile_count(schema.get("maxItems"), "maxItems"),
-        items=compile_schema(items_value) if items_value is not None else None,
+        types=_compile_types(schema, allow_null=allow_null),
+        enum=_compile_enum(schema),
+        minimum=_compile_bound(schema, "minimum"),
+        maximum=_compile_bound(schema, "maximum"),
+        min_length=_compile_count(schema, "minLength"),
+        max_length=_compile_count(schema, "maxLength"),
+        min_items=_compile_count(schema, "minItems"),
+        max_items=_compile_count(schema, "maxItems"),
+        items=compile_schema(schema["items"], allow_null=allow_null) if "items" in schema else None,
         properties=properties,
-        required=_compile_required(schema.get("required")),
+        required=_compile_required(schema),
         allow_additional=additional,
         property_names=frozenset(name for name, _ in properties),
     )
@@ -211,6 +232,8 @@ def _matches_type(instance: Any, type_name: str) -> bool:
         return False
     if type_name == "boolean":
         return isinstance(instance, bool)
+    if type_name == "null":
+        return instance is None
     return False
 
 

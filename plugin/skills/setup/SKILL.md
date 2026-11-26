@@ -5,7 +5,7 @@ description: |
   Trigger when the user asks to: install OpenBrowser, set up OpenBrowser,
   configure the MCP server, install the CLI, set up browser profiles,
   install the plugin skills, verify a browser, or repair a broken install.
-allowed-tools: Bash(openbrowser-ai:*) Bash(uv:*) Bash(uvx:*) Bash(python3:*) Bash(pip:*) Bash(pipx:*) Bash(npm:*) Bash(npx:*) Bash(claude:*) Bash(curl:*) Bash(irm:*) Read Write Edit
+allowed-tools: Bash(openbrowser-ai:*) Bash(openbrowser-ai-py:*) Bash(uv:*) Bash(uvx:*) Bash(python:*) Bash(python3:*) Bash(pip:*) Bash(pipx:*) Bash(npm:*) Bash(npx:*) Bash(claude:*) Bash(curl:*) Bash(irm:*) Read Write Edit
 ---
 
 # OpenBrowser Setup
@@ -18,6 +18,7 @@ allowed-tools: Bash(openbrowser-ai:*) Bash(uv:*) Bash(uvx:*) Bash(python3:*) Bas
 - [3. Step 2 -- Install or upgrade OpenBrowser](#3-step-2----install-or-upgrade-openbrowser)
   - [3.1. Native web search](#31-native-web-search)
   - [3.2. Fast CLI paths](#32-fast-cli-paths)
+  - [3.3. Native frontend scope](#33-native-frontend-scope)
 - [4. Step 3 -- Inspect and repair config](#4-step-3----inspect-and-repair-config)
 - [5. Step 4 -- Configure MCP](#5-step-4----configure-mcp)
 - [6. Step 5 -- Install the skills](#6-step-5----install-the-skills)
@@ -35,6 +36,9 @@ Use this skill once per machine or project. It installs the CLI and browser, con
 - Prefer `uv`, then `pipx`, then `pip`.
 - Python 3.12 or newer is required.
 - Use `openbrowser-ai -c` for CLI verification and `openbrowser-ai --mcp` for the installed MCP server.
+- Run the exact form `openbrowser-ai -c CODE` for the native fast path. Use `openbrowser-ai-py -c CODE` for the Python CLI.
+- Keep `openbrowser-ai-py` installed. The native launcher uses it for delegated commands.
+- If `openbrowser-ai -c` returns `daemon_response_too_large`, inspect the page before you retry. Use `openbrowser-ai-py -c` or reduce the output.
 - For stateful MCP calls, create a context and pass its `context_id`. Call `close_context` when finished. The stateless `web_search` tool needs no context and does not start a browser.
 - Verify with a temporary socket and profile. Never stop a user daemon that this setup did not start.
 - Do not install optional provider packages unless the user wants that provider.
@@ -43,16 +47,19 @@ Use this skill once per machine or project. It installs the CLI and browser, con
 
 ```bash
 openbrowser-ai --version 2>/dev/null || true
-openbrowser-ai web-search --help 2>/dev/null || openbrowser-ai search --help 2>/dev/null || true
+openbrowser-ai-py --version 2>/dev/null || true
+openbrowser-ai web-search --help 2>/dev/null || true
+command -v openbrowser-ai-py || true
 command -v uv || true
 command -v pipx || true
 python3 --version || python --version
 ```
 
-Run `openbrowser-ai web-search --help`. This shows whether the installed CLI has native web search. If the canonical command fails but `openbrowser-ai search --help` succeeds, the installed release predates the canonical name. Use `search` for that install, or install from source to use `web-search`.
-If either command succeeds, skip only the CLI upgrade commands in Step 2.
-Always run `openbrowser-ai install` to repair Chromium.
-If both commands fail, upgrade the CLI.
+Run `openbrowser-ai web-search --help`. This shows whether the installed CLI has web search.
+`openbrowser-ai-py --version` reports the Python CLI. Every other command form uses that CLI. Examples include `--mcp`, `--version`, `--help`, scrape, web-search, prompt runs, daemon commands, `-c -`, and options outside the exact `-c CODE` form.
+If both version commands and the web-search help command succeed, skip only the CLI upgrade commands in Step 2.
+If any of the three commands fails, run the Step 2 install or upgrade commands.
+After the CLI is present, always run `openbrowser-ai install` to repair Chromium.
 If Python is below 3.12, install a supported Python. Then repeat this step.
 
 ## 3. Step 2 -- Install or upgrade OpenBrowser
@@ -90,6 +97,8 @@ irm https://raw.githubusercontent.com/billy-enrizky/openbrowser-ai/main/install.
 
 Pass `--no-browser` to either installer to skip Chromium installation. This installer flag is separate from the `scrape --no-browser` mode. If `install.sh` falls back to pip, pass `--local` to request a user install.
 
+`pip`, `pipx`, and `uv` select a platform wheel on supported macOS and Linux platforms. A source checkout, a `uv sync` environment, an editable install, and a git URL install use the Python CLI by default.
+
 Install or repair Chromium:
 
 ```bash
@@ -102,7 +111,7 @@ openbrowser-ai install
 
 The base OpenBrowser package includes the DDGS client at `openbrowser.web_search`. Do not install DDGS separately and do not shell out to a `ddgs` CLI. The `web-search` command does not start a browser.
 
-The canonical `web-search` command is on the current source branch. PyPI `0.1.60` exposes the same feature as `openbrowser-ai search`. To install the canonical CLI from source, run `uv tool install --force "openbrowser-ai @ git+https://github.com/billy-enrizky/openbrowser-ai.git@main"`. To run it once without changing the installed CLI, use `uvx --from git+https://github.com/billy-enrizky/openbrowser-ai.git@main openbrowser-ai web-search "OpenBrowser MCP docs"`.
+OpenBrowser 0.1.61 provides `openbrowser-ai web-search`. To install the source branch, run `uv tool install --force "openbrowser-ai @ git+https://github.com/billy-enrizky/openbrowser-ai.git@main"`. A git URL install uses the Python CLI. To run the source build once without changing the installed CLI, use `uvx --from git+https://github.com/billy-enrizky/openbrowser-ai.git@main openbrowser-ai web-search "OpenBrowser MCP docs"`.
 
 ```bash
 openbrowser-ai web-search "OpenBrowser MCP docs"
@@ -117,7 +126,9 @@ Search snippets are discovery previews. Scrape and read the source page before c
 
 ### 3.2. Fast CLI paths
 
-A warm `openbrowser-ai -c` call uses a standard-library thin client against the daemon. It does not import the full CLI or agent stack. A cold call falls back to the full client and starts the daemon. No extra setup is required.
+On a native wheel, an exact `openbrowser-ai -c CODE` call uses the native launcher to send one JSON request to the daemon. On a pure Python install, the Python thin client sends the same request. Both paths keep variables in the daemon. A cold call starts the daemon and browser.
+
+Every other command form uses `openbrowser-ai-py`. Examples include `--mcp`, `--version`, `--help`, scrape, web-search, prompt runs, daemon commands, `-c -`, and options outside the exact `-c CODE` form.
 
 For static pages, `openbrowser-ai scrape --no-browser` uses OpenBrowser no-browser mode. It uses a light console entry that does not import the browser or configuration stack, starts no Chrome, Blink, or V8 process, and never falls back to a browser. Multi-URL batches use bounded concurrency:
 
@@ -127,6 +138,21 @@ openbrowser-ai scrape https://a.example https://b.example --no-browser --jsonl -
 ```
 
 It cannot run JavaScript, take screenshots, or use browser cookies. Use the default `auto` engine or `--engine browser` when a page needs JavaScript.
+
+### 3.3. Native frontend scope
+
+See [Native CLI frontend](https://docs.openbrowser.me/customize/integrations/native-cli) for the public reference.
+
+Native platform wheels cover:
+
+- macOS arm64, minimum 11.0
+- macOS x86_64, minimum 10.13
+- Linux x86_64, manylinux_2_17
+- Linux aarch64, manylinux_2_17
+
+Windows uses the pure Python wheel. The Linux wheels contain static musl binaries and use the manylinux_2_17 tag. A source checkout, a `uv sync` environment, an editable install, and a git URL install use the Python CLI by default. To build a native wheel from source, set `OPENBROWSER_BUILD_NATIVE=1`, select a supported target, and use the Rust toolchain. Editable native builds fail.
+
+The native launcher accepts a JSON response frame up to 8 MiB (8,388,608 bytes). The limit includes the JSON envelope. The limit excludes the terminating newline. A larger frame exits with code 1 and `daemon_response_too_large`. The code may have run. Inspect the page before you retry. Run the same code with `openbrowser-ai-py -c CODE` for the Python CLI. The Python CLI uses the same daemon and variables. `OPENBROWSER_MAX_OUTPUT` still applies.
 
 ## 4. Step 3 -- Inspect and repair config
 
@@ -146,7 +172,7 @@ MCP and `openbrowser-ai -c` do not need an LLM key. Do not print the value.
 
 ## 5. Step 4 -- Configure MCP
 
-The installed server command is `openbrowser-ai --mcp`. The zero-install form is `uvx openbrowser-ai --mcp`. The default stdio transport is a lean JSON-RPC loop that answers discovery and `tools/list` before it imports the MCP SDK. Set `OPENBROWSER_MCP_TRANSPORT=sdk` to use the MCP SDK 2.3 escape hatch. Invalid values exit with code 2. Modern `2026-07-28` clients see seven tools: `create_context`, `execute_code`, `get_status`, `reset_browser`, `close_context`, `web_search`, and `scrape_web`. The legacy handshakes `2024-11-05`, `2025-03-26`, `2025-06-18`, and `2025-11-25` see four tools: `execute_code`, `get_status`, `reset_browser`, and `web_search`. Both catalogs include stateless `web_search`. The modern catalog adds stateless `scrape_web`, which fetches one HTTP(S) page in OpenBrowser no-browser mode: it starts no Chrome, Blink, or V8 process and stays on the HTTP path. JavaScript, screenshots, and browser cookies are unavailable on this path. Neither stateless tool needs a `context_id` or starts a browser. Use the handle returned by `create_context` for stateful calls. The current source server also accepts `search_web` as a call alias. The published `0.1.60` package advertises and accepts `search_web`; the current source server uses `web_search`. Update the installed server or run it from source to see `web_search`.
+The installed server command is `openbrowser-ai --mcp`. The zero-install form is `uvx openbrowser-ai --mcp`. MCP runs through the Python CLI. On a native wheel, the native launcher delegates `--mcp` to `openbrowser-ai-py`. The default stdio transport is a lean JSON-RPC loop that answers discovery and `tools/list` before it imports the MCP SDK. Set `OPENBROWSER_MCP_TRANSPORT=sdk` to use the MCP SDK 2.3 escape hatch. Invalid values exit with code 2. Modern `2026-07-28` clients see seven tools: `create_context`, `execute_code`, `get_status`, `reset_browser`, `close_context`, `web_search`, and `scrape_web`. The legacy handshakes `2024-11-05`, `2025-03-26`, `2025-06-18`, and `2025-11-25` see four tools: `execute_code`, `get_status`, `reset_browser`, and `web_search`. Both catalogs include stateless `web_search`. The modern catalog adds stateless `scrape_web`, which fetches one HTTP(S) page in OpenBrowser no-browser mode: it starts no Chrome, Blink, or V8 process and stays on the HTTP path. JavaScript, screenshots, and browser cookies are unavailable on this path. Neither stateless tool needs a `context_id` or starts a browser. Use the handle returned by `create_context` for stateful calls.
 
 Add it to the agent's native MCP configuration.
 
@@ -246,7 +272,16 @@ Codex manual installation is documented at `https://github.com/billy-enrizky/ope
 
 ## 8. Step 7 -- Verify a real browser
 
-First verify the HTTP-only path. It should print page text without starting Chromium:
+First verify the CLI entries:
+
+```bash
+openbrowser-ai --version
+openbrowser-ai-py --version
+```
+
+The two commands must report the package version. If `openbrowser-ai-py --version` fails, reinstall OpenBrowser.
+
+Then verify the HTTP-only path. It should print page text without starting Chromium:
 
 ```bash
 openbrowser-ai scrape https://example.com --engine http --format text
@@ -279,7 +314,7 @@ PY
 
 `user_data_dir=None` creates a throwaway profile. The script starts a real Chrome, prints the title and health phase, and stops. It does not touch the user's daemon or profile. A document title does not prove application hydration.
 
-If you also want to verify the CLI daemon, run `openbrowser-ai -c "..."` explicitly. On macOS/Linux, set `OPENBROWSER_SOCKET` and `OPENBROWSER_DAEMON_PROFILE_DIR` to isolate it. On Windows the daemon uses fixed port 19222 and ignores `OPENBROWSER_SOCKET`, so only stop a daemon you started.
+If you also want to verify the CLI daemon, run the exact form `openbrowser-ai -c CODE` explicitly. On macOS and Linux, set `OPENBROWSER_SOCKET` and `OPENBROWSER_DAEMON_PROFILE_DIR` to isolate it. On Windows the daemon uses fixed port 19222 and ignores `OPENBROWSER_SOCKET`, so only stop a daemon you started. If the native command returns `daemon_response_too_large`, inspect the page and run the same code with `openbrowser-ai-py -c`.
 
 For a batch of autonomous commands, start the daemon and browser once before the first call:
 
@@ -317,6 +352,7 @@ asyncio.run(main())
 Print a short setup report:
 
 - Installed version
+- CLI entries present: `openbrowser-ai` and `openbrowser-ai-py`
 - Config path and state
 - Browser path or channel
 - MCP command and config location

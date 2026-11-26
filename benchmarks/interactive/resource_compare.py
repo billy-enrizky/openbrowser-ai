@@ -28,12 +28,17 @@ from typing import Any
 
 import psutil
 
+from .arms import CANONICAL_ARMS
+
 ROOT = Path(__file__).resolve().parents[2]
 MODULE = "benchmarks.interactive.resource_compare"
 LOGGER = logging.getLogger(__name__)
 DEFAULT_WORKDIR = Path("/tmp") if os.name != "nt" else Path(tempfile.gettempdir())
 SAMPLE_PREFIX = "r-"
-DEFAULT_ARMS = ["openbrowser-fast", "openbrowser-mcp-fast", "chrome-devtools-mcp", "agent-browser", "browser-use"]
+SAMPLER_METHOD_VERSION = 4
+MAX_READ_ERROR_DETAILS = 32
+
+DEFAULT_ARMS = list(CANONICAL_ARMS)
 METRICS = (
     "peak_tree_rss_bytes",
     "peak_worker_rss_bytes",
@@ -78,15 +83,56 @@ class ResourceLedger:
         self.fatal_read_errors = 0
         self.expected_exit_races = 0
         self.read_error_types: dict[str, int] = {}
+        self.read_resolutions: dict[str, int] = {}
+        self.read_error_details: list[dict] = []
+        self.read_error_details_truncated = 0
+        self.fatal_read_identities: set[tuple[int, float]] = set()
 
-    def note_read_error(self, error: psutil.Error) -> None:
+    def note_read_error(
+        self,
+        error: BaseException,
+        *,
+        identity: tuple[int, float],
+        operation: str,
+        phase: str,
+        sample_index: int,
+        resolution: str = "unknown",
+        resolution_error: BaseException | None = None,
+    ) -> bool:
         self.read_errors += 1
         name = type(error).__name__
+        errno_value = getattr(error, "errno", None)
+        if isinstance(errno_value, bool) or not isinstance(errno_value, int):
+            errno_value = None
         self.read_error_types[name] = self.read_error_types.get(name, 0) + 1
-        if isinstance(error, (psutil.NoSuchProcess, psutil.ZombieProcess)):
-            self.expected_exit_races += 1
+        self.read_resolutions[resolution] = self.read_resolutions.get(resolution, 0) + 1
+        resolution_error_type = type(resolution_error).__name__ if resolution_error is not None else None
+        resolution_errno = getattr(resolution_error, "errno", None) if resolution_error is not None else None
+        if isinstance(resolution_errno, bool) or not isinstance(resolution_errno, int):
+            resolution_errno = None
+        if len(self.read_error_details) < MAX_READ_ERROR_DETAILS:
+            self.read_error_details.append(
+                {
+                    "pid": identity[0],
+                    "created_at": identity[1],
+                    "operation": operation,
+                    "phase": phase,
+                    "sample_index": sample_index,
+                    "error_type": name,
+                    "errno": errno_value,
+                    "resolution": resolution,
+                    "resolution_error_type": resolution_error_type,
+                    "resolution_errno": resolution_errno,
+                }
+            )
         else:
-            self.fatal_read_errors += 1
+            self.read_error_details_truncated += 1
+        if resolution in {"gone", "zombie", "replaced"}:
+            self.expected_exit_races += 1
+            return False
+        self.fatal_read_errors += 1
+        self.fatal_read_identities.add(identity)
+        return True
 
     def observe(self, readings: list[ProcessReading], *, phase: str = "native_run") -> None:
         self.samples += 1
@@ -151,7 +197,13 @@ class ResourceLedger:
             "fatal_read_errors": self.fatal_read_errors,
             "expected_exit_races": self.expected_exit_races,
             "read_error_types": dict(sorted(self.read_error_types.items())),
-            "sampler_method_version": 2,
+            "read_resolutions": dict(sorted(self.read_resolutions.items())),
+            "sampler_method_version": SAMPLER_METHOD_VERSION,
+            "read_error_details": list(self.read_error_details),
+            "read_error_details_truncated": self.read_error_details_truncated,
+            "fatal_read_identities": [
+                {"pid": pid, "created_at": created_at} for pid, created_at in sorted(self.fatal_read_identities)
+            ],
             "rss_accounting": "sampled_sum_includes_worker_shared_pages_may_repeat",
         }
 
@@ -198,6 +250,20 @@ def make_footprint_reader(*, platform_name: str | None = None) -> Callable[[int]
     return read
 
 
+def _valid_pid(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def _valid_create_time(value: object) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        number = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return False
+    return math.isfinite(number) and number > 0
+
+
 class ProcessTreeSampler:
     """Retain owned descendants after reparenting without following reused PIDs."""
 
@@ -222,9 +288,63 @@ class ProcessTreeSampler:
             root_identity = root_pid, -1.0
         self._known = {root_identity}
         self._unverified: set[tuple[int, float]] = set()
+        self._browser_roles: dict[tuple[int, float], bool] = {}
         self._ledger = ResourceLedger(
             root_identity,
             footprint_supported=self._footprint is not None if footprint_supported is None else footprint_supported,
+        )
+
+    def _identity_resolution(self, identity: tuple[int, float]) -> tuple[str, BaseException | None]:
+        """Classify a failed read using an immediate PID, create-time, and status fence."""
+        pid, expected = identity
+        if not _valid_pid(pid):
+            return "unknown", ValueError("invalid identity pid")
+        if not _valid_create_time(expected):
+            return "unknown", ValueError("invalid expected create time")
+        try:
+            process = self._process(pid)
+        except psutil.ZombieProcess as error:
+            return "zombie", error
+        except psutil.NoSuchProcess as error:
+            return "gone", error
+        except (psutil.Error, OSError) as error:
+            return "unknown", error
+        try:
+            if not process.is_running():
+                return "gone", None
+            current = process.create_time()
+            if not _valid_create_time(current):
+                return "unknown", ValueError("invalid current create time")
+            if current != expected:
+                return "replaced", None
+            if process.status() == psutil.STATUS_ZOMBIE:
+                return "zombie", None
+            return "alive", None
+        except psutil.ZombieProcess as error:
+            return "zombie", error
+        except psutil.NoSuchProcess as error:
+            return "gone", error
+        except (psutil.Error, OSError) as error:
+            return "unknown", error
+
+    def _note_read_error(
+        self,
+        error: BaseException,
+        *,
+        identity: tuple[int, float],
+        operation: str,
+        phase: str,
+        sample_index: int,
+    ) -> None:
+        resolution, resolution_error = self._identity_resolution(identity)
+        self._ledger.note_read_error(
+            error,
+            identity=identity,
+            operation=operation,
+            phase=phase,
+            sample_index=sample_index,
+            resolution=resolution,
+            resolution_error=resolution_error,
         )
 
     def discover_orphans(self) -> None:
@@ -246,7 +366,7 @@ class ProcessTreeSampler:
             except psutil.AccessDenied:
                 self._marker_unverified.add(process.pid)
 
-    def live_processes(self) -> dict[tuple[int, float], Any]:
+    def live_processes(self, *, phase: str = "native_run") -> dict[tuple[int, float], Any]:
         self._unverified.clear()
         live: dict[tuple[int, float], Any] = {}
         queue = list(self._known)
@@ -256,54 +376,109 @@ class ProcessTreeSampler:
             if identity in checked:
                 continue
             checked.add(identity)
+            operation = "process_lookup"
             try:
                 process = self._process(identity[0])
-                if (
-                    not process.is_running()
-                    or process.create_time() != identity[1]
-                    or process.status() == psutil.STATUS_ZOMBIE
-                ):
+                operation = "is_running"
+                if not process.is_running():
                     continue
+                operation = "create_time"
+                if process.create_time() != identity[1]:
+                    continue
+                operation = "status"
+                if process.status() == psutil.STATUS_ZOMBIE:
+                    continue
+                operation = "children"
+                children = process.children(recursive=True)
                 live[identity] = process
-                for child in process.children(recursive=True):
-                    child_identity = child.pid, child.create_time()
+                for child in children:
+                    try:
+                        child_identity = child.pid, child.create_time()
+                    except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                        continue
+                    except (psutil.Error, OSError) as error:
+                        child_identity = (child.pid, -1.0)
+                        self._note_read_error(
+                            error,
+                            identity=child_identity,
+                            operation="child_identity",
+                            phase=phase,
+                            sample_index=self._ledger.samples,
+                        )
+                        self._unverified.add(child_identity)
+                        continue
                     self._known.add(child_identity)
                     queue.append(child_identity)
             except (psutil.NoSuchProcess, psutil.ZombieProcess):
                 continue
-            except psutil.AccessDenied as error:
-                self._ledger.note_read_error(error)
+            except (psutil.Error, OSError) as error:
+                self._note_read_error(
+                    error,
+                    identity=identity,
+                    operation=operation,
+                    phase=phase,
+                    sample_index=self._ledger.samples,
+                )
                 self._unverified.add(identity)
         return live
 
     def sample(self, *, phase: str = "native_run") -> None:
         readings = []
-        for identity, process in self.live_processes().items():
+        for identity, process in self.live_processes(phase=phase).items():
+            operation = "memory_info"
             try:
                 rss = process.memory_info().rss
+                operation = "cpu_times"
                 cpu = process.cpu_times()
+                operation = "name"
                 name = process.name()
-                command = process.cmdline()
                 lowered = name.lower()
-                browser_main = (
-                    any(token in lowered for token in ("chrome", "chromium", "headless_shell", "brave", "msedge"))
-                    and "helper" not in lowered
-                    and "crashpad" not in lowered
-                    and not any(argument.startswith("--type=") for argument in command)
-                )
+                role = self._browser_roles.get(identity)
+                if role is None:
+                    if "helper" in lowered or "crashpad" in lowered:
+                        role = False
+                        self._browser_roles[identity] = role
+                    elif any(token in lowered for token in ("chrome", "chromium", "headless_shell", "brave", "msedge")):
+                        if len(name) >= 15:
+                            operation = "exe"
+                            executable_name = Path(process.exe()).name.lower()
+                            if "helper" in executable_name or "crashpad" in executable_name:
+                                role = False
+                                self._browser_roles[identity] = role
+                        if role is None:
+                            operation = "cmdline"
+                            command = process.cmdline()
+                            role = not any(argument.startswith("--type=") for argument in command)
+                            self._browser_roles[identity] = role
+                    else:
+                        role = False
+                browser_main = role is True
+                operation = "footprint"
                 footprint = self._footprint(process.pid) if self._footprint is not None else None
+                operation = "identity_recheck"
                 if not process.is_running() or process.create_time() != identity[1]:
                     continue
                 readings.append(
                     ProcessReading(process.pid, identity[1], rss, cpu.user + cpu.system, footprint, name, browser_main)
                 )
-            except psutil.Error as error:
-                self._ledger.note_read_error(error)
+            except (psutil.Error, OSError) as error:
+                self._note_read_error(
+                    error,
+                    identity=identity,
+                    operation=operation,
+                    phase=phase,
+                    sample_index=self._ledger.samples,
+                )
         self._ledger.observe(readings, phase=phase)
 
     def result(self) -> dict:
-        unknown = {pid for pid, _ in self._unverified} | self._marker_unverified
-        return {**self._ledger.result(), "unverified_processes": len(unknown)}
+        live_unknown = {pid for pid, _ in self._unverified} | self._marker_unverified
+        observation_unknown = live_unknown | {pid for pid, _ in self._ledger.fatal_read_identities}
+        return {
+            **self._ledger.result(),
+            "unverified_processes": len(observation_unknown),
+            "cleanup_unverified_processes": len(live_unknown),
+        }
 
 
 def sample_plan(arms: list[str], tasks: list[str], samples: int):
@@ -380,12 +555,13 @@ def source_manifest() -> dict:
         "psutil": psutil.__version__,
         "mcp_transport": os.environ.get("OPENBROWSER_MCP_TRANSPORT", "package default"),
         "method": "fresh worker plus owned descendants, through native runner cleanup",
-        "sampler_method_version": 2,
+        "sampler_method_version": SAMPLER_METHOD_VERSION,
         "limitations": [
             "Includes common Python worker and task-driver overhead.",
             "Summed RSS can double-count shared pages.",
             "Sampling can miss short-lived processes and final CPU increments.",
-            "Expected process-exit read races are counted separately; access and other read failures remain fatal.",
+            "Expected process-exit read races require an immediate identity fence that proves the same PID is "
+            "gone, zombie, or replaced. Access failures on a live identity remain fatal.",
             "Child footprint is null when unsupported or unavailable.",
             "Resource-instrumented wall time is not a latency benchmark.",
         ],
@@ -393,7 +569,7 @@ def source_manifest() -> dict:
 
 
 def binding_snapshot(arms: list[str]) -> dict:
-    from .resource_provenance import bind_openbrowser
+    from .resource_provenance import bind_console_entry
 
     if not any(name.startswith("openbrowser") for name in arms):
         return {"verified": True, "reason": "openbrowser_not_selected"}
@@ -405,7 +581,7 @@ def binding_snapshot(arms: list[str]) -> dict:
 
     with tempfile.TemporaryDirectory(prefix="ob-resource-binding-") as directory:
         context = make_context("provenance", "openbrowser-fast", 0, "http://127.0.0.1:0", Path(directory))
-        return bind_openbrowser(binary, ROOT / "src" / "openbrowser", env=_env(context), cwd=ROOT)
+        return bind_console_entry(binary, ROOT / "src" / "openbrowser", env=_env(context), cwd=ROOT)
 
 
 def arm_versions(arms: list[str]) -> dict:
@@ -430,16 +606,35 @@ def run_worker(task: str, arm: str, sample: int, workdir: Path, output: Path) ->
     output.write_text(json.dumps(record) + "\n")
 
 
+def observation_ok(resources: dict, cleanup: dict) -> bool:
+    """Return whether the resource observation is comparable and cleanup is verified."""
+    return bool(
+        resources.get("peak_tree_rss_bytes") is not None
+        and resources.get("fatal_read_errors") == 0
+        and resources.get("observed_child_processes", 0) > 0
+        and resources.get("observed_browser_during_native_run", 0) > 0
+        and cleanup["verified"]
+    )
+
+
 def cleanup_owned(sampler: ProcessTreeSampler, *, interval: float = 0.02, timeout: float = 4.0) -> dict:
     started = time.monotonic()
     deadline = started + timeout
     terminate_sent: set[tuple[int, float]] = set()
     kill_sent: set[tuple[int, float]] = set()
     errors = []
+
+    def cleanup_uncertainty() -> int:
+        result = sampler.result()
+        value = result.get("cleanup_unverified_processes")
+        if value is None:
+            value = result.get("unverified_processes", 0)
+        return int(value)
+
     sampler.discover_orphans()
-    live = sampler.live_processes()
+    live = sampler.live_processes(phase="cleanup")
     initial = len(live)
-    while live or sampler.result().get("unverified_processes", 0):
+    while live or cleanup_uncertainty():
         now = time.monotonic()
         for identity, process in live.items():
             try:
@@ -456,17 +651,17 @@ def cleanup_owned(sampler: ProcessTreeSampler, *, interval: float = 0.02, timeou
                     errors.append(type(error).__name__)
         sampler.sample(phase="cleanup")
         sampler.discover_orphans()
-        live = sampler.live_processes()
+        live = sampler.live_processes(phase="cleanup")
         remaining = deadline - time.monotonic()
-        if not live and not sampler.result().get("unverified_processes", 0):
+        if not live and not cleanup_uncertainty():
             break
         if remaining <= 0:
             break
         time.sleep(min(interval, remaining))
     sampler.discover_orphans()
     sampler.sample(phase="cleanup")
-    live = sampler.live_processes()
-    uncertain = sampler.result().get("unverified_processes", 0)
+    live = sampler.live_processes(phase="cleanup")
+    uncertain = cleanup_uncertainty()
     return {
         "initial_leftovers": initial,
         "remaining": [{"pid": pid, "created_at": created} for pid, created in sorted(live)],
@@ -586,11 +781,7 @@ def run_sample(task: str, arm: str, sample: int, *, workdir: Path, interval: flo
             {
                 "resources": resources,
                 "resource_window_seconds": elapsed,
-                "resource_ok": resources.get("peak_tree_rss_bytes") is not None
-                and resources.get("fatal_read_errors") == 0
-                and resources.get("observed_child_processes", 0) > 0
-                and resources.get("observed_browser_during_native_run", 0) > 0
-                and cleanup["verified"],
+                "resource_ok": observation_ok(resources, cleanup),
                 "cleanup": cleanup,
                 "diagnostics": worker_diagnostics(root),
                 "worker_timed_out": timed_out,
@@ -615,6 +806,7 @@ def run_lane(
     with output.open("x") as handle:
         before_source = source_manifest()
         before_binding = binding_snapshot(arms)
+        expected_observations = len(arms) * len(tasks) * samples
         metadata = {
             "record_type": "run",
             **before_source,
@@ -623,6 +815,7 @@ def run_lane(
             "arms": arms,
             "tasks": tasks,
             "samples": samples,
+            "expected_observations": expected_observations,
             "interval_seconds": interval,
             "worker_timeout_seconds": worker_timeout,
             "arm_versions": arm_versions(arms),
@@ -663,23 +856,44 @@ def run_lane(
             after_source = {}
             after_binding = {"verified": False, "reason": f"postflight_{type(error).__name__}"}
         source_unchanged = before_source.get("source_digest") == after_source.get("source_digest")
-        binding_unchanged = all(
-            before_binding.get(name) == after_binding.get(name)
-            for name in ("entry_sha256", "actual_app_digest", "expected_app_digest", "dist_version")
-        )
+        binding_unchanged = before_binding == after_binding
         verified = bool(
             before_binding.get("verified") and after_binding.get("verified") and source_unchanged and binding_unchanged
         )
         for record in records:
             record["provenance_verified"] = verified
+        cleanup_verified = bool(records) and all(
+            isinstance(item.get("cleanup"), dict)
+            and item["cleanup"].get("verified") is True
+            and not item["cleanup"].get("remaining")
+            and item["cleanup"].get("unverified_processes") == 0
+            and not item["cleanup"].get("errors")
+            and item.get("worker_timed_out") is False
+            for item in records
+        )
+        valid = bool(
+            not aborted
+            and len(records) == expected_observations
+            and cleanup_verified
+            and verified
+            and all(
+                item["ok"] and item.get("resource_ok", False) and item.get("provenance_verified", False)
+                for item in records
+            )
+        )
         terminal = {
             "record_type": "end",
             "observations": len(records),
+            "expected_observations": expected_observations,
             "failures": sum(not item["ok"] or not item.get("resource_ok", True) for item in records),
             "provenance_verified": verified,
             "source_unchanged": source_unchanged,
             "binding_unchanged": binding_unchanged,
             "binding_after": after_binding,
+            "cleanup_verified": cleanup_verified,
+            "fixture_errors": [],
+            "valid": valid,
+            "terminal": True,
         }
         if aborted:
             terminal.update({"aborted": True, "abort_reason": "cleanup_unverified"})

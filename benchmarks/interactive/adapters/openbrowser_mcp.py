@@ -3,21 +3,25 @@
 This arm drives the package's own MCP server over the stateless
 ``2026-07-28`` stdio protocol: one ``server/discover`` probe, then
 ``create_context``, ``execute_code``, and ``close_context``. It measures the
-MCP surface that coding agents actually use, not the CLI daemon path.
+MCP surface that coding agents use.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import time
 
-from ..fixtures.server import BENCH_PASSWORD, BENCH_USER
 from .base import ArmResult, RunContext, terminate_matching, verify_mock_keychain
+from .launch_proof import LaunchProof, capture_launch_proof, proof_status
 from .mcp_modern import ModernMcpError, ModernStdioMcpClient
 from .openbrowser import (
+    _default_binary,
     _download,
+    _env,
     _fast_download,
+    _fast_login,
     _fast_modal,
     _fast_tabs,
     _fast_wizard,
@@ -27,8 +31,6 @@ from .openbrowser import (
     _tabs,
     _wizard,
     _write_config,
-    _default_binary,
-    _env,
 )
 
 
@@ -42,11 +44,13 @@ class OpenBrowserMcpArm:
         self._result = ArmResult(ok=False)
         self._client: ModernStdioMcpClient | None = None
         self._context_id: str | None = None
+        self._launch_proof: LaunchProof | None = None
 
     # -- lifecycle -------------------------------------------------------
     def _start(self, ctx: RunContext) -> ModernStdioMcpClient:
         if self._client is not None:
             return self._client
+        self._launch_proof = None
         client = ModernStdioMcpClient([self.binary, "--mcp"], env=_env(ctx))
         self._result.process_starts += 1
         client.discover()
@@ -69,6 +73,7 @@ class OpenBrowserMcpArm:
         return client.call_tool_text("execute_code", {"context_id": context_id, "code": code}, timeout=timeout)
 
     def _close_context(self, client: ModernStdioMcpClient, context_id: str) -> None:
+        self._launch_proof = None
         self._result.tool_calls += 1
         payload = json.loads(client.call_tool_text("close_context", {"context_id": context_id}, timeout=120))
         if payload.get("status") != "closed":
@@ -85,7 +90,8 @@ class OpenBrowserMcpArm:
         if task == "tabs":
             return _fast_tabs(url + "/tabs") if fast else _tabs(url + "/tabs")
         if task == "auth" and state_path is not None:
-            return _login(url + "/login", state_path)
+            login = _fast_login if fast else _login
+            return login(url + "/login", state_path)
         raise ValueError(f"unknown task {task}")
 
     def _mock_keychain_profile(self, ctx: RunContext) -> str:
@@ -99,6 +105,13 @@ class OpenBrowserMcpArm:
     def run(self, ctx: RunContext, *, cleanup: bool = True, restart_for_auth: bool = True) -> ArmResult:
         self._result = ArmResult(ok=False)
         _write_config(ctx, extensions=False)
+        proof = self._launch_proof
+        if cleanup:
+            self._launch_proof = None
+            proof = None
+        if ctx.task == "auth":
+            self._launch_proof = None
+            proof = None
         try:
             client = self._start(ctx)
             if ctx.task == "auth":
@@ -120,9 +133,32 @@ class OpenBrowserMcpArm:
             else:
                 context_id = self._create_context(client) if cleanup else self._ensure_context(client)
                 self._context_id = context_id
+                server_pid = client.process.pid if client.process is not None else None
+                if proof is not None:
+                    before = proof_status(
+                        proof,
+                        profile_marker=self._mock_keychain_profile(ctx),
+                        server_pid=server_pid,
+                        context_id=context_id,
+                    )
+                    if before != "valid":
+                        self._launch_proof = None
+                        raise RuntimeError(f"launch proof invalid before task: {before}")
                 output = self._execute(client, context_id, self._program(ctx.task, ctx.base_url), 150)
                 self._result.stdout += output
-                verified = verify_mock_keychain(self._mock_keychain_profile(ctx))
+                if proof is not None:
+                    after = proof_status(
+                        proof,
+                        profile_marker=self._mock_keychain_profile(ctx),
+                        server_pid=server_pid,
+                        context_id=context_id,
+                    )
+                    if after != "valid":
+                        self._launch_proof = None
+                        raise RuntimeError(f"launch proof invalid after task: {after}")
+                    verified = True
+                else:
+                    verified = verify_mock_keychain(self._mock_keychain_profile(ctx))
                 self._result.keychain_verified = verified
                 if verified is False:
                     raise RuntimeError("OpenBrowser MCP Chrome launched without --use-mock-keychain")
@@ -141,6 +177,7 @@ class OpenBrowserMcpArm:
 
     def warmup(self, ctx: RunContext) -> tuple[dict, float]:
         """Start the server and one context so the browser is warm."""
+        self._launch_proof = None
         started = time.monotonic()
         _write_config(ctx, extensions=False)
         client = self._start(ctx)
@@ -148,7 +185,23 @@ class OpenBrowserMcpArm:
         self._context_id = context_id
         self._execute(client, context_id, "pass", 180)
         elapsed_ms = (time.monotonic() - started) * 1000.0
-        return {"server": "started", "context_id": context_id}, elapsed_ms
+        profile_marker = self._mock_keychain_profile(ctx)
+        verified = verify_mock_keychain(profile_marker)
+        if verified is False:
+            raise RuntimeError("OpenBrowser MCP Chrome launched without --use-mock-keychain")
+        server_pid = client.process.pid if client.process is not None else None
+        self._launch_proof = capture_launch_proof(
+            profile_marker,
+            server_pid,
+            context_id=context_id,
+            keychain_verified=verified,
+        )
+        return {
+            "server": "started",
+            "context_id": context_id,
+            "keychain_verified": verified,
+            "launch_proof_captured": self._launch_proof is not None,
+        }, elapsed_ms
 
     def _parse_last_json(self) -> dict:
         for line in reversed(self._result.stdout.splitlines()):
@@ -161,11 +214,10 @@ class OpenBrowserMcpArm:
         return {}
 
     def cleanup(self, ctx: RunContext) -> None:
+        self._launch_proof = None
         if self._client is not None and self._context_id is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._close_context(self._client, self._context_id)
-            except Exception:
-                pass
             self._context_id = None
         if self._client is not None:
             self._client.close()

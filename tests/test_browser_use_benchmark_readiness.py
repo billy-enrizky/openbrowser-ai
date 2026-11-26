@@ -10,11 +10,12 @@ import subprocess
 from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from benchmarks.interactive.adapters import browser_use as adapter
-from benchmarks.interactive.adapters.base import ArmResult
+from benchmarks.interactive.adapters.base import ArmResult, RunContext
 from benchmarks.interactive.tasks import oracle_tabs
 
 
@@ -211,7 +212,7 @@ def test_terminal_errors_propagate_without_retry(error, monkeypatch):
 
 def test_single_deadline_survives_geometry_and_context_retries():
     clock = Clock()
-    namespace = {"js": lambda *args, **kwargs: None}
+    namespace: dict[str, Any] = {"js": lambda *args, **kwargs: None}
     exec(adapter.HEADER + adapter.TABS_READINESS, namespace)
     namespace["_time"] = clock
     with pytest.raises(RuntimeError, match="timeout"):
@@ -265,7 +266,7 @@ def test_geometry_return_after_deadline_does_not_click():
 
 
 def test_atomic_geometry_checks_visibility_and_positive_dimensions():
-    namespace = {"js": lambda expression, **kwargs: expressions.append(expression)}
+    namespace: dict[str, Any] = {"js": lambda expression, **kwargs: expressions.append(expression)}
     expressions = []
     clock = Clock()
     exec(adapter.HEADER + adapter.TABS_READINESS, namespace)
@@ -279,8 +280,20 @@ def test_atomic_geometry_checks_visibility_and_positive_dimensions():
     assert "r.width>0" in expression and "r.height>0" in expression
 
 
-def ctx(tmp_path):
-    return SimpleNamespace(root=tmp_path, home=tmp_path / "home", tmp=tmp_path / "tmp", env={})
+def ctx(tmp_path: Path) -> RunContext:
+    return RunContext(
+        task="wizard",
+        arm="browser-use",
+        sample=0,
+        base_url="http://fixture.invalid",
+        root=tmp_path,
+        downloads=tmp_path / "downloads",
+        profile=tmp_path / "profile",
+        home=tmp_path / "home",
+        tmp=tmp_path / "tmp",
+        config=tmp_path / "config",
+        session="fake",
+    )
 
 
 def fake_chrome(arm, events):
@@ -360,7 +373,7 @@ def test_warmup_cleanup_error_does_not_hide_native_error(monkeypatch, tmp_path):
 def test_stderr_retains_final_exception_and_explicit_byte_metadata(size, monkeypatch, tmp_path):
     context = ctx(tmp_path)
     arm = adapter.BrowserUseArm()
-    arm._chrome = SimpleNamespace(cdp_url="http://127.0.0.1:1")
+    monkeypatch.setattr(arm, "_chrome", SimpleNamespace(cdp_url="http://127.0.0.1:1"))
     stderr = "x" * size + "\nFINAL EXCEPTION"
     monkeypatch.setattr(adapter, "run_process", lambda *args, **kwargs: (1, "", stderr, 0.0))
     with pytest.raises(RuntimeError, match="FINAL EXCEPTION") as error:
@@ -374,7 +387,7 @@ def test_stderr_retains_final_exception_and_explicit_byte_metadata(size, monkeyp
 def test_diagnostics_redact_paths_before_record_and_error(monkeypatch, tmp_path):
     context = ctx(tmp_path)
     arm = adapter.BrowserUseArm()
-    arm._chrome = SimpleNamespace(cdp_url="http://127.0.0.1:1")
+    monkeypatch.setattr(arm, "_chrome", SimpleNamespace(cdp_url="http://127.0.0.1:1"))
     private = f"{Path.home()}/Documents/repo/.worktrees/private/test.py {context.tmp}/secret {context.home}/secret"
     monkeypatch.setattr(adapter, "run_process", lambda *args, **kwargs: (1, "", private, 0.0))
     with pytest.raises(RuntimeError) as error:
@@ -388,7 +401,7 @@ def test_diagnostics_redact_paths_before_record_and_error(monkeypatch, tmp_path)
 
 def test_adapter_method_version_is_in_success_payload(monkeypatch, tmp_path):
     arm = adapter.BrowserUseArm()
-    arm._chrome = SimpleNamespace(cdp_url="http://127.0.0.1:1")
+    monkeypatch.setattr(arm, "_chrome", SimpleNamespace(cdp_url="http://127.0.0.1:1"))
     monkeypatch.setattr(adapter, "run_process", lambda *args, **kwargs: (0, 'BENCH_RESULT {"tool_calls": 3}', "", 0.0))
     payload = arm._script(ctx(tmp_path), "pass", 1)
     assert payload["adapter_version"] == adapter.ADAPTER_VERSION
@@ -397,7 +410,7 @@ def test_adapter_method_version_is_in_success_payload(monkeypatch, tmp_path):
 
 def test_cumulative_stderr_byte_count_remains_raw_and_utf8_safe(monkeypatch, tmp_path):
     arm = adapter.BrowserUseArm()
-    arm._chrome = SimpleNamespace(cdp_url="http://127.0.0.1:1")
+    monkeypatch.setattr(arm, "_chrome", SimpleNamespace(cdp_url="http://127.0.0.1:1"))
     stderr = "界" * 20000 + "final exception"
     monkeypatch.setattr(adapter, "run_process", lambda *args, **kwargs: (0, "BENCH_RESULT {}", stderr, 0.0))
     first = arm._script(ctx(tmp_path), "pass", 1)
@@ -408,3 +421,119 @@ def test_cumulative_stderr_byte_count_remains_raw_and_utf8_safe(monkeypatch, tmp
     assert len(arm._result.stderr.encode()) <= adapter.STDERR_TAIL_BYTES
     assert "�" not in arm._result.stderr
     assert arm._result.stderr.endswith("final exception")
+
+
+@pytest.mark.parametrize(
+    "program,selector",
+    [
+        (adapter._wizard, "#name"),
+        (adapter._modal, "#open-modal"),
+        (adapter._download, "#download-report"),
+        (adapter._login, "#username"),
+        (adapter._read_account, "#secret"),
+    ],
+)
+@pytest.mark.parametrize("delayed", [False, True])
+def test_program_waits_for_first_control_on_returned_target(program, selector, delayed):
+    class ActionReached(Exception):
+        pass
+
+    clock = Clock()
+    outcomes = [RuntimeError("Execution context was destroyed."), None, [10, 20]] if delayed else [[10, 20]]
+    checks = []
+    action = []
+
+    def first_action(*args, **kwargs):
+        assert checks and checks[-1] == [10, 20], "action ran before the navigation control was ready"
+        action.append(True)
+        raise ActionReached
+
+    def js(expression, target_id=None):
+        if "getBoundingClientRect" not in expression:
+            return first_action(expression)
+        assert target_id == "new-target"
+        assert json.dumps(selector) in expression
+        value = outcomes.pop(0)
+        checks.append(value)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    real_import = __import__
+    namespace = {
+        "new_tab": lambda url: "new-target",
+        "js": js,
+        "fill_input": first_action,
+        "__builtins__": {
+            **vars(__import__("builtins")),
+            "__import__": lambda name, *args, **kwargs: clock if name == "time" else real_import(name, *args, **kwargs),
+        },
+    }
+    with pytest.raises(ActionReached):
+        exec(compile(program("https://fixture.invalid/task"), "<native-readiness>", "exec"), namespace)
+    assert action == [True]
+    assert namespace["_calls"] == 3
+    assert len(clock.sleeps) == (2 if delayed else 0)
+
+
+def test_initial_readiness_waits_for_document_parse_with_visible_geometry():
+    clock = Clock()
+    checks = []
+    states = ["loading", "interactive"]
+
+    def js(expression, target_id=None):
+        assert target_id == "new-target"
+        checks.append(expression)
+        state = states.pop(0)
+        if "document.readyState==='loading'" in expression and state == "loading":
+            return None
+        return [10, 20]
+
+    real_import = __import__
+    namespace = {
+        "new_tab": lambda url: "new-target",
+        "js": js,
+        "__builtins__": {
+            **vars(__import__("builtins")),
+            "__import__": lambda name, *args, **kwargs: clock if name == "time" else real_import(name, *args, **kwargs),
+        },
+    }
+    exec(
+        compile(adapter._ready_header("https://fixture.invalid/modal", "#open-modal"), "<parsed-document>", "exec"),
+        namespace,
+    )
+    assert len(checks) == 2
+    assert clock.sleeps == [0.1]
+    assert all("document.readyState==='loading'" in expression for expression in checks)
+
+
+def test_auth_keeps_method_and_stderr_provenance_after_restart(monkeypatch, tmp_path):
+    from benchmarks.interactive.fixtures.server import ACCOUNT_SECRET
+
+    arm = adapter.BrowserUseArm()
+    monkeypatch.setattr(arm, "_chrome", SimpleNamespace(process=None, cdp_url="http://127.0.0.1:1"))
+    monkeypatch.setattr(arm, "_warm_keychain_verified", True)
+    monkeypatch.setattr(arm, "_stop_chrome", lambda: None)
+    monkeypatch.setattr(arm, "_start_chrome", lambda context: None)
+    calls = []
+
+    def script(context, code, timeout):
+        calls.append(code)
+        arm._result.reported.update(
+            adapter_version=adapter.ADAPTER_VERSION,
+            stderr_total_bytes=42 + len(calls),
+            stderr_truncated=False,
+        )
+        return {"secret": ACCOUNT_SECRET}
+
+    monkeypatch.setattr(arm, "_script", script)
+    context = ctx(tmp_path)
+    context.task = "auth"
+    result = arm.run(context, cleanup=False)
+    assert result.ok is True
+    assert len(calls) == 2
+    assert result.reported["adapter_version"] == adapter.ADAPTER_VERSION
+    assert result.reported["stderr_total_bytes"] == 44
+    assert result.reported["stderr_truncated"] is False
+    assert result.reported["secret"] == ACCOUNT_SECRET
+    assert result.reported["phase1_secret"] == ACCOUNT_SECRET

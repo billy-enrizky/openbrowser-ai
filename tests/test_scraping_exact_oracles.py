@@ -132,3 +132,29 @@ def test_assets_rejects_twenty_copies_of_headline_one():
 def test_assets_rejects_reordered_headlines():
     content = "\n".join(f"Headline {index}" for index in reversed(range(1, 21)))
     assert exact_assets(content) is False
+
+
+def test_static_rejects_all_labels_without_values():
+    content = "\n".join(f"Item {index}" for index in range(50))
+    assert exact_static(content) is False
+
+
+def test_static_rejects_a_corrupt_value():
+    content = "\n".join(f"Item {index}\nValue {index * 7}" for index in range(50))
+    assert exact_static(content.replace("Value 168", "Value 999")) is False
+
+
+def test_static_rejects_reordered_values():
+    content = "\n".join(f"Item {index}\nValue {(49 - index) * 7}" for index in range(50))
+    assert exact_static(content) is False
+
+
+def test_static_rejects_additional_value():
+    content = "\n".join(f"Item {index}\nValue {index * 7}" for index in range(50))
+    assert exact_static(content + "\nValue 350") is False
+
+
+@pytest.mark.parametrize("value", [None, False, 0, [], {}])
+def test_text_scrape_oracles_reject_non_text(value):
+    assert exact_static(value) is False
+    assert exact_assets(value) is False

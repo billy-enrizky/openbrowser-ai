@@ -27,6 +27,8 @@ cd openbrowser-ai
 uv sync --all-extras --dev
 ```
 
+Source and editable installs use the Python frontend. Native platform wheels use the native frontend for eligible warm code calls. See the [CLI frontend reference](/customize/integrations/native-cli) for the explicit Python command and native wheel builds.
+
 Python 3.12 or newer is required. `uv sync --all-extras --dev` installs the base package, optional providers, the interactive CLI, and the test and static-check tools.
 
 ## 2. Configure
@@ -80,7 +82,7 @@ uv run openbrowser-ai --version
 uv run openbrowser-ai -c "await navigate('https://example.com'); print(await evaluate('document.title'))"
 ```
 
-A warm `-c` call uses a standard-library thin client and does not import the full CLI or agent stack. A cold call falls back to the full client and starts the daemon.
+This source installation uses the standard-library Python thin client for warm plain `-c` calls. A cold call starts the daemon through the Python client.
 
 The second command starts the CLI daemon, opens a real browser, prints the page title, and leaves the daemon running for later calls. Stop it when finished:
 
@@ -93,8 +95,11 @@ Poll `uv run openbrowser-ai daemon status` until it reports `daemon_not_running`
 ## 6. Tests and static checks
 
 ```bash
+# Match the locked CI dependency set.
+uv sync --locked --all-extras
+
 # Full non-integration suite
-uv run pytest -q -m "not integration"
+uv run --locked pytest -q -m "not integration"
 
 # Focused MCP protocol and lifecycle tests
 uv run pytest tests/test_mcp_protocol.py tests/test_mcp_lifecycle.py -q

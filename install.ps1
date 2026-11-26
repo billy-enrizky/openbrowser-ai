@@ -25,6 +25,10 @@ foreach ($a in $args) {
             Write-Host "Options:"
             Write-Host "  --no-browser   Skip Chromium installation"
             Write-Host "  -h, --help     Show this help message"
+            Write-Host ""
+            Write-Host "Windows uses the Python CLI frontend."
+            Write-Host "Explicit Python client (OpenBrowser 0.1.61+): openbrowser-ai-py"
+            Write-Host "Frontend and response-recovery guide: https://docs.openbrowser.me/customize/integrations/native-cli"
             exit 0
         }
     }
@@ -181,5 +185,7 @@ Write-Host "  Get started:"
 Write-Host "    openbrowser-ai --help"
 Write-Host "    openbrowser-ai -c `"await navigate('https://example.com')`""
 Write-Host ""
+Write-Host "  Python client (OpenBrowser 0.1.61+): openbrowser-ai-py"
+Write-Host "  Frontend and response-recovery guide: https://docs.openbrowser.me/customize/integrations/native-cli"
 Write-Host "  Docs: https://docs.openbrowser.me"
 Write-Host ""

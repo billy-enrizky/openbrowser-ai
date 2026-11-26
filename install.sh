@@ -39,6 +39,10 @@ for arg in "$@"; do
       echo "  --local        Install to ~/.local/bin (no sudo required)"
       echo "  --no-browser   Skip Chromium installation"
       echo "  -h, --help     Show this help message"
+      echo ""
+      echo "OpenBrowser 0.1.61+: compatible wheels select the native warm-code frontend."
+      echo "Explicit Python client: openbrowser-ai-py"
+      echo "Frontend and response-recovery guide: https://docs.openbrowser.me/customize/integrations/native-cli"
       exit 0
       ;;
   esac
@@ -172,5 +176,7 @@ echo "  Get started:"
 echo "    openbrowser-ai --help"
 echo "    openbrowser-ai -c \"await navigate('https://example.com')\""
 echo ""
+echo "  Python client (OpenBrowser 0.1.61+): openbrowser-ai-py"
+echo "  Frontend and response-recovery guide: https://docs.openbrowser.me/customize/integrations/native-cli"
 echo "  Docs: https://docs.openbrowser.me"
 echo ""

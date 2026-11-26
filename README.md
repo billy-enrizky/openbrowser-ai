@@ -113,7 +113,7 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
 - **MCP Server** - Model Context Protocol for Claude Desktop, Claude Code, Codex, OpenCode, and other AI assistants.
   Modern clients use explicit contexts and isolated profiles. The server includes read-only status and reset tools.
 - **CLI Daemon** - Persistent browser daemon with `-c` flag for direct code execution from Bash, explicit startup ownership, health and recovery status, saved login state, and 10-minute auto-shutdown
-- **Fast CLI paths** - `-c` uses a standard-library thin client against a warm daemon. `scrape --no-browser` uses OpenBrowser no-browser mode: a light console entry that starts no Chrome, Blink, or V8 process and does not import the browser or configuration stack
+- **CLI frontends** - OpenBrowser 0.1.61 platform wheels send eligible warm `-c` calls through a native client. The Python backend owns startup and the remaining CLI commands. See the [CLI frontend reference](https://docs.openbrowser.me/customize/integrations/native-cli). `scrape --no-browser` uses OpenBrowser no-browser mode: a light console entry that starts no Chrome, Blink, or V8 process and does not import the browser or configuration stack
 - **Batch scraping** - `scrape_pages` and the CLI batch scrape multiple URLs with bounded concurrency. An explicit `--no-browser` or `--engine http` batch starts no browser
 - **Explicit Lifecycle State** - Browser, CDP, navigation, focus, storage, downloads, agent runs, and CodeAgent runs report typed phases that replace log inspection
 - **Workflow Recording** - Record, replay, and export browser sessions to Jupyter notebooks or API crawler code
@@ -240,6 +240,8 @@ uv venv --python 3.12
 source .venv/bin/activate
 uv pip install -e ".[all]"
 ```
+
+Source and editable installs use the Python frontend by default. Native wheel builds require a supported Rust target. See the [CLI frontend reference](https://docs.openbrowser.me/customize/integrations/native-cli) for build options and the output limit.
 
 ### 3.9. Optional Dependencies
 
@@ -540,6 +542,8 @@ OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser
 
 By default, each modern MCP context uses an isolated managed profile under `~/.config/openbrowser/profiles/mcp-<owner-id>`. The legacy no-handle owner uses `mcp-<server-instance-id>`. The owner ID is internal. Read the resolved path from `get_status.profile.user_data_dir`. The `context_id` handle is separate. The profile's `storage_state.json` is seeded once from `~/.config/openbrowser/profiles/default/storage_state.json`, so existing logins are available without allowing concurrent contexts to kill or corrupt one another's browser. Profiles are retained on disk after `close_context`. A new MCP server process cannot resume a context handle, and it creates a new isolated profile unless you configure an explicit shared profile. Configure `OPENBROWSER_USER_DATA_DIR` for a profile that survives restarts. `OPENBROWSER_STORAGE_STATE` is a one-time seed for managed profiles. Later changes are saved to the active profile copy. OpenBrowser also auto-cleans disposable Chromium caches in managed profiles, which keeps disk usage down without deleting cookies or login state. If you explicitly configure the same `OPENBROWSER_USER_DATA_DIR` for multiple contexts or servers, the profile lease rejects the second owner with a clear error.
 
+The native entry delegates `--mcp` to the Python server. Its stdio protocol and context lifecycle stay the same across CLI frontends. See the [CLI frontend reference](https://docs.openbrowser.me/customize/integrations/native-cli).
+
 ### 12.1. Quick Setup
 
 **Claude Code**: add to your project's `.mcp.json`:
@@ -715,6 +719,8 @@ The tables above show the effect. The warm lane reaches 43.555 ms p50 on `wizard
 Other frameworks also reuse sessions and batch work. These lanes measure the configured combination. The page assigns no causal share to one mechanism without an ablation. The Firecrawl Local batch uses a 10 ms job-poll workflow and returns markdown pages; OpenBrowser returns selected row dictionaries. A matched single-call Firecrawl Local memory lane remains open, as do model-driven Agent and CodeAgent lanes and matched Lightpanda cold and warm lanes.
 
 ## 14. CLI Usage
+
+OpenBrowser 0.1.61 compatible wheels provide a native frontend for the exact form `openbrowser-ai -c CODE` against a warm daemon. Source and editable installs use Python. Use `openbrowser-ai-py` to select the Python client explicitly. The [CLI frontend reference](https://docs.openbrowser.me/customize/integrations/native-cli) covers platform tags, the JSON response limit, and recovery after a send or response failure.
 
 ```bash
 # Run a browser automation task with an LLM agent

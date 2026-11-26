@@ -16,7 +16,7 @@ icon: "rocket"
 
 {/* toc:end */}
 
-To get started with OpenBrowser you need to install the package and set up an API key.
+Install OpenBrowser first. Add a provider API key when you use Agent or CodeAgent.
 
 ## 1. Installing OpenBrowser
 
@@ -112,6 +112,8 @@ To get started with OpenBrowser you need to install the package and set up an AP
   </Tab>
 </Tabs>
 
+OpenBrowser 0.1.61 compatible wheels include the native CLI frontend and the `openbrowser-ai-py` Python command. Source and editable installs use Python by default. Read the [CLI frontend reference](/customize/integrations/native-cli) for platform support and response-limit recovery.
+
 <Info>
 **No separate browser install needed.** OpenBrowser auto-detects any installed Chromium-based browser (Chrome, Edge, Brave, Chromium) and uses it directly. If none is found and `uvx` is available, Chromium is installed automatically on first run. To pre-install manually (requires `uvx`): `openbrowser-ai install`
 </Info>
@@ -121,7 +123,7 @@ To get started with OpenBrowser you need to install the package and set up an AP
 OpenBrowser web search and scrape work immediately. Neither command needs an API key.
 
 <Note>
-The canonical `web-search` command, `openbrowser.web_search` module, and MCP `web_search` tool are on the current source branch. PyPI `0.1.60` exposes the same feature as `openbrowser-ai search`, `openbrowser.search`, and MCP `search_web`. To install the canonical CLI from source, run `uv tool install --force "openbrowser-ai @ git+https://github.com/billy-enrizky/openbrowser-ai.git@main"`. To run it once without changing the installed CLI, use `uvx --from git+https://github.com/billy-enrizky/openbrowser-ai.git@main openbrowser-ai web-search "OpenBrowser MCP docs"`.
+Use `openbrowser-ai web-search` for CLI source discovery, `openbrowser.web_search` in Python, and `web_search` in MCP or CodeAgent. These are the canonical names in OpenBrowser 0.1.61 and later.
 </Note>
 
 ```bash

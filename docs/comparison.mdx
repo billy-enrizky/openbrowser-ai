@@ -347,6 +347,8 @@ The measured paths use four areas of work. Each area maps to a lane on this page
 | Strict HTTP | Fetch and parse static pages in a Python process, with a pooled batch client and bounded concurrency for CLI and namespace batches | Firecrawl Local batch and no-browser memory lane |
 | Targeted browser work | Use selector and CDP helpers for known targets, and block selected asset types in lightweight and no-render policies | Warm and cold interactive lanes and render asset lane |
 
+OpenBrowser 0.1.61 also provides a native warm-code CLI frontend on compatible platform wheels. The [CLI frontend reference](/customize/integrations/native-cli) explains the command boundary and explicit Python option. Each result artifact identifies its measured application build.
+
 ### 6.1. What each area changes
 
 1. **Request grouping and state reuse.** The interactive MCP and CLI arms group several browser actions into one Python request for most tasks. The `auth` task uses a login program and an account program around the browser restart. A request can hold several actions and persistent variables. The namespace loads optional libraries on first use. Warm CLI calls use a small standard-library client over IPC, and cold CLI startup loads the full client.

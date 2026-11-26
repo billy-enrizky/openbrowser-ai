@@ -1,0 +1,166 @@
+name: Native wheels
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/native-wheels.yml"
+      - ".github/workflows/publish.yml"
+      - "hatch_native.py"
+      - "pyproject.toml"
+      - "src/openbrowser/native_client/rust/**"
+      - "src/openbrowser/cli_entry.py"
+      - "benchmarks/interactive/resource_provenance.py"
+      - "scripts/ci/verify_native_wheel.py"
+      - "tests/ci/test_*native*"
+      - "tests/test_native*"
+      - "tests/test_resource_provenance.py"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/native-wheels.yml"
+      - ".github/workflows/publish.yml"
+      - "hatch_native.py"
+      - "pyproject.toml"
+      - "src/openbrowser/native_client/rust/**"
+      - "src/openbrowser/cli_entry.py"
+      - "benchmarks/interactive/resource_provenance.py"
+      - "scripts/ci/verify_native_wheel.py"
+      - "tests/ci/test_*native*"
+      - "tests/test_native*"
+      - "tests/test_resource_provenance.py"
+
+permissions:
+  contents: read
+
+env:
+  RUST_VERSION: "1.100.0"
+  UV_VERSION: "0.9.15"
+  CRATE: src/openbrowser/native_client/rust/Cargo.toml
+
+jobs:
+  build-native:
+    name: Native ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            deployment_target: "11.0"
+            baseline_image: ""
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            deployment_target: "10.13"
+            baseline_image: ""
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            deployment_target: ""
+            baseline_image: quay.io/pypa/manylinux2014_x86_64
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            deployment_target: ""
+            baseline_image: quay.io/pypa/manylinux2014_aarch64
+    env:
+      OPENBROWSER_NATIVE_TARGET: ${{ matrix.target }}
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target }}
+      BASELINE_IMAGE: ${{ matrix.baseline_image }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Install pinned toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$RUST_VERSION" --profile minimal --component clippy,rustfmt --target "$OPENBROWSER_NATIVE_TARGET"
+          rustup default "$RUST_VERSION"
+          rustc -vV
+      - name: Install build dependencies
+        run: python -m pip install "build==1.3.0" "hatchling==1.33.0" "hatch-vcs==0.5.0"
+      - name: Verify Rust core
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/native-core-tests"
+          cargo fmt --manifest-path "$CRATE" -- --check
+          cargo test --locked --release --manifest-path "$CRATE" --target "$OPENBROWSER_NATIVE_TARGET"
+          cargo clippy --locked --manifest-path "$CRATE" --target "$OPENBROWSER_NATIVE_TARGET" --all-targets -- -D warnings
+      - name: Build platform wheel
+        env:
+          OPENBROWSER_BUILD_NATIVE: "1"
+        run: python -m build --no-isolation --wheel --outdir dist
+      - name: Verify installed native wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheels=(dist/*.whl)
+          test "${#wheels[@]}" -eq 1
+          python -m scripts.ci.verify_native_wheel --wheel "${wheels[0]}" --expected-package src/openbrowser --output native-wheel-receipt.json
+      - name: Verify same-version wheel selection
+        shell: bash
+        run: |
+          set -euo pipefail
+          OPENBROWSER_BUILD_NATIVE=0 python -m build --no-isolation --wheel --outdir pure-dist
+          python -m pip download --no-index --no-deps --find-links dist --find-links pure-dist --dest selected openbrowser-ai
+          uv venv --python "$(command -v python)" "$RUNNER_TEMP/native-selected"
+          uv pip install --python "$RUNNER_TEMP/native-selected/bin/python" --no-index --no-deps --find-links dist --find-links pure-dist openbrowser-ai
+          python - "$RUNNER_TEMP/native-selected/bin/openbrowser-ai" <<'PY'
+          import hashlib
+          import sys
+          import zipfile
+          from pathlib import Path
+          from packaging.utils import parse_wheel_filename
+          native, = Path('dist').glob('*.whl')
+          pure, = Path('pure-dist').glob('*.whl')
+          selected, = Path('selected').glob('*.whl')
+          if not (parse_wheel_filename(native.name)[1] == parse_wheel_filename(pure.name)[1]):
+              raise ValueError("same_version_native_wheel_selection_failed")
+          if not (selected.name == native.name):
+              raise ValueError("same_version_native_wheel_selection_failed")
+          if not (hashlib.sha256(selected.read_bytes()).digest() == hashlib.sha256(native.read_bytes()).digest()):
+              raise ValueError("same_version_native_wheel_selection_failed")
+          with zipfile.ZipFile(native) as archive:
+              name, = [name for name in archive.namelist() if name.endswith(".data/scripts/openbrowser-ai")]
+              expected = hashlib.sha256(archive.read(name)).digest()
+          if hashlib.sha256(Path(sys.argv[1]).read_bytes()).digest() != expected:
+              raise ValueError("uv_native_wheel_selection_failed")
+          PY
+      - name: Verify Linux compatibility baseline
+        if: matrix.baseline_image != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull "$BASELINE_IMAGE"
+          docker inspect --format '{{index .RepoDigests 0}}' "$BASELINE_IMAGE" > linux-baseline-image.txt
+          mkdir -p "$RUNNER_TEMP/baseline-output"
+          wheels=(dist/*.whl)
+          docker run --rm -v "$GITHUB_WORKSPACE:/project:ro" -v "$RUNNER_TEMP/baseline-output:/evidence" -w /project \
+            "$BASELINE_IMAGE" /opt/python/cp312-cp312/bin/python -m scripts.ci.verify_native_wheel \
+            --wheel "/project/${wheels[0]}" --expected-package /project/src/openbrowser --output /evidence/native-baseline-receipt.json
+          cp "$RUNNER_TEMP/baseline-output/native-baseline-receipt.json" native-baseline-receipt.json
+      - name: Store verified native wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-wheel-${{ matrix.target }}
+          path: dist/*.whl
+          if-no-files-found: error
+      - name: Store native build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-evidence-${{ matrix.target }}
+          path: |
+            native-wheel-receipt.json
+            native-baseline-receipt.json
+            linux-baseline-image.txt
+          if-no-files-found: warn

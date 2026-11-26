@@ -5,6 +5,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 from benchmarks.scraping import scrape_compare
 
 
@@ -92,3 +94,24 @@ def test_interleaved_run_writes_each_measured_sample_as_jsonl(monkeypatch, tmp_p
     ]
     assert all(row["ok"] for row in samples)
     assert summary_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_browser_arm_rejects_use_before_start():
+    arm = scrape_compare.BrowserArm("openbrowser-full", "full")
+    with pytest.raises(RuntimeError, match="start"):
+        await arm._ensure_started()
+    with pytest.raises(RuntimeError, match="start"):
+        await arm.scrape(url="http://fixture.invalid")
+
+
+@pytest.mark.asyncio
+async def test_browser_arm_propagates_cleanup_failure(monkeypatch):
+    class Session:
+        async def kill(self):
+            raise OSError("cleanup failed")
+
+    arm = scrape_compare.BrowserArm("openbrowser-full", "full")
+    monkeypatch.setattr(arm, "session", Session())
+    with pytest.raises(OSError, match="cleanup failed"):
+        await arm.stop()

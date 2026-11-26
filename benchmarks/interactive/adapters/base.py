@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 import socket
@@ -113,17 +114,13 @@ def run_process(
         elapsed = time.monotonic() - started
         return process.returncode, stdout or "", stderr or "", elapsed
     except subprocess.TimeoutExpired:
-        try:
+        with contextlib.suppress(OSError):
             os.killpg(process.pid, signal.SIGTERM)
-        except OSError:
-            pass
         try:
             stdout, stderr = process.communicate(timeout=5)
         except subprocess.TimeoutExpired:
-            try:
+            with contextlib.suppress(OSError):
                 os.killpg(process.pid, signal.SIGKILL)
-            except OSError:
-                pass
             stdout, stderr = process.communicate()
         elapsed = time.monotonic() - started
         raise TimeoutError(f"command timed out after {timeout}s: {' '.join(command[:3])}") from None
@@ -151,9 +148,9 @@ def wait_for_http(url: str, timeout: float = 20.0) -> None:
 
 def _process_table() -> list[tuple[int, str]]:
     rows: list[tuple[int, str]] = []
-    for process in psutil.process_iter(["pid", "cmdline"]):
+    for process in psutil.process_iter(["pid"]):
         try:
-            command = " ".join(process.info.get("cmdline") or [])
+            command = " ".join(process.cmdline())
         except (OSError, psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
             continue
         if command:
@@ -199,10 +196,8 @@ def terminate_matching(marker: str, *, grace: float = 2.0) -> list[int]:
         raise ValueError("refusing to terminate on a broad marker")
     victims = processes_matching(marker)
     for pid in victims:
-        try:
+        with contextlib.suppress(OSError):
             os.kill(pid, signal.SIGTERM)
-        except OSError:
-            pass
     deadline = time.monotonic() + grace
     while victims and time.monotonic() < deadline:
         alive = []
@@ -216,10 +211,8 @@ def terminate_matching(marker: str, *, grace: float = 2.0) -> list[int]:
         if victims:
             time.sleep(0.1)
     for pid in victims:
-        try:
+        with contextlib.suppress(OSError):
             os.kill(pid, signal.SIGKILL)
-        except OSError:
-            pass
     return victims
 
 
@@ -239,10 +232,8 @@ def kill_pidfile(pid_file: Path) -> None:
         except OSError:
             return
         time.sleep(0.1)
-    try:
+    with contextlib.suppress(OSError):
         os.kill(pid, signal.SIGKILL)
-    except OSError:
-        pass
 
 
 class ChromeInstance:
@@ -274,9 +265,8 @@ class ChromeInstance:
         preferences.parent.mkdir(parents=True, exist_ok=True)
         if not preferences.exists():
             preferences.write_text(
-                '{"download":{"default_directory":"%s","prompt_for_download":false,'
-                '"directory_upgrade":true},"savefile":{"default_directory":"%s"}}'
-                % (str(self.downloads), str(self.downloads))
+                f'{{"download":{{"default_directory":"{self.downloads!s}","prompt_for_download":false,'
+                f'"directory_upgrade":true}},"savefile":{{"default_directory":"{self.downloads!s}"}}}}'
             )
         args = [
             self.executable,
@@ -306,16 +296,12 @@ class ChromeInstance:
     def stop(self) -> None:
         if self.process is None:
             return
-        try:
+        with contextlib.suppress(OSError):
             os.killpg(self.process.pid, signal.SIGTERM)
-        except OSError:
-            pass
         try:
             self.process.wait(timeout=10)
         except subprocess.TimeoutExpired:
-            try:
+            with contextlib.suppress(OSError):
                 os.killpg(self.process.pid, signal.SIGKILL)
-            except OSError:
-                pass
         self.process = None
         terminate_matching(str(self.profile))

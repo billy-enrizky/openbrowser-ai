@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import contextlib
 import html
 import json
 import os
@@ -51,28 +50,30 @@ TABLE_COLS = 6
 ASSET_COUNT = 20
 
 EXPECTED_JS_SKUS = [f"SKU-{index:03d}" for index in range(JS_ITEMS)]
-EXPECTED_PAGINATION_IDS = [
-    f"page-{page}-row-{row}" for page in range(1, PAGE_COUNT + 1) for row in range(PAGE_SIZE)
-]
+EXPECTED_PAGINATION_IDS = [f"page-{page}-row-{row}" for page in range(1, PAGE_COUNT + 1) for row in range(PAGE_SIZE)]
 EXPECTED_TABLE_CELLS = [
-    [str(index)] + [f"cell-{index}-{column}" for column in range(1, TABLE_COLS)]
-    for index in range(TABLE_ROWS)
+    [str(index)] + [f"cell-{index}-{column}" for column in range(1, TABLE_COLS)] for index in range(TABLE_ROWS)
 ]
-EXPECTED_TABLE_ROWS = [
-    [f"table-{index}", *EXPECTED_TABLE_CELLS[index]] for index in range(TABLE_ROWS)
-]
+EXPECTED_TABLE_ROWS = [[f"table-{index}", *EXPECTED_TABLE_CELLS[index]] for index in range(TABLE_ROWS)]
 
 
 def exact_static(content: str) -> bool:
-    """Require every static item in order and no decoy text."""
-    items = [int(value) for value in re.findall(r"Item (\d+)", content)]
-    return items == list(range(STATIC_ROWS)) and "DO NOT INCLUDE" not in content
+    """Require every article label and value in order, with no decoy text."""
+    if not isinstance(content, str):
+        return False
+    fields = re.findall(r"\b(Item|Value)\s+([0-9]+)(?![\w.+-])", content)
+    expected = [
+        (label, str(value)) for index in range(STATIC_ROWS) for label, value in (("Item", index), ("Value", index * 7))
+    ]
+    return fields == expected and "DO NOT INCLUDE" not in content
 
 
 def exact_assets(content: str) -> bool:
     """Require every rendered headline exactly once in order."""
-    headlines = [int(value) for value in re.findall(r"Headline (\d+)", content)]
-    return headlines == list(range(1, ASSET_COUNT + 1))
+    if not isinstance(content, str):
+        return False
+    headlines = re.findall(r"\bHeadline\s+([0-9]+)(?![\w.+-])", content)
+    return headlines == [str(index) for index in range(1, ASSET_COUNT + 1)]
 
 
 def exact_js_list(skus: list[str]) -> bool:
@@ -336,6 +337,8 @@ class BrowserArm:
         self.namespace = create_namespace(browser_session=self.session, tools=CodeAgentTools())
 
     async def _ensure_started(self) -> None:
+        if self.session is None:
+            raise RuntimeError("start() must complete before browser use")
         if not self._started:
             await self.session.start()
             self._started = True
@@ -347,10 +350,11 @@ class BrowserArm:
 
     async def stop(self) -> None:
         if self.session is not None:
-            with contextlib.suppress(Exception):
-                await self.session.kill()
+            await self.session.kill()
 
     async def scrape(self, **kwargs):
+        if self.namespace is None:
+            raise RuntimeError("start() must complete before scraping")
         kwargs.setdefault("engine", self.engine)
         result = await self.namespace["scrape_page"](**kwargs)
         self.last_engine = result.get("engine_used", "browser")
@@ -748,6 +752,7 @@ async def _measure(arm, task_name: str, method: str, base: str, state: FixtureSt
     error = ""
     try:
         ok, output, detail = await getattr(arm, method)(base)
+        error = detail if not ok else ""
     except Exception as exc:
         ok, output, detail = False, "", f"{type(exc).__name__}: {exc}"
         error = detail
@@ -843,6 +848,37 @@ def _environment(
     return environment
 
 
+def make_scrape_arm(
+    name: str,
+    *,
+    chrome_path: str | None = None,
+    firecrawl_server: FirecrawlServer | None = None,
+    firecrawl_waits: dict[str, dict[str, int]] | None = None,
+    lightpanda_bin: str | None = None,
+):
+    """Construct the requested native scraping surface without starting it."""
+    modes = {"openbrowser-full": "full", "openbrowser-lightweight": "lightweight", "openbrowser-no-render": "no-render"}
+    if name in modes:
+        return BrowserArm(name, modes[name], chrome_path=chrome_path)
+    if name in {"playwright-mcp", "playwright-cli"}:
+        from benchmarks.interactive.adapters.playwright_scrape_bridge import build_scrape_arm
+
+        return build_scrape_arm(name)
+    if name in {"firecrawl-local", "firecrawl-local-auto"}:
+        if firecrawl_server is None:
+            raise ValueError("Firecrawl scraping needs a configured service")
+        waits = {"asset_heavy": FIRECRAWL_ASSET_WAIT_MS} if name == "firecrawl-local" else {}
+        if firecrawl_waits is not None:
+            firecrawl_waits[name] = waits
+        return FirecrawlArm(name, firecrawl_server, waits)
+    if name == "lightpanda":
+        binary = lightpanda_bin or os.environ.get("LIGHTPANDA_BIN") or shutil.which("lightpanda")
+        if not binary:
+            raise SystemExit("Lightpanda arm needs a binary. Pass --lightpanda-bin or set LIGHTPANDA_BIN.")
+        return LightpandaArm(binary)
+    raise SystemExit(f"unknown arm: {name}")
+
+
 async def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--samples", type=int, default=3)
@@ -887,6 +923,18 @@ async def main() -> int:
     results: list[TaskResult] = []
     raw_samples: list[dict] = []
     environment: dict = {}
+    cleanup_errors: list[str] = []
+    stopped: set[str] = set()
+
+    async def stop_arm(arm) -> None:
+        if arm.name in stopped:
+            return
+        stopped.add(arm.name)
+        try:
+            await arm.stop()
+        except Exception as error:
+            cleanup_errors.append(f"{arm.name}: {type(error).__name__}")
+
     try:
         if any(name.startswith("firecrawl") for name in args.arms):
             if args.firecrawl_url:
@@ -904,25 +952,15 @@ async def main() -> int:
             print(f"firecrawl-local {firecrawl_server.version} at {firecrawl_server.url}")
 
         for name in args.arms:
-            if name == "openbrowser-full":
-                arms.append(BrowserArm(name, "full", chrome_path=args.chrome))
-            elif name == "openbrowser-lightweight":
-                arms.append(BrowserArm(name, "lightweight", chrome_path=args.chrome))
-            elif name == "openbrowser-no-render":
-                arms.append(BrowserArm(name, "no-render", chrome_path=args.chrome))
-            elif name == "firecrawl-local":
-                firecrawl_waits[name] = {"asset_heavy": FIRECRAWL_ASSET_WAIT_MS}
-                arms.append(FirecrawlArm(name, firecrawl_server, firecrawl_waits[name]))
-            elif name == "firecrawl-local-auto":
-                firecrawl_waits[name] = {}
-                arms.append(FirecrawlArm(name, firecrawl_server, firecrawl_waits[name]))
-            elif name == "lightpanda":
-                binary = args.lightpanda_bin or os.environ.get("LIGHTPANDA_BIN") or shutil.which("lightpanda")
-                if not binary:
-                    raise SystemExit("Lightpanda arm needs a binary. Pass --lightpanda-bin or set LIGHTPANDA_BIN.")
-                arms.append(LightpandaArm(binary))
-            else:
-                raise SystemExit(f"unknown arm: {name}")
+            arms.append(
+                make_scrape_arm(
+                    name,
+                    chrome_path=args.chrome,
+                    firecrawl_server=firecrawl_server,
+                    firecrawl_waits=firecrawl_waits,
+                    lightpanda_bin=args.lightpanda_bin,
+                )
+            )
 
         lightpanda_arm = next((arm for arm in arms if isinstance(arm, LightpandaArm)), None)
         environment = _environment(firecrawl_server, firecrawl_waits, args.chrome, lightpanda_arm)
@@ -970,13 +1008,21 @@ async def main() -> int:
                                 **asdict(result),
                             }
                         )
-                await arm.stop()
+                await stop_arm(arm)
     finally:
-        await asyncio.gather(*(arm.stop() for arm in arms), return_exceptions=True)
-        if firecrawl_server is not None:
-            firecrawl_server.stop()
-        server.shutdown()
-        server.server_close()
+        await asyncio.gather(*(stop_arm(arm) for arm in arms))
+        for name, stop in (
+            ("firecrawl-service", firecrawl_server.stop if firecrawl_server is not None else None),
+            ("fixture-shutdown", server.shutdown),
+            ("fixture-close", server.server_close),
+        ):
+            if stop is not None:
+                try:
+                    stop()
+                except Exception as error:
+                    cleanup_errors.append(f"{name}: {type(error).__name__}")
+        environment["cleanup_completed"] = not cleanup_errors
+        environment["cleanup_errors"] = cleanup_errors
 
     grouped: dict[tuple[str, str], list[TaskResult]] = {}
     for result in results:
@@ -1011,9 +1057,11 @@ async def main() -> int:
         }
         report["groups"].append(entry)
         engine = ",".join(entry["engines"])
+        p50 = f"{summary['p50_ms']:8.1f}" if summary.get("p50_ms") is not None else f"{'n/a':>8}"
+        p95 = f"{summary['p95_ms']:8.1f}" if summary.get("p95_ms") is not None else f"{'n/a':>8}"
         print(
             f"{task:18} {arm_name:24} {ok_count}/{len(group):<2} "
-            f"{summary.get('p50_ms', 0):8.1f} {summary.get('p95_ms', 0):8.1f} "
+            f"{p50} {p95} "
             f"{entry['mean_output_bytes']:8.0f} {entry['mean_requests']:4.1f} {engine:<12}"
         )
 
@@ -1034,7 +1082,8 @@ async def main() -> int:
         lines = [json.dumps(record, separators=(",", ":"), sort_keys=True) for record in [raw_run, *raw_samples]]
         args.raw_jsonl.write_text("\n".join(lines) + "\n", encoding="utf-8")
         print(f"Wrote {args.raw_jsonl}")
-    return 0
+    expected = len(args.arms) * len(args.tasks) * args.samples
+    return 0 if results and len(results) == expected and all(item.ok for item in results) and not cleanup_errors else 1
 
 
 if __name__ == "__main__":

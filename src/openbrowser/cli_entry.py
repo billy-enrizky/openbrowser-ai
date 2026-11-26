@@ -297,6 +297,12 @@ def _execute_scrape_fast_path(argv: list[str]) -> bool:
 
 
 def cli() -> None:
+    if sys.argv:
+        program = sys.argv[0]
+        name = program.replace("\\", "/").rsplit("/", 1)[-1]
+        if name in {"openbrowser-ai-py", "openbrowser-ai-py.exe"}:
+            prefix, suffix = program.rsplit("openbrowser-ai-py", 1)
+            sys.argv[0] = prefix + "openbrowser-ai" + suffix
     if _version_fast_path(sys.argv):
         return
     if _daemon_stop_fast_path(sys.argv):
