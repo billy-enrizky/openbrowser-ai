@@ -694,7 +694,12 @@ def test_binding_uses_the_adapter_environment_without_starting_application(monke
 
     monkeypatch.setenv("OPENBROWSER_BIN", "/fake/openbrowser-ai")
     monkeypatch.setenv("PYTHONPATH", "/unrelated/source")
-    monkeypatch.setattr(resource_provenance, "bind_openbrowser", bind)
+    monkeypatch.setattr(resource_provenance, "bind_console_entry", bind)
+
+    def legacy_must_not_run(*args, **kwargs):
+        raise AssertionError("Resource binding must dispatch through the native-aware facade")
+
+    monkeypatch.setattr(resource_provenance, "bind_openbrowser", legacy_must_not_run)
 
     assert module.binding_snapshot(["openbrowser-fast"])["verified"] is True
     assert observed[0][0] == "/fake/openbrowser-ai"
@@ -1088,9 +1093,7 @@ def test_observation_ok_rejects_fatal_read_even_with_verified_cleanup():
     assert module.observation_ok({**resources, "fatal_read_errors": 0}, {"verified": True}) is True
 
 
-@pytest.mark.parametrize(
-    "changed_key", ["backend_entry_sha256", "native_manifest_sha256", "native_source_digest", "native_target"]
-)
+@pytest.mark.parametrize("changed_key", ["backend_entry_sha", "native_manifest_sha", "native_source_digest", "target"])
 def test_lane_rejects_any_native_binding_change(monkeypatch, tmp_path, changed_key):
     module = resource_module()
     before = {

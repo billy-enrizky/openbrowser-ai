@@ -478,7 +478,7 @@ def source_manifest() -> dict:
 
 
 def binding_snapshot(arms: list[str]) -> dict:
-    from .resource_provenance import bind_openbrowser
+    from .resource_provenance import bind_console_entry
 
     if not any(name.startswith("openbrowser") for name in arms):
         return {"verified": True, "reason": "openbrowser_not_selected"}
@@ -490,7 +490,7 @@ def binding_snapshot(arms: list[str]) -> dict:
 
     with tempfile.TemporaryDirectory(prefix="ob-resource-binding-") as directory:
         context = make_context("provenance", "openbrowser-fast", 0, "http://127.0.0.1:0", Path(directory))
-        return bind_openbrowser(binary, ROOT / "src" / "openbrowser", env=_env(context), cwd=ROOT)
+        return bind_console_entry(binary, ROOT / "src" / "openbrowser", env=_env(context), cwd=ROOT)
 
 
 def arm_versions(arms: list[str]) -> dict:
