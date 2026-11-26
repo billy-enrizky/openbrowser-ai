@@ -929,8 +929,11 @@ def test_authoritative_exit_does_not_call_identity_fence(error_name):
     assert result["read_error_details"][0]["resolution_source"] == "read_exception"
 
 
-@pytest.mark.parametrize("error_name", ["AccessDenied", "OSError"])
-def test_ambiguous_read_error_uses_identity_fence(error_name):
+@pytest.mark.parametrize(
+    ("error_name", "operation"),
+    [("AccessDenied", "cmdline"), ("OSError", "memory_info")],
+)
+def test_ambiguous_read_error_uses_identity_fence(error_name, operation):
     module = resource_module()
     root = FakeProcess(10, 1.0)
     sampler = fake_sampler(module, {10: root})
@@ -945,7 +948,7 @@ def test_ambiguous_read_error_uses_identity_fence(error_name):
     sampler._note_read_error(
         error,
         identity=(20, 2.0),
-        operation="memory_info",
+        operation=operation,
         phase="native_run",
         sample_index=0,
     )
@@ -954,8 +957,301 @@ def test_ambiguous_read_error_uses_identity_fence(error_name):
     assert calls == [(20, 2.0)]
     assert result["fatal_read_errors"] == 1
     assert result["expected_exit_races"] == 0
-    assert result["read_error_details"][0]["resolution"] == "alive"
-    assert result["read_error_details"][0]["resolution_source"] == "identity_fence"
+    detail = result["read_error_details"][0]
+    assert detail["resolution"] == "alive"
+    assert detail["resolution_source"] == "identity_fence"
+    assert detail["memory_task_verification"] == "not_run"
+
+
+def memory_task_sampler(module, second):
+    root = FakeProcess(10, 1.0, rss=100)
+    child = FakeProcess(20, 2.0, rss=200)
+    root.descendants = [child]
+    calls = []
+
+    def memory_info():
+        calls.append(None)
+        if len(calls) == 1:
+            raise module.psutil.AccessDenied(20)
+        return second()
+
+    child.memory_info = memory_info
+    sampler = fake_sampler(module, {10: root, 20: child})
+    return sampler, calls
+
+
+def raise_error(error):
+    def second():
+        raise error
+
+    return second
+
+
+@pytest.mark.parametrize(
+    ("error_name", "resolution", "verification"),
+    [("NoSuchProcess", "gone", "no_such_process"), ("ZombieProcess", "zombie", "zombie_process")],
+)
+def test_memory_task_proof_accepts_authoritative_exit(error_name, resolution, verification):
+    module = resource_module()
+    sampler, calls = memory_task_sampler(module, raise_error(getattr(module.psutil, error_name)(20)))
+    sampler.sample()
+
+    result = sampler.result()
+    assert len(calls) == 2
+    assert result["expected_exit_races"] == 1
+    assert result["fatal_read_errors"] == 0
+    assert result["peak_tree_rss_bytes"] == 100
+    detail = result["read_error_details"][0]
+    assert detail["error_type"] == "AccessDenied"
+    assert detail["resolution"] == resolution
+    assert detail["resolution_source"] == "memory_task_fence"
+    assert detail["memory_task_verification"] == verification
+
+
+def test_memory_task_proof_success_stays_fatal():
+    module = resource_module()
+    sampler, calls = memory_task_sampler(module, lambda: SimpleNamespace(rss=999))
+    sampler.sample()
+
+    result = sampler.result()
+    assert len(calls) == 2
+    assert result["expected_exit_races"] == 0
+    assert result["fatal_read_errors"] == 1
+    assert result["peak_tree_rss_bytes"] == 100
+    detail = result["read_error_details"][0]
+    assert detail["error_type"] == "AccessDenied"
+    assert detail["resolution"] == "alive"
+    assert detail["resolution_source"] == "memory_task_fence"
+    assert detail["memory_task_verification"] == "success"
+
+
+def test_memory_task_proof_access_denied_stays_fatal():
+    module = resource_module()
+    sampler, calls = memory_task_sampler(module, raise_error(module.psutil.AccessDenied(20)))
+    sampler.sample()
+
+    result = sampler.result()
+    assert len(calls) == 2
+    assert result["expected_exit_races"] == 0
+    assert result["fatal_read_errors"] == 1
+    detail = result["read_error_details"][0]
+    assert detail["resolution"] == "alive"
+    assert detail["resolution_source"] == "memory_task_fence"
+    assert detail["memory_task_verification"] == "access_denied"
+
+
+def test_memory_task_proof_oserror_stays_fatal():
+    module = resource_module()
+    sampler, calls = memory_task_sampler(module, raise_error(OSError(0, "ambiguous")))
+    sampler.sample()
+
+    result = sampler.result()
+    assert len(calls) == 2
+    assert result["expected_exit_races"] == 0
+    assert result["fatal_read_errors"] == 1
+    detail = result["read_error_details"][0]
+    assert detail["resolution"] == "alive"
+    assert detail["resolution_source"] == "memory_task_fence"
+    assert detail["memory_task_verification"] == "oserror"
+
+
+def test_memory_task_proof_unknown_error_stays_fatal():
+    module = resource_module()
+    sampler, calls = memory_task_sampler(module, raise_error(RuntimeError("ambiguous")))
+    sampler.sample()
+
+    result = sampler.result()
+    assert len(calls) == 2
+    assert result["expected_exit_races"] == 0
+    assert result["fatal_read_errors"] == 1
+    detail = result["read_error_details"][0]
+    assert detail["resolution"] == "unknown"
+    assert detail["resolution_source"] == "memory_task_fence"
+    assert detail["memory_task_verification"] == "unknown"
+
+
+@pytest.mark.parametrize("error_name", ["NoSuchProcess", "ZombieProcess"])
+def test_memory_task_proof_mismatched_pid_stays_fatal(error_name):
+    module = resource_module()
+    sampler, calls = memory_task_sampler(module, raise_error(getattr(module.psutil, error_name)(21)))
+    sampler.sample()
+
+    result = sampler.result()
+    assert len(calls) == 2
+    assert result["expected_exit_races"] == 0
+    assert result["fatal_read_errors"] == 1
+    detail = result["read_error_details"][0]
+    assert detail["resolution"] == "alive"
+    assert detail["resolution_source"] == "memory_task_fence"
+    assert detail["memory_task_verification"] == "pid_mismatch"
+
+
+def test_memory_task_proof_pid_reuse_is_replaced():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    child = FakeProcess(20, 2.0)
+    replacement = FakeProcess(20, 99.0)
+    processes = {10: root, 20: child}
+    sampler = fake_sampler(module, processes)
+    sampler._identity_resolution = lambda identity: ("alive", None)  # type: ignore[method-assign]
+    processes[20] = replacement
+
+    sampler._note_read_error(
+        module.psutil.AccessDenied(20),
+        identity=(20, 2.0),
+        operation="memory_info",
+        phase="native_run",
+        sample_index=0,
+    )
+
+    result = sampler.result()
+    assert result["expected_exit_races"] == 1
+    assert result["fatal_read_errors"] == 0
+    detail = result["read_error_details"][0]
+    assert detail["resolution"] == "replaced"
+    assert detail["resolution_source"] == "identity_fence"
+    assert detail["memory_task_verification"] == "pid_reused"
+
+
+def test_memory_task_proof_malformed_time_is_fatal():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    child = FakeProcess(20, 2.0)
+    replacement = FakeProcess(20, 2.0)
+    replacement.create_time = lambda: math.nan
+    processes = {10: root, 20: child}
+    sampler = fake_sampler(module, processes)
+    sampler._identity_resolution = lambda identity: ("alive", None)  # type: ignore[method-assign]
+    processes[20] = replacement
+
+    sampler._note_read_error(
+        module.psutil.AccessDenied(20),
+        identity=(20, 2.0),
+        operation="memory_info",
+        phase="native_run",
+        sample_index=0,
+    )
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    assert result["expected_exit_races"] == 0
+    detail = result["read_error_details"][0]
+    assert detail["resolution"] == "unknown"
+    assert detail["resolution_source"] == "identity_fence"
+    assert detail["memory_task_verification"] == "malformed_identity"
+
+
+def test_memory_task_proof_skips_other_operations():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    child = FakeProcess(20, 2.0)
+    processes = {10: root, 20: child}
+    sampler = fake_sampler(module, processes)
+    sampler._identity_resolution = lambda identity: ("alive", None)  # type: ignore[method-assign]
+    child.memory_info = lambda: pytest.fail("memory_info verification must not run for cmdline")
+    sampler._note_read_error(
+        module.psutil.AccessDenied(20),
+        identity=(20, 2.0),
+        operation="cmdline",
+        phase="native_run",
+        sample_index=0,
+    )
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    assert result["expected_exit_races"] == 0
+    detail = result["read_error_details"][0]
+    assert detail["resolution"] == "alive"
+    assert detail["resolution_source"] == "identity_fence"
+    assert detail["memory_task_verification"] == "not_run"
+
+
+def test_memory_task_proof_initial_pid_mismatch_skips_verification():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    child = FakeProcess(20, 2.0)
+    processes = {10: root, 20: child}
+    sampler = fake_sampler(module, processes)
+    sampler._identity_resolution = lambda identity: ("alive", None)  # type: ignore[method-assign]
+    child.memory_info = lambda: pytest.fail("memory_info verification must not run for a mismatched PID")
+    sampler._note_read_error(
+        module.psutil.AccessDenied(21),
+        identity=(20, 2.0),
+        operation="memory_info",
+        phase="native_run",
+        sample_index=0,
+    )
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    assert result["expected_exit_races"] == 0
+    detail = result["read_error_details"][0]
+    assert detail["resolution"] == "alive"
+    assert detail["resolution_source"] == "identity_fence"
+    assert detail["memory_task_verification"] == "not_run"
+
+
+@pytest.mark.parametrize("error_name", ["NoSuchProcess", "ZombieProcess"])
+@pytest.mark.parametrize("bad_pid", [21, None])
+def test_authoritative_exit_requires_matching_pid(error_name, bad_pid):
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    child = FakeProcess(20, 2.0)
+    root.descendants = [child]
+    sampler = fake_sampler(module, {10: root, 20: child})
+    sampler.sample()
+
+    error = getattr(module.psutil, error_name)(bad_pid)
+    child.memory_info = raise_error(error)
+    sampler.sample()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    assert result["expected_exit_races"] == 0
+    detail = result["read_error_details"][0]
+    assert detail["resolution"] == "alive"
+    assert detail["resolution_source"] == "identity_fence"
+    assert detail["memory_task_verification"] == "not_run"
+
+
+def test_authoritative_exit_does_not_retry_memory_info():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    child = FakeProcess(20, 2.0)
+    root.descendants = [child]
+    calls = []
+
+    def memory_info():
+        calls.append(None)
+        raise module.psutil.NoSuchProcess(20)
+
+    child.memory_info = memory_info
+    sampler = fake_sampler(module, {10: root, 20: child})
+    sampler.sample()
+
+    result = sampler.result()
+    assert len(calls) == 1
+    assert result["expected_exit_races"] == 1
+    assert result["fatal_read_errors"] == 0
+    detail = result["read_error_details"][0]
+    assert detail["resolution_source"] == "read_exception"
+    assert detail["memory_task_verification"] == "not_run"
+
+
+@pytest.mark.parametrize("kwargs", [{"resolution_source": "bad"}, {"memory_task_verification": "bad"}])
+def test_note_read_error_rejects_unknown_provenance(kwargs):
+    module = resource_module()
+    ledger = module.ResourceLedger((10, 1.0), footprint_supported=False)
+
+    with pytest.raises(ValueError):
+        ledger.note_read_error(
+            module.psutil.AccessDenied(10),
+            identity=(10, 1.0),
+            operation="cmdline",
+            phase="native_run",
+            sample_index=0,
+            **kwargs,
+        )
 
 
 def test_short_worker_layout_stays_inside_macos_socket_budget_for_all_pilot_tasks():
@@ -1356,7 +1652,8 @@ def test_required_read_failure_records_operation_and_unverified():
     assert detail["pid"] == 10
     assert detail["created_at"] == 1.0
     assert detail["resolution"] == "alive"
-    assert detail["resolution_source"] == "identity_fence"
+    assert detail["resolution_source"] == "memory_task_fence"
+    assert detail["memory_task_verification"] == "access_denied"
 
 
 def test_live_process_lookup_failure_records_operation():

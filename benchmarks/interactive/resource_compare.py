@@ -37,6 +37,21 @@ DEFAULT_WORKDIR = Path("/tmp") if os.name != "nt" else Path(tempfile.gettempdir(
 SAMPLE_PREFIX = "r-"
 SAMPLER_METHOD_VERSION = 5
 MAX_READ_ERROR_DETAILS = 32
+_RESOLUTION_SOURCES = frozenset({"read_exception", "identity_fence", "memory_task_fence"})
+_MEMORY_TASK_VERIFICATIONS = frozenset(
+    {
+        "not_run",
+        "no_such_process",
+        "zombie_process",
+        "success",
+        "access_denied",
+        "oserror",
+        "pid_mismatch",
+        "pid_reused",
+        "malformed_identity",
+        "unknown",
+    }
+)
 
 DEFAULT_ARMS = list(CANONICAL_ARMS)
 METRICS = (
@@ -99,14 +114,17 @@ class ResourceLedger:
         resolution: str = "unknown",
         resolution_error: BaseException | None = None,
         resolution_source: str = "identity_fence",
+        memory_task_verification: str = "not_run",
     ) -> bool:
         self.read_errors += 1
         name = type(error).__name__
         errno_value = getattr(error, "errno", None)
         if isinstance(errno_value, bool) or not isinstance(errno_value, int):
             errno_value = None
-        if resolution_source not in {"read_exception", "identity_fence"}:
+        if resolution_source not in _RESOLUTION_SOURCES:
             raise ValueError(f"Unsupported resolution source: {resolution_source}")
+        if memory_task_verification not in _MEMORY_TASK_VERIFICATIONS:
+            raise ValueError(f"Unsupported memory task verification: {memory_task_verification}")
         self.read_error_types[name] = self.read_error_types.get(name, 0) + 1
         self.read_resolutions[resolution] = self.read_resolutions.get(resolution, 0) + 1
         resolution_error_type = type(resolution_error).__name__ if resolution_error is not None else None
@@ -125,6 +143,7 @@ class ResourceLedger:
                     "errno": errno_value,
                     "resolution": resolution,
                     "resolution_source": resolution_source,
+                    "memory_task_verification": memory_task_verification,
                     "resolution_error_type": resolution_error_type,
                     "resolution_errno": resolution_errno,
                 }
@@ -258,6 +277,11 @@ def _valid_pid(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
+def _exception_pid(error: BaseException) -> int | None:
+    value = getattr(error, "pid", None)
+    return value if _valid_pid(value) else None
+
+
 def _valid_create_time(value: object) -> bool:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return False
@@ -331,6 +355,42 @@ class ProcessTreeSampler:
         except (psutil.Error, OSError) as error:
             return "unknown", error
 
+    def _memory_task_proof(self, identity: tuple[int, float]) -> tuple[str, BaseException | None, str, str]:
+        """Run one fresh identity check and one same-operation memory read."""
+        resolution, resolution_error = self._identity_resolution(identity)
+        if resolution != "alive":
+            return resolution, resolution_error, "identity_fence", "not_run"
+        try:
+            process = self._process(identity[0])
+            current = process.create_time()
+        except psutil.ZombieProcess as error:
+            return "zombie", error, "identity_fence", "not_run"
+        except psutil.NoSuchProcess as error:
+            return "gone", error, "identity_fence", "not_run"
+        except (psutil.Error, OSError) as error:
+            return "unknown", error, "identity_fence", "unknown"
+        if not _valid_create_time(current):
+            return "unknown", ValueError("invalid current create time"), "identity_fence", "malformed_identity"
+        if current != identity[1]:
+            return "replaced", None, "identity_fence", "pid_reused"
+        try:
+            process.memory_info()
+        except psutil.ZombieProcess as error:
+            if _exception_pid(error) == identity[0]:
+                return "zombie", error, "memory_task_fence", "zombie_process"
+            return "alive", error, "memory_task_fence", "pid_mismatch"
+        except psutil.NoSuchProcess as error:
+            if _exception_pid(error) == identity[0]:
+                return "gone", error, "memory_task_fence", "no_such_process"
+            return "alive", error, "memory_task_fence", "pid_mismatch"
+        except psutil.AccessDenied as error:
+            return "alive", error, "memory_task_fence", "access_denied"
+        except OSError as error:
+            return "alive", error, "memory_task_fence", "oserror"
+        except Exception as error:
+            return "unknown", error, "memory_task_fence", "unknown"
+        return "alive", None, "memory_task_fence", "success"
+
     def _note_read_error(
         self,
         error: BaseException,
@@ -341,13 +401,24 @@ class ProcessTreeSampler:
         sample_index: int,
     ) -> None:
         resolution_source = "identity_fence"
+        memory_task_verification = "not_run"
         valid_identity = _valid_pid(identity[0]) and _valid_create_time(identity[1])
-        if valid_identity and isinstance(error, psutil.ZombieProcess):
+        matching_error_pid = _exception_pid(error) == identity[0]
+        if valid_identity and matching_error_pid and isinstance(error, psutil.ZombieProcess):
             resolution, resolution_error = "zombie", error
             resolution_source = "read_exception"
-        elif valid_identity and isinstance(error, psutil.NoSuchProcess):
+        elif valid_identity and matching_error_pid and isinstance(error, psutil.NoSuchProcess):
             resolution, resolution_error = "gone", error
             resolution_source = "read_exception"
+        elif (
+            valid_identity
+            and matching_error_pid
+            and operation == "memory_info"
+            and isinstance(error, psutil.AccessDenied)
+        ):
+            resolution, resolution_error, resolution_source, memory_task_verification = self._memory_task_proof(
+                identity
+            )
         else:
             resolution, resolution_error = self._identity_resolution(identity)
         self._ledger.note_read_error(
@@ -359,6 +430,7 @@ class ProcessTreeSampler:
             resolution=resolution,
             resolution_error=resolution_error,
             resolution_source=resolution_source,
+            memory_task_verification=memory_task_verification,
         )
 
     def discover_orphans(self) -> None:
@@ -574,9 +646,10 @@ def source_manifest() -> dict:
             "Includes common Python worker and task-driver overhead.",
             "Summed RSS can double-count shared pages.",
             "Sampling can miss short-lived processes and final CPU increments.",
-            "Authoritative NoSuchProcess and ZombieProcess read errors are expected exits. Other read failures "
-            "require an immediate identity fence that proves the same PID is gone, zombie, or replaced; access "
-            "failures on a live identity remain fatal.",
+            "Authoritative NoSuchProcess and ZombieProcess read errors are expected exits. An AccessDenied "
+            "memory_info read may be proved by one same-identity memory_info verification; only NoSuchProcess or "
+            "ZombieProcess from that verification is an exit. Other read failures require the immediate identity "
+            "fence; access failures on a live identity remain fatal.",
             "Child footprint is null when unsupported or unavailable.",
             "Resource-instrumented wall time is not a latency benchmark.",
         ],
