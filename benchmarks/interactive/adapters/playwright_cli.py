@@ -1,0 +1,193 @@
+"""Native Playwright CLI arm for the interactive and scraping benchmarks.
+
+The arm drives the official ``@playwright/cli`` session. The primary scripted
+path is one ``run-code --filename`` program per task. Downloads use the native
+automatic save with ``outputDir`` set to the run directory.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import os
+import time
+from pathlib import Path
+
+from .base import ArmResult, RunContext, run_process, terminate_matching
+from .playwright_common import (
+    CLI_VERSION,
+    DEFAULT_CLI_BINARY,
+    PLAYWRIGHT_VERSION,
+    SECRETS_ENV,
+    assert_no_secret,
+    keychain,
+    last_json,
+    wait_for_download,
+    write_secrets,
+)
+from .playwright_tasks import SECRET_PASSWORD, account_program, login_program, task_program
+
+READINESS_PROGRAM = """async (page) => {
+  const browser_version = await page.evaluate(() => navigator.userAgent);
+  return { browser_version };
+}"""
+
+AUTH_READY_PROGRAM = """async (page) => {
+  await page.waitForSelector('#secret', { timeout: 15000 });
+  return { ready: true };
+}"""
+
+
+class PlaywrightCliArm:
+    name = "playwright-cli"
+
+    def __init__(
+        self,
+        binary: str | None = None,
+        *,
+        secrets_file: Path | None = None,
+        timeout: float = 180.0,
+    ) -> None:
+        self.binary = str(binary or os.environ.get("PLAYWRIGHT_CLI_BIN") or DEFAULT_CLI_BINARY)
+        self.secrets_file = Path(secrets_file) if secrets_file else None
+        self.timeout = timeout
+        self._result = ArmResult(ok=False)
+        self._opened = False
+        self._config_path: Path | None = None
+        self._program_index = 0
+
+    # -- native lifecycle --------------------------------------------------
+    def _config(self, ctx: RunContext) -> Path:
+        if self._config_path is None:
+            path = ctx.config / "playwright-cli.json"
+            path.write_text(json.dumps({"outputDir": str(ctx.downloads), "codegen": "none"}))
+            self._config_path = path
+        return self._config_path
+
+    def _run(self, ctx: RunContext, *args: str, timeout: float | None = None) -> str:
+        env = ctx.env
+        env[SECRETS_ENV] = str(self.secrets_file or write_secrets(ctx))
+        command = [self.binary, "-s", ctx.session, *args, "--raw"]
+        returncode, stdout, stderr, _elapsed = run_process(
+            command, env=env, cwd=ctx.root, timeout=timeout or self.timeout
+        )
+        self._result.stdout += stdout
+        self._result.stderr += stderr
+        if args[0] == "open":
+            self._result.process_starts += 1
+        elif args[0] != "close":
+            self._result.tool_calls += 1
+        if returncode != 0:
+            detail = (stderr.strip() or stdout.strip())[-800:]
+            raise RuntimeError(f"playwright-cli {' '.join(args[:2])} failed: {detail}")
+        return stdout
+
+    def _open(self, ctx: RunContext) -> None:
+        if self._opened:
+            return
+        self._run(
+            ctx,
+            "open",
+            "--profile",
+            str(ctx.profile),
+            "--config",
+            str(self._config(ctx)),
+            timeout=120,
+        )
+        self._opened = True
+
+    def _program_file(self, ctx: RunContext, code: str) -> Path:
+        self._program_index += 1
+        path = ctx.config / f"program-{self._program_index:02}.js"
+        path.write_text(code)
+        return path
+
+    def _code(self, ctx: RunContext, code: str, *, timeout: float | None = None) -> str:
+        self._open(ctx)
+        return self._run(
+            ctx,
+            "run-code",
+            "--filename",
+            str(self._program_file(ctx, code)),
+            timeout=timeout or self.timeout,
+        )
+
+    def _restart(self, ctx: RunContext) -> None:
+        if self._opened:
+            with contextlib.suppress(Exception):
+                self._run(ctx, "close", timeout=60)
+            self._opened = False
+        self._open(ctx)
+
+    # -- benchmark surface -------------------------------------------------
+    def warmup(self, ctx: RunContext) -> tuple[dict, float]:
+        started = time.monotonic()
+        self._result = ArmResult(ok=False)
+        text = self._code(ctx, READINESS_PROGRAM)
+        payload = last_json(text)
+        payload.update({"server": "playwright-cli", "package": CLI_VERSION, "playwright": PLAYWRIGHT_VERSION})
+        return payload, (time.monotonic() - started) * 1000.0
+
+    def execute_program(self, ctx: RunContext, code: str, *, timeout: float | None = None) -> ArmResult:
+        """Run one native program. Seam for the scraping bridge."""
+        result = ArmResult(ok=False)
+        calls, starts = self._result.tool_calls, self._result.process_starts
+        try:
+            text = self._code(ctx, code, timeout=timeout)
+            result.stdout = text
+            result.reported = last_json(text)
+            result.ok = True
+        except Exception as exc:
+            result.error = str(exc)
+            result.stdout = self._result.stdout
+            result.stderr = self._result.stderr
+        result.tool_calls = self._result.tool_calls - calls
+        result.process_starts = self._result.process_starts - starts
+        return result
+
+    def run(self, ctx: RunContext, *, cleanup: bool = True, restart_for_auth: bool = True) -> ArmResult:
+        self._result = ArmResult(ok=False)
+        try:
+            if ctx.task == "auth":
+                self._code(ctx, login_program(ctx.base_url), timeout=120)
+                self._open(ctx)
+                self._run(
+                    ctx,
+                    "fill",
+                    "#password",
+                    SECRET_PASSWORD,
+                    "--submit",
+                    timeout=120,
+                )
+                self._code(ctx, AUTH_READY_PROGRAM, timeout=120)
+                if restart_for_auth:
+                    self._restart(ctx)
+                text = self._code(ctx, account_program(ctx.base_url), timeout=120)
+                self._result.reported = last_json(text)
+            else:
+                self._code(ctx, task_program(ctx.task, ctx.base_url, ctx.downloads), timeout=150)
+                if ctx.task == "download":
+                    path = wait_for_download(ctx.downloads)
+                    self._result.reported = {"download": path.name}
+                else:
+                    self._result.reported = last_json(self._result.stdout)
+            self._result.keychain_verified = keychain(ctx)
+            if self._result.keychain_verified is False:
+                raise RuntimeError("Playwright Chrome launched without --use-mock-keychain")
+            assert_no_secret(self._result.stdout, self._result.stderr)
+            self._result.ok = True
+        except Exception as exc:
+            self._result.ok = False
+            self._result.error = str(exc)
+        finally:
+            if cleanup:
+                self.cleanup(ctx)
+        return self._result
+
+    def cleanup(self, ctx: RunContext) -> None:
+        if self._opened:
+            with contextlib.suppress(Exception):
+                self._run(ctx, "close", timeout=60)
+            self._opened = False
+        terminate_matching(str(ctx.profile))
+        terminate_matching(str(ctx.downloads))
