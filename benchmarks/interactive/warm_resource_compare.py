@@ -26,6 +26,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from .adapters.base import RunContext
 from .resource_compare import (
     ProcessTreeSampler,
     arm_versions,
@@ -39,7 +40,6 @@ from .warm_benchmark import (
     DEFAULT_ARMS,
     WARM_TASKS,
     clean_downloads,
-    make_context,
     start_fixture,
     stop_fixture,
 )
@@ -193,10 +193,30 @@ def _write_record(path: Path, record: dict) -> None:
         handle.write(json.dumps(record))
 
 
+def make_owned_context(root: Path, arm_name: str) -> RunContext:
+    """Build the context directly in the preallocated private arm scope."""
+    root = Path(root).resolve()
+    for name in ("downloads", "profile", "home", "tmp", "config"):
+        (root / name).mkdir(parents=True, exist_ok=True)
+    return RunContext(
+        task="wizard",
+        arm=arm_name,
+        sample=0,
+        base_url="http://127.0.0.1:1",
+        root=root,
+        downloads=root / "downloads",
+        profile=root / "profile",
+        home=root / "home",
+        tmp=root / "tmp",
+        config=root / "config",
+        session=uuid.uuid4().hex[:10],
+    )
+
+
 def run_worker(arm_name: str, workdir: Path) -> int:
     try:
         arm = make_arm(arm_name)
-        root_ctx = make_context(workdir, arm_name)
+        root_ctx = make_owned_context(workdir, arm_name)
     except Exception as error:
         _emit({"type": "fatal", "error": f"worker setup failed: {type(error).__name__}: {error}"})
         return 2
@@ -422,7 +442,7 @@ def run_warm_lane(
         try:
             try:
                 for arm in arms:
-                    owned = (Path(workdir).resolve() / f"warm-{arm}-{uuid.uuid4().hex}").resolve()
+                    owned = (Path(workdir).resolve() / f"warm-{uuid.uuid4().hex[:10]}").resolve()
                     owned.mkdir(parents=True, exist_ok=True)
                     session = session_factory(arm, owned, diagnostics)
                     sessions[arm] = session
