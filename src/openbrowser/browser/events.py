@@ -50,7 +50,7 @@ def _get_timeout(env_var: str, default: float) -> float | None:
 # ============================================================================
 
 
-class ElementSelectedEvent(BaseEvent[T_EventResultType]):
+class ElementSelectedEvent(BaseEvent[T_EventResultType], defer_build=True):
 	"""An element was selected."""
 
 	node: EnhancedDOMTreeNode
@@ -109,7 +109,7 @@ class ElementSelectedEvent(BaseEvent[T_EventResultType]):
 # 	page: PageHandle
 
 
-class NavigateToUrlEvent(BaseEvent[None]):
+class NavigateToUrlEvent(BaseEvent[None], defer_build=True):
 	"""Navigate to a specific URL."""
 
 	url: str
@@ -137,7 +137,7 @@ class NavigateToUrlEvent(BaseEvent[None]):
 		return self._navigation_operation
 
 
-class ClickElementEvent(ElementSelectedEvent[dict[str, Any] | None]):
+class ClickElementEvent(ElementSelectedEvent[dict[str, Any] | None], defer_build=True):
 	"""Click an element."""
 
 	node: 'EnhancedDOMTreeNode'
@@ -148,7 +148,7 @@ class ClickElementEvent(ElementSelectedEvent[dict[str, Any] | None]):
 	event_timeout: float | None = _get_timeout('TIMEOUT_ClickElementEvent', 15.0)  # seconds
 
 
-class TypeTextEvent(ElementSelectedEvent[dict | None]):
+class TypeTextEvent(ElementSelectedEvent[dict | None], defer_build=True):
 	"""Type text into an element."""
 
 	node: 'EnhancedDOMTreeNode'
@@ -160,7 +160,7 @@ class TypeTextEvent(ElementSelectedEvent[dict | None]):
 	event_timeout: float | None = _get_timeout('TIMEOUT_TypeTextEvent', 15.0)  # seconds
 
 
-class ScrollEvent(ElementSelectedEvent[None]):
+class ScrollEvent(ElementSelectedEvent[None], defer_build=True):
 	"""Scroll the page or element."""
 
 	direction: Literal['up', 'down', 'left', 'right']
@@ -170,7 +170,7 @@ class ScrollEvent(ElementSelectedEvent[None]):
 	event_timeout: float | None = _get_timeout('TIMEOUT_ScrollEvent', 8.0)  # seconds
 
 
-class SwitchTabEvent(BaseEvent[TargetID]):
+class SwitchTabEvent(BaseEvent[TargetID], defer_build=True):
 	"""Switch to a different tab."""
 
 	target_id: TargetID | None = Field(default=None, description='None means switch to the most recently opened tab')
@@ -181,7 +181,7 @@ class SwitchTabEvent(BaseEvent[TargetID]):
 	event_timeout: float | None = _get_timeout('TIMEOUT_SwitchTabEvent', 10.0)  # seconds
 
 
-class CloseTabEvent(BaseEvent[None]):
+class CloseTabEvent(BaseEvent[None], defer_build=True):
 	"""Close a tab."""
 
 	target_id: TargetID
@@ -190,7 +190,7 @@ class CloseTabEvent(BaseEvent[None]):
 	event_timeout: float | None = _get_timeout('TIMEOUT_CloseTabEvent', 10.0)  # seconds
 
 
-class ScreenshotEvent(BaseEvent[str]):
+class ScreenshotEvent(BaseEvent[str], defer_build=True):
 	"""Request to take a screenshot."""
 
 	full_page: bool = False
@@ -199,7 +199,7 @@ class ScreenshotEvent(BaseEvent[str]):
 	event_timeout: float | None = _get_timeout('TIMEOUT_ScreenshotEvent', 8.0)  # seconds
 
 
-class BrowserStateRequestEvent(BaseEvent[BrowserStateSummary]):
+class BrowserStateRequestEvent(BaseEvent[BrowserStateSummary], defer_build=True):
 	"""Request current browser state."""
 
 	include_dom: bool = True
@@ -218,25 +218,25 @@ class BrowserStateRequestEvent(BaseEvent[BrowserStateSummary]):
 # 	state: Literal['attached', 'detached', 'visible', 'hidden'] | None = None
 
 
-class GoBackEvent(BaseEvent[str]):
+class GoBackEvent(BaseEvent[str], defer_build=True):
 	"""Navigate back in browser history."""
 
 	event_timeout: float | None = _get_timeout('TIMEOUT_GoBackEvent', 15.0)  # seconds
 
 
-class GoForwardEvent(BaseEvent[str]):
+class GoForwardEvent(BaseEvent[str], defer_build=True):
 	"""Navigate forward in browser history."""
 
 	event_timeout: float | None = _get_timeout('TIMEOUT_GoForwardEvent', 15.0)  # seconds
 
 
-class RefreshEvent(BaseEvent[str]):
+class RefreshEvent(BaseEvent[str], defer_build=True):
 	"""Refresh/reload the current page."""
 
 	event_timeout: float | None = _get_timeout('TIMEOUT_RefreshEvent', 15.0)  # seconds
 
 
-class WaitEvent(BaseEvent[None]):
+class WaitEvent(BaseEvent[None], defer_build=True):
 	"""Wait for a specified number of seconds."""
 
 	seconds: float = 3.0
@@ -245,7 +245,7 @@ class WaitEvent(BaseEvent[None]):
 	event_timeout: float | None = _get_timeout('TIMEOUT_WaitEvent', 60.0)  # seconds
 
 
-class SendKeysEvent(BaseEvent[None]):
+class SendKeysEvent(BaseEvent[None], defer_build=True):
 	"""Send keyboard keys/shortcuts."""
 
 	keys: str  # e.g., "ctrl+a", "cmd+c", "Enter"
@@ -253,7 +253,7 @@ class SendKeysEvent(BaseEvent[None]):
 	event_timeout: float | None = _get_timeout('TIMEOUT_SendKeysEvent', 15.0)  # seconds
 
 
-class UploadFileEvent(ElementSelectedEvent[None]):
+class UploadFileEvent(ElementSelectedEvent[None], defer_build=True):
 	"""Upload a file to an element."""
 
 	node: 'EnhancedDOMTreeNode'
@@ -262,7 +262,7 @@ class UploadFileEvent(ElementSelectedEvent[None]):
 	event_timeout: float | None = _get_timeout('TIMEOUT_UploadFileEvent', 30.0)  # seconds
 
 
-class GetDropdownOptionsEvent(ElementSelectedEvent[dict[str, str]]):
+class GetDropdownOptionsEvent(ElementSelectedEvent[dict[str, str]], defer_build=True):
 	"""Get all options from any dropdown (native <select>, ARIA menus, or custom dropdowns).
 
 	Returns a dict containing dropdown type, options list, and element metadata."""
@@ -275,7 +275,7 @@ class GetDropdownOptionsEvent(ElementSelectedEvent[dict[str, str]]):
 	)  # some dropdowns lazy-load the list of options on first interaction, so we need to wait for them to load (e.g. table filter lists can have thousands of options)
 
 
-class SelectDropdownOptionEvent(ElementSelectedEvent[dict[str, str]]):
+class SelectDropdownOptionEvent(ElementSelectedEvent[dict[str, str]], defer_build=True):
 	"""Select a dropdown option by exact text from any dropdown type.
 
 	Returns a dict containing success status and selection details."""
@@ -286,7 +286,7 @@ class SelectDropdownOptionEvent(ElementSelectedEvent[dict[str, str]]):
 	event_timeout: float | None = _get_timeout('TIMEOUT_SelectDropdownOptionEvent', 8.0)  # seconds
 
 
-class ScrollToTextEvent(BaseEvent[None]):
+class ScrollToTextEvent(BaseEvent[None], defer_build=True):
 	"""Scroll to specific text on the page. Raises exception if text not found."""
 
 	text: str
@@ -298,7 +298,7 @@ class ScrollToTextEvent(BaseEvent[None]):
 # ============================================================================
 
 
-class BrowserStartEvent(BaseEvent):
+class BrowserStartEvent(BaseEvent, defer_build=True):
 	"""Start/connect to browser."""
 
 	cdp_url: str | None = None
@@ -307,7 +307,7 @@ class BrowserStartEvent(BaseEvent):
 	event_timeout: float | None = _get_timeout('TIMEOUT_BrowserStartEvent', 30.0)  # seconds
 
 
-class BrowserStopEvent(BaseEvent):
+class BrowserStopEvent(BaseEvent, defer_build=True):
 	"""Stop/disconnect from browser."""
 
 	force: bool = False
@@ -322,7 +322,7 @@ class BrowserLaunchResult(BaseModel):
 	cdp_url: str
 
 
-class BrowserLaunchEvent(BaseEvent[BrowserLaunchResult]):
+class BrowserLaunchEvent(BaseEvent[BrowserLaunchResult], defer_build=True):
 	"""Launch a local browser process."""
 
 	# TODO: add executable_path, proxy settings, preferences, extra launch args, etc.
@@ -330,7 +330,7 @@ class BrowserLaunchEvent(BaseEvent[BrowserLaunchResult]):
 	event_timeout: float | None = _get_timeout('TIMEOUT_BrowserLaunchEvent', 30.0)  # seconds
 
 
-class BrowserKillEvent(BaseEvent):
+class BrowserKillEvent(BaseEvent, defer_build=True):
 	"""Kill local browser subprocess."""
 
 	event_timeout: float | None = _get_timeout('TIMEOUT_BrowserKillEvent', 30.0)  # seconds
@@ -381,7 +381,7 @@ class BrowserKillEvent(BaseEvent):
 # ============================================================================
 
 
-class BrowserConnectedEvent(BaseEvent):
+class BrowserConnectedEvent(BaseEvent, defer_build=True):
 	"""Browser has started/connected."""
 
 	cdp_url: str
@@ -389,7 +389,7 @@ class BrowserConnectedEvent(BaseEvent):
 	event_timeout: float | None = _get_timeout('TIMEOUT_BrowserConnectedEvent', 30.0)  # seconds
 
 
-class BrowserStoppedEvent(BaseEvent):
+class BrowserStoppedEvent(BaseEvent, defer_build=True):
 	"""Browser has stopped/disconnected."""
 
 	reason: str | None = None
@@ -397,7 +397,7 @@ class BrowserStoppedEvent(BaseEvent):
 	event_timeout: float | None = _get_timeout('TIMEOUT_BrowserStoppedEvent', 30.0)  # seconds
 
 
-class TabCreatedEvent(BaseEvent):
+class TabCreatedEvent(BaseEvent, defer_build=True):
 	"""A new tab was created."""
 
 	target_id: TargetID
@@ -408,7 +408,7 @@ class TabCreatedEvent(BaseEvent):
 	event_timeout: float | None = _get_timeout('TIMEOUT_TabCreatedEvent', 30.0)  # seconds
 
 
-class TabClosedEvent(BaseEvent):
+class TabClosedEvent(BaseEvent, defer_build=True):
 	"""A tab was closed."""
 
 	target_id: TargetID
@@ -421,7 +421,7 @@ class TabClosedEvent(BaseEvent):
 	event_timeout: float | None = _get_timeout('TIMEOUT_TabClosedEvent', 10.0)  # seconds
 
 
-class TabClosingEvent(BaseEvent):
+class TabClosingEvent(BaseEvent, defer_build=True):
 	"""A tab close was requested and the target is still expected to exist."""
 
 	target_id: TargetID
@@ -437,7 +437,7 @@ class TabClosingEvent(BaseEvent):
 # 	url: str
 
 
-class AgentFocusChangedEvent(BaseEvent):
+class AgentFocusChangedEvent(BaseEvent, defer_build=True):
 	"""Agent focus changed to a different tab."""
 
 	target_id: TargetID
@@ -454,7 +454,7 @@ class AgentFocusChangedEvent(BaseEvent):
 	event_timeout: float | None = _get_timeout('TIMEOUT_AgentFocusChangedEvent', 10.0)  # seconds
 
 
-class TargetCrashedEvent(BaseEvent):
+class TargetCrashedEvent(BaseEvent, defer_build=True):
 	"""A target has crashed."""
 
 	target_id: TargetID
@@ -463,7 +463,7 @@ class TargetCrashedEvent(BaseEvent):
 	event_timeout: float | None = _get_timeout('TIMEOUT_TargetCrashedEvent', 10.0)  # seconds
 
 
-class NavigationStartedEvent(BaseEvent):
+class NavigationStartedEvent(BaseEvent, defer_build=True):
 	"""Navigation started."""
 
 	target_id: TargetID
@@ -474,7 +474,7 @@ class NavigationStartedEvent(BaseEvent):
 	event_timeout: float | None = _get_timeout('TIMEOUT_NavigationStartedEvent', 30.0)  # seconds
 
 
-class NavigationCompleteEvent(BaseEvent):
+class NavigationCompleteEvent(BaseEvent, defer_build=True):
 	"""Document/focus observation, not an exactly-once request outcome."""
 
 	target_id: TargetID
@@ -488,7 +488,7 @@ class NavigationCompleteEvent(BaseEvent):
 	event_timeout: float | None = _get_timeout('TIMEOUT_NavigationCompleteEvent', 30.0)  # seconds
 
 
-class NavigationFinishedEvent(BaseEvent):
+class NavigationFinishedEvent(BaseEvent, defer_build=True):
 	"""Correlated terminal request status, independent of legacy observations."""
 
 	navigation_id: str
@@ -506,7 +506,7 @@ class NavigationFinishedEvent(BaseEvent):
 # ============================================================================
 
 
-class BrowserErrorEvent(BaseEvent):
+class BrowserErrorEvent(BaseEvent, defer_build=True):
 	"""An error occurred in the browser layer."""
 
 	error_type: str
@@ -521,7 +521,7 @@ class BrowserErrorEvent(BaseEvent):
 # ============================================================================
 
 
-class SaveStorageStateEvent(BaseEvent):
+class SaveStorageStateEvent(BaseEvent, defer_build=True):
 	"""Request to save browser storage state."""
 
 	path: str | None = None  # Optional path, uses profile default if not provided
@@ -529,7 +529,7 @@ class SaveStorageStateEvent(BaseEvent):
 	event_timeout: float | None = _get_timeout('TIMEOUT_SaveStorageStateEvent', 45.0)  # seconds
 
 
-class StorageStateSavedEvent(BaseEvent):
+class StorageStateSavedEvent(BaseEvent, defer_build=True):
 	"""Notification that storage state was saved."""
 
 	path: str
@@ -541,7 +541,7 @@ class StorageStateSavedEvent(BaseEvent):
 	event_timeout: float | None = _get_timeout('TIMEOUT_StorageStateSavedEvent', 30.0)  # seconds
 
 
-class StorageStateFailedEvent(BaseEvent):
+class StorageStateFailedEvent(BaseEvent, defer_build=True):
 	"""A storage-state load or save reached a failed terminal phase."""
 
 	operation: str
@@ -553,7 +553,7 @@ class StorageStateFailedEvent(BaseEvent):
 	event_timeout: float | None = _get_timeout('TIMEOUT_StorageStateFailedEvent', 30.0)  # seconds
 
 
-class LoadStorageStateEvent(BaseEvent):
+class LoadStorageStateEvent(BaseEvent, defer_build=True):
 	"""Request to load browser storage state."""
 
 	path: str | None = None  # Optional path, uses profile default if not provided
@@ -565,7 +565,7 @@ class LoadStorageStateEvent(BaseEvent):
 # - on_BrowserConnectedEvent() -> dispatch(LoadStorageStateEvent()) -> _copy_storage_state_from_json_to_browser(json_file, new_cdp_session) + return storage_state from handler
 # - on_BrowserStopEvent() -> dispatch(SaveStorageStateEvent()) -> _copy_storage_state_from_browser_to_json(new_cdp_session, json_file)
 # and get rid of StorageStateSavedEvent and StorageStateLoadedEvent, have the original events + provide handler return values for any results
-class StorageStateLoadedEvent(BaseEvent):
+class StorageStateLoadedEvent(BaseEvent, defer_build=True):
 	"""Notification that storage state was loaded."""
 
 	path: str
@@ -585,7 +585,7 @@ class StorageStateLoadedEvent(BaseEvent):
 # ============================================================================
 
 
-class FileDownloadedEvent(BaseEvent):
+class FileDownloadedEvent(BaseEvent, defer_build=True):
 	"""A file has been downloaded."""
 
 	url: str
@@ -600,14 +600,14 @@ class FileDownloadedEvent(BaseEvent):
 	event_timeout: float | None = _get_timeout('TIMEOUT_FileDownloadedEvent', 30.0)  # seconds
 
 
-class AboutBlankDVDScreensaverShownEvent(BaseEvent):
+class AboutBlankDVDScreensaverShownEvent(BaseEvent, defer_build=True):
 	"""AboutBlankWatchdog has shown DVD screensaver animation on an about:blank tab."""
 
 	target_id: TargetID
 	error: str | None = None
 
 
-class DialogOpenedEvent(BaseEvent):
+class DialogOpenedEvent(BaseEvent, defer_build=True):
 	"""Event dispatched when a JavaScript dialog is opened and handled."""
 
 	dialog_type: str  # 'alert', 'confirm', 'prompt', or 'beforeunload'
