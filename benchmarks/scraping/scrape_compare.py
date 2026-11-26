@@ -919,6 +919,18 @@ async def main() -> int:
     results: list[TaskResult] = []
     raw_samples: list[dict] = []
     environment: dict = {}
+    cleanup_errors: list[str] = []
+    stopped: set[str] = set()
+
+    async def stop_arm(arm) -> None:
+        if arm.name in stopped:
+            return
+        stopped.add(arm.name)
+        try:
+            await arm.stop()
+        except Exception as error:
+            cleanup_errors.append(f"{arm.name}: {type(error).__name__}")
+
     try:
         if any(name.startswith("firecrawl") for name in args.arms):
             if args.firecrawl_url:
@@ -936,8 +948,15 @@ async def main() -> int:
             print(f"firecrawl-local {firecrawl_server.version} at {firecrawl_server.url}")
 
         for name in args.arms:
-            arms.append(make_scrape_arm(name, chrome_path=args.chrome, firecrawl_server=firecrawl_server,
-                                       firecrawl_waits=firecrawl_waits, lightpanda_bin=args.lightpanda_bin))
+            arms.append(
+                make_scrape_arm(
+                    name,
+                    chrome_path=args.chrome,
+                    firecrawl_server=firecrawl_server,
+                    firecrawl_waits=firecrawl_waits,
+                    lightpanda_bin=args.lightpanda_bin,
+                )
+            )
 
         lightpanda_arm = next((arm for arm in arms if isinstance(arm, LightpandaArm)), None)
         environment = _environment(firecrawl_server, firecrawl_waits, args.chrome, lightpanda_arm)
@@ -985,13 +1004,21 @@ async def main() -> int:
                                 **asdict(result),
                             }
                         )
-                await arm.stop()
+                await stop_arm(arm)
     finally:
-        await asyncio.gather(*(arm.stop() for arm in arms), return_exceptions=True)
-        if firecrawl_server is not None:
-            firecrawl_server.stop()
-        server.shutdown()
-        server.server_close()
+        await asyncio.gather(*(stop_arm(arm) for arm in arms))
+        for name, stop in (
+            ("firecrawl-service", firecrawl_server.stop if firecrawl_server is not None else None),
+            ("fixture-shutdown", server.shutdown),
+            ("fixture-close", server.server_close),
+        ):
+            if stop is not None:
+                try:
+                    stop()
+                except Exception as error:
+                    cleanup_errors.append(f"{name}: {type(error).__name__}")
+        environment["cleanup_completed"] = not cleanup_errors
+        environment["cleanup_errors"] = cleanup_errors
 
     grouped: dict[tuple[str, str], list[TaskResult]] = {}
     for result in results:
@@ -1052,7 +1079,7 @@ async def main() -> int:
         args.raw_jsonl.write_text("\n".join(lines) + "\n", encoding="utf-8")
         print(f"Wrote {args.raw_jsonl}")
     expected = len(args.arms) * len(args.tasks) * args.samples
-    return 0 if results and len(results) == expected and all(item.ok for item in results) else 1
+    return 0 if results and len(results) == expected and all(item.ok for item in results) and not cleanup_errors else 1
 
 
 if __name__ == "__main__":

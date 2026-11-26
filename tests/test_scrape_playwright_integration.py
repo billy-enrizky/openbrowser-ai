@@ -37,7 +37,11 @@ def test_scraping_factory_selects_native_bridge(monkeypatch, name):
 
 
 @pytest.mark.parametrize("failure", [False, True])
-def test_scraping_cli_keeps_both_native_paths_for_every_task(monkeypatch, tmp_path, failure):
+@pytest.mark.parametrize("cleanup_failure", [False, True])
+@pytest.mark.parametrize("interleave", [False, True])
+def test_scraping_cli_keeps_both_native_paths_for_every_task(
+    monkeypatch, tmp_path, failure, cleanup_failure, interleave
+):
     from benchmarks.interactive.adapters import playwright_scrape_bridge
 
     calls = []
@@ -57,6 +61,8 @@ def test_scraping_cli_keeps_both_native_paths_for_every_task(monkeypatch, tmp_pa
 
         async def stop(self):
             calls.append((self.name, "stop"))
+            if cleanup_failure:
+                raise OSError("native cleanup failed")
 
         def __getattr__(self, method):
             if not method.startswith("run_"):
@@ -90,18 +96,21 @@ def test_scraping_cli_keeps_both_native_paths_for_every_task(monkeypatch, tmp_pa
             "1",
             "--warmups",
             "0",
-            "--interleave",
+            *(["--interleave"] if interleave else []),
             "--output",
             str(summary),
             "--raw-jsonl",
             str(raw),
         ],
     )
-    assert asyncio.run(scrape.main()) == int(failure)
+    assert asyncio.run(scrape.main()) == int(failure or cleanup_failure)
     rows = [
         json.loads(line) for line in raw.read_text().splitlines() if json.loads(line).get("record_type") == "sample"
     ]
     assert len(rows) == 10
+    metadata = json.loads(summary.read_text())["environment"]
+    assert metadata["cleanup_completed"] is (not cleanup_failure)
+    assert len(metadata["cleanup_errors"]) == (2 if cleanup_failure else 0)
     assert {(row["task"], row["arm"]) for row in rows} == {
         (task, arm) for task in scrape.TASKS for arm in ("playwright-mcp", "playwright-cli")
     }
@@ -112,3 +121,6 @@ def test_scraping_cli_keeps_both_native_paths_for_every_task(monkeypatch, tmp_pa
         assert calls.count((arm, "start")) == calls.count((arm, "stop")) == 1
         for task, method in scrape.TASKS.items():
             assert calls.count((arm, "prepare", task)) == calls.count((arm, method)) == 1
+
+    for name in ("playwright-mcp", "playwright-cli"):
+        assert calls.count((name, "stop")) == 1
