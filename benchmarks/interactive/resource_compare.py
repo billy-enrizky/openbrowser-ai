@@ -35,7 +35,7 @@ MODULE = "benchmarks.interactive.resource_compare"
 LOGGER = logging.getLogger(__name__)
 DEFAULT_WORKDIR = Path("/tmp") if os.name != "nt" else Path(tempfile.gettempdir())
 SAMPLE_PREFIX = "r-"
-SAMPLER_METHOD_VERSION = 4
+SAMPLER_METHOD_VERSION = 5
 MAX_READ_ERROR_DETAILS = 32
 
 DEFAULT_ARMS = list(CANONICAL_ARMS)
@@ -98,12 +98,15 @@ class ResourceLedger:
         sample_index: int,
         resolution: str = "unknown",
         resolution_error: BaseException | None = None,
+        resolution_source: str = "identity_fence",
     ) -> bool:
         self.read_errors += 1
         name = type(error).__name__
         errno_value = getattr(error, "errno", None)
         if isinstance(errno_value, bool) or not isinstance(errno_value, int):
             errno_value = None
+        if resolution_source not in {"read_exception", "identity_fence"}:
+            raise ValueError(f"Unsupported resolution source: {resolution_source}")
         self.read_error_types[name] = self.read_error_types.get(name, 0) + 1
         self.read_resolutions[resolution] = self.read_resolutions.get(resolution, 0) + 1
         resolution_error_type = type(resolution_error).__name__ if resolution_error is not None else None
@@ -121,6 +124,7 @@ class ResourceLedger:
                     "error_type": name,
                     "errno": errno_value,
                     "resolution": resolution,
+                    "resolution_source": resolution_source,
                     "resolution_error_type": resolution_error_type,
                     "resolution_errno": resolution_errno,
                 }
@@ -336,7 +340,16 @@ class ProcessTreeSampler:
         phase: str,
         sample_index: int,
     ) -> None:
-        resolution, resolution_error = self._identity_resolution(identity)
+        resolution_source = "identity_fence"
+        valid_identity = _valid_pid(identity[0]) and _valid_create_time(identity[1])
+        if valid_identity and isinstance(error, psutil.ZombieProcess):
+            resolution, resolution_error = "zombie", error
+            resolution_source = "read_exception"
+        elif valid_identity and isinstance(error, psutil.NoSuchProcess):
+            resolution, resolution_error = "gone", error
+            resolution_source = "read_exception"
+        else:
+            resolution, resolution_error = self._identity_resolution(identity)
         self._ledger.note_read_error(
             error,
             identity=identity,
@@ -345,6 +358,7 @@ class ProcessTreeSampler:
             sample_index=sample_index,
             resolution=resolution,
             resolution_error=resolution_error,
+            resolution_source=resolution_source,
         )
 
     def discover_orphans(self) -> None:
@@ -560,8 +574,9 @@ def source_manifest() -> dict:
             "Includes common Python worker and task-driver overhead.",
             "Summed RSS can double-count shared pages.",
             "Sampling can miss short-lived processes and final CPU increments.",
-            "Expected process-exit read races require an immediate identity fence that proves the same PID is "
-            "gone, zombie, or replaced. Access failures on a live identity remain fatal.",
+            "Authoritative NoSuchProcess and ZombieProcess read errors are expected exits. Other read failures "
+            "require an immediate identity fence that proves the same PID is gone, zombie, or replaced; access "
+            "failures on a live identity remain fatal.",
             "Child footprint is null when unsupported or unavailable.",
             "Resource-instrumented wall time is not a latency benchmark.",
         ],

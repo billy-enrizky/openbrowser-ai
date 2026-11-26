@@ -749,7 +749,7 @@ def test_source_manifest_separates_harness_and_application_content(monkeypatch, 
     assert first["harness_digest"] == second["harness_digest"]
     assert first["expected_app_digest"] != second["expected_app_digest"]
     assert first["source_digest"] != second["source_digest"]
-    assert first["sampler_method_version"] == module.SAMPLER_METHOD_VERSION == 4
+    assert first["sampler_method_version"] == module.SAMPLER_METHOD_VERSION == 5
     assert first["configuration_digest"] == second["configuration_digest"]
 
 
@@ -798,22 +798,20 @@ def test_cleanup_finds_a_marked_orphan_created_as_its_parent_exits(monkeypatch):
     assert evidence["observed_during_native_run"] is False
 
 
-@pytest.mark.parametrize("exception_name", ["NoSuchProcess", "ZombieProcess"])
-def test_expected_process_exit_race_is_proven_by_immediate_identity_fence(exception_name):
+@pytest.mark.parametrize(
+    ("exception_name", "expected_resolution"),
+    [("NoSuchProcess", "gone"), ("ZombieProcess", "zombie")],
+)
+def test_authoritative_process_exit_is_expected(exception_name, expected_resolution):
     module = resource_module()
     root = FakeProcess(10, 1.0)
     child = FakeProcess(20, 2.0, rss=200, cpu=0.2)
     child.executable = "Google Chrome"
     root.descendants = [child]
-    processes = {10: root, 20: child}
-    sampler = fake_sampler(module, processes)
+    sampler = fake_sampler(module, {10: root, 20: child})
     sampler.sample()
 
     def exited():
-        if exception_name == "NoSuchProcess":
-            processes.pop(20)
-        else:
-            child.state = module.psutil.STATUS_ZOMBIE
         raise getattr(module.psutil, exception_name)(20)
 
     child.memory_info = exited
@@ -824,10 +822,140 @@ def test_expected_process_exit_race_is_proven_by_immediate_identity_fence(except
     assert result["expected_exit_races"] == 1
     assert result["fatal_read_errors"] == 0
     assert result["read_error_types"] == {exception_name: 1}
-    assert result["read_error_details"][0]["resolution"] in {"gone", "zombie"}
+    detail = result["read_error_details"][0]
+    assert detail["resolution"] == expected_resolution
+    assert detail["resolution_source"] == "read_exception"
+    assert detail["resolution_error_type"] == exception_name
     assert result["peak_tree_rss_bytes"] == 300
     assert result["observed_browser_during_native_run"] == 1
     assert result["cpu_accounting"] == "sampled_lower_bound"
+
+
+@pytest.mark.parametrize("exception_name", ["NoSuchProcess", "ZombieProcess"])
+def test_access_denied_after_process_exit_is_expected_by_identity_fence(exception_name):
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    child = FakeProcess(20, 2.0)
+    child.executable = "Google Chrome"
+    root.descendants = [child]
+    processes = {10: root, 20: child}
+    sampler = fake_sampler(module, processes)
+    sampler.sample()
+
+    def denied():
+        if exception_name == "NoSuchProcess":
+            processes.pop(20)
+        else:
+            child.state = module.psutil.STATUS_ZOMBIE
+        raise module.psutil.AccessDenied(20)
+
+    child.memory_info = denied
+    sampler.sample()
+    result = sampler.result()
+
+    assert result["expected_exit_races"] == 1
+    assert result["fatal_read_errors"] == 0
+    detail = result["read_error_details"][0]
+    assert detail["error_type"] == "AccessDenied"
+    assert detail["resolution"] in {"gone", "zombie"}
+    assert detail["resolution_source"] == "identity_fence"
+
+
+def test_no_such_process_from_cmdline_is_authoritative_exit():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    browser = FakeProcess(20, 2.0)
+    browser.executable = "Google Chrome"
+
+    def missing():
+        raise module.psutil.NoSuchProcess(20)
+
+    browser.cmdline = missing
+    root.descendants = [browser]
+    sampler = fake_sampler(module, {10: root, 20: browser})
+    sampler.sample()
+
+    result = sampler.result()
+    assert result["expected_exit_races"] == 1
+    assert result["fatal_read_errors"] == 0
+    detail = result["read_error_details"][0]
+    assert detail["operation"] == "cmdline"
+    assert detail["resolution"] == "gone"
+    assert detail["resolution_source"] == "read_exception"
+
+
+def test_authoritative_exit_with_malformed_identity_stays_fatal():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    sampler = fake_sampler(module, {10: root})
+
+    sampler._note_read_error(
+        module.psutil.NoSuchProcess(20),
+        identity=(20, math.nan),
+        operation="memory_info",
+        phase="native_run",
+        sample_index=0,
+    )
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    assert result["expected_exit_races"] == 0
+    detail = result["read_error_details"][0]
+    assert detail["resolution"] == "unknown"
+    assert detail["resolution_source"] == "identity_fence"
+
+
+@pytest.mark.parametrize("error_name", ["NoSuchProcess", "ZombieProcess"])
+def test_authoritative_exit_does_not_call_identity_fence(error_name):
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    sampler = fake_sampler(module, {10: root})
+
+    def fail(_identity):
+        pytest.fail("authoritative exit must not call the identity fence")
+
+    sampler._identity_resolution = fail  # type: ignore[method-assign]
+    sampler._note_read_error(
+        getattr(module.psutil, error_name)(20),
+        identity=(20, 2.0),
+        operation="memory_info",
+        phase="native_run",
+        sample_index=0,
+    )
+
+    result = sampler.result()
+    assert result["expected_exit_races"] == 1
+    assert result["fatal_read_errors"] == 0
+    assert result["read_error_details"][0]["resolution_source"] == "read_exception"
+
+
+@pytest.mark.parametrize("error_name", ["AccessDenied", "OSError"])
+def test_ambiguous_read_error_uses_identity_fence(error_name):
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    sampler = fake_sampler(module, {10: root})
+    calls = []
+
+    def fence(identity):
+        calls.append(identity)
+        return "alive", None
+
+    sampler._identity_resolution = fence  # type: ignore[method-assign]
+    error = module.psutil.AccessDenied(20) if error_name == "AccessDenied" else OSError(0, "ambiguous")
+    sampler._note_read_error(
+        error,
+        identity=(20, 2.0),
+        operation="memory_info",
+        phase="native_run",
+        sample_index=0,
+    )
+
+    result = sampler.result()
+    assert calls == [(20, 2.0)]
+    assert result["fatal_read_errors"] == 1
+    assert result["expected_exit_races"] == 0
+    assert result["read_error_details"][0]["resolution"] == "alive"
+    assert result["read_error_details"][0]["resolution_source"] == "identity_fence"
 
 
 def test_short_worker_layout_stays_inside_macos_socket_budget_for_all_pilot_tasks():
@@ -866,7 +994,7 @@ def test_sampler_skips_cmdline_for_non_browser_processes():
     result = sampler.result()
     assert calls == []
     assert result["fatal_read_errors"] == 0
-    assert result["sampler_method_version"] == module.SAMPLER_METHOD_VERSION == 4
+    assert result["sampler_method_version"] == module.SAMPLER_METHOD_VERSION == 5
 
 
 def test_sampler_skips_cmdline_for_helper_and_crashpad():
@@ -1053,6 +1181,7 @@ def test_sampler_replaced_pid_after_access_denied_is_expected():
     detail = result["read_error_details"][0]
     assert detail["error_type"] == "AccessDenied"
     assert detail["resolution"] == "replaced"
+    assert detail["resolution_source"] == "identity_fence"
 
 
 def test_sampler_unknown_fence_resolution_is_fatal():
@@ -1076,6 +1205,7 @@ def test_sampler_unknown_fence_resolution_is_fatal():
     detail = result["read_error_details"][0]
     assert detail["operation"] == "cmdline"
     assert detail["resolution"] == "unknown"
+    assert detail["resolution_source"] == "identity_fence"
 
 
 @pytest.mark.parametrize("pid", [True, False, 0, -1, 20.5, "20", None])
@@ -1147,6 +1277,7 @@ def test_sampler_malformed_current_create_time_is_fatal(created: Any):
     assert result["expected_exit_races"] == 0
     detail = result["read_error_details"][0]
     assert detail["resolution"] == "unknown"
+    assert detail["resolution_source"] == "identity_fence"
     assert detail["resolution_error_type"] == "ValueError"
 
 
@@ -1166,6 +1297,7 @@ def test_sampler_child_identity_failure_keeps_sentinel_unknown():
     detail = result["read_error_details"][0]
     assert detail["operation"] == "child_identity"
     assert detail["resolution"] == "unknown"
+    assert detail["resolution_source"] == "identity_fence"
     assert detail["resolution_error_type"] == "ValueError"
 
 
@@ -1196,6 +1328,7 @@ def test_browser_cmdline_failure_is_fatal_and_unverified():
     assert detail["phase"] == "native_run"
     assert detail["error_type"] == "AccessDenied"
     assert detail["resolution"] == "alive"
+    assert detail["resolution_source"] == "identity_fence"
     assert "error" not in detail
     assert detail["errno"] is None
     assert result["cleanup_unverified_processes"] == 0
@@ -1222,6 +1355,8 @@ def test_required_read_failure_records_operation_and_unverified():
     assert detail["operation"] == "memory_info"
     assert detail["pid"] == 10
     assert detail["created_at"] == 1.0
+    assert detail["resolution"] == "alive"
+    assert detail["resolution_source"] == "identity_fence"
 
 
 def test_live_process_lookup_failure_records_operation():
@@ -1244,6 +1379,8 @@ def test_live_process_lookup_failure_records_operation():
     assert detail["operation"] == "is_running"
     assert detail["pid"] == 10
     assert detail["created_at"] == 1.0
+    assert detail["resolution"] == "unknown"
+    assert detail["resolution_source"] == "identity_fence"
 
 
 def test_read_error_details_are_bounded():
@@ -1260,6 +1397,7 @@ def test_read_error_details_are_bounded():
         )
 
     result = ledger.result()
+    assert result["read_error_details"][0]["resolution_source"] == "identity_fence"
     assert len(result["read_error_details"]) == module.MAX_READ_ERROR_DETAILS
     assert result["read_error_details_truncated"] == 5
     assert result["fatal_read_errors"] == module.MAX_READ_ERROR_DETAILS + 5
@@ -1292,6 +1430,7 @@ def test_fatal_access_denied_is_not_reclassified_after_exit():
     assert second["unverified_processes"] == 1
     assert second["read_error_details"][0]["operation"] == "cmdline"
     assert second["read_error_details"][0]["resolution"] == "alive"
+    assert second["read_error_details"][0]["resolution_source"] == "identity_fence"
 
 
 def test_lane_writes_strict_terminal_metadata(monkeypatch, tmp_path):
