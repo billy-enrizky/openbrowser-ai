@@ -235,11 +235,51 @@ def _has_empty_application_root(tree: LexborHTMLParser) -> bool:
 class ParsedHTML:
     """Read several extraction results from one cleaned Lexbor tree."""
 
-    __slots__ = ("_html", "_tree")
+    __slots__ = (
+        "_content_filter_selectors",
+        "_html",
+        "_include_root",
+        "_raw_filtered_selectors",
+        "_raw_tree",
+        "_tree",
+    )
 
     def __init__(self, html: str) -> None:
         self._html = html
         self._tree = _parse(html)
+        self._raw_tree: LexborHTMLParser | None = None
+        self._content_filter_selectors: tuple[str, ...] = ()
+        self._raw_filtered_selectors: list[str] = []
+        self._include_root: str | None = None
+
+    def _raw_document(self) -> LexborHTMLParser:
+        if self._raw_tree is None:
+            self._raw_tree = LexborHTMLParser(self._html)
+        for selector in self._content_filter_selectors:
+            if selector in self._raw_filtered_selectors:
+                continue
+            for node in self._raw_tree.css(selector):
+                node.decompose()
+            self._raw_filtered_selectors.append(selector)
+        return self._raw_tree
+
+    def html(self, selector: str | None = None) -> str:
+        """Return original HTML or raw selected/filtered HTML.
+
+        Unscoped and unfiltered output is the original string byte-for-byte.
+        A selector returns the raw selected node, including inline script,
+        style, and SVG. Content filters apply to a lazy raw parse.
+        """
+        if selector is None:
+            if self._include_root is not None:
+                selector = self._include_root
+            elif not self._content_filter_selectors:
+                return self._html
+        raw = self._raw_document()
+        if selector is None:
+            return raw.html or ""
+        node = raw.css_first(selector)
+        return (node.html or "") if node is not None else ""
 
     def probe_static(self) -> tuple[str, bool]:
         node = self._tree.body or self._tree.root
@@ -295,7 +335,7 @@ class ParsedHTML:
         if format == "text":
             return self.text(selector)
         if format == "html":
-            return self._html
+            return self.html(selector)
         if format == "links":
             return self.links()
         return self.nodes(selector) if selector else []
@@ -354,6 +394,8 @@ def apply_content_filters(
             if document._tree.css_first(selector) is not None:
                 include_root = selector
                 break
+    document._content_filter_selectors = tuple(dict.fromkeys((*document._content_filter_selectors, *selectors)))
+    document._include_root = include_root
     return {"removed": removed, "include_root": include_root}
 
 
