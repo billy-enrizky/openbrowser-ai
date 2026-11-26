@@ -8,18 +8,20 @@ from unittest.mock import AsyncMock
 import pytest
 
 from openbrowser.mcp import server as mcp_module
-from openbrowser.search import SearchError, SearchResult
+from openbrowser.web_search import WebSearchError, WebSearchResult
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", ["web_search", "search_web"])
 @pytest.mark.parametrize(
     ("protocol_version", "legacy"),
     [("2026-07-28", False), ("2024-11-05", True)],
 )
-async def test_search_web_dispatch_is_stateless_for_modern_and_legacy(
+async def test_web_search_dispatch_is_stateless_for_modern_and_legacy(
     monkeypatch,
     protocol_version,
     legacy,
+    tool_name,
 ):
     monkeypatch.setattr(mcp_module, "TELEMETRY_AVAILABLE", False)
     server = mcp_module.OpenBrowserServer()
@@ -27,9 +29,9 @@ async def test_search_web_dispatch_is_stateless_for_modern_and_legacy(
 
     async def fake_asearch(query, **kwargs):
         calls.append((query, kwargs))
-        return [SearchResult("Docs", "https://docs.example/", "Preview")]
+        return [WebSearchResult("Docs", "https://docs.example/", "Preview")]
 
-    monkeypatch.setattr("openbrowser.search.asearch", fake_asearch)
+    monkeypatch.setattr("openbrowser.web_search.aweb_search", fake_asearch)
     denied_acquire = AsyncMock(side_effect=AssertionError("stateless search acquired a context"))
     if legacy:
         monkeypatch.setattr(server._contexts, "acquire_legacy", denied_acquire)
@@ -39,7 +41,7 @@ async def test_search_web_dispatch_is_stateless_for_modern_and_legacy(
     handler = server.server._request_handlers["tools/call"].handler
     context = SimpleNamespace(protocol_version=protocol_version)
     params = mcp_module.types.CallToolRequestParams(
-        name="search_web",
+        name=tool_name,
         arguments={"query": "browser docs", "max_results": 2},
     )
     result = await handler(context, params)
@@ -65,14 +67,14 @@ async def test_search_web_dispatch_is_stateless_for_modern_and_legacy(
 
 
 @pytest.mark.asyncio
-async def test_search_web_returns_actionable_json_error_without_context(monkeypatch):
+async def test_web_search_returns_actionable_json_error_without_context(monkeypatch):
     monkeypatch.setattr(mcp_module, "TELEMETRY_AVAILABLE", False)
     server = mcp_module.OpenBrowserServer()
 
     async def fail_search(*_args, **_kwargs):
-        raise SearchError("Use browser search as fallback.", attempts=3)
+        raise WebSearchError("Use browser search as fallback.", attempts=3)
 
-    monkeypatch.setattr("openbrowser.search.asearch", fail_search)
+    monkeypatch.setattr("openbrowser.web_search.aweb_search", fail_search)
     monkeypatch.setattr(
         server._contexts,
         "acquire",
@@ -81,7 +83,7 @@ async def test_search_web_returns_actionable_json_error_without_context(monkeypa
     handler = server.server._request_handlers["tools/call"].handler
     result = await handler(
         SimpleNamespace(protocol_version="2026-07-28"),
-        mcp_module.types.CallToolRequestParams(name="search_web", arguments={"query": "query"}),
+        mcp_module.types.CallToolRequestParams(name="web_search", arguments={"query": "query"}),
     )
 
     assert result.is_error is True
@@ -96,7 +98,7 @@ def test_packaged_mcp_manifest_lists_stateless_search_tool():
     manifest_path = Path(__file__).parents[1] / "src/openbrowser/mcp/manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
-    search_tool = next(tool for tool in manifest["tools"] if tool["name"] == "search_web")
+    search_tool = next(tool for tool in manifest["tools"] if tool["name"] == "web_search")
     assert "without starting a browser" in search_tool["description"]
     scrape_tool = next(tool for tool in manifest["tools"] if tool["name"] == "scrape_web")
     assert "no-Blink" in scrape_tool["description"]

@@ -36,7 +36,7 @@ Check out all customizable parameters <a href = "/customize/agent/all-parameters
 
 ## 1. Run lifecycle
 
-`agent.status` returns an `AgentRunStatus` snapshot. Use it instead of inferring state from logs or the final history:
+`agent.status` returns an `AgentRunStatus` snapshot. Read the snapshot directly:
 
 - `phase`: `idle`, `starting`, `running`, `paused`, `stopping`, `succeeded`, `failed`, `max_steps`, `stopped`, or `cancelled`
 - `terminal`: `true` only for `succeeded`, `failed`, `max_steps`, `stopped`, or `cancelled`

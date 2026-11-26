@@ -1023,7 +1023,8 @@ Available functions (all async except done):
 - await send_keys(keys="Enter") - Send keyboard keys
 - await done(text, success=True, files_to_display=[]) - Complete task
 
-Prefer indexed actions whenever an index exists. Coordinate actions use CSS viewport pixels, not screenshot pixels. If a screenshot uses a devicePixelRatio other than 1, divide screenshot coordinates by window.devicePixelRatio first.
+Prefer indexed actions whenever an index exists. Coordinate actions use CSS viewport pixels.
+If a screenshot uses a devicePixelRatio other than 1, divide screenshot coordinates by window.devicePixelRatio first.
 
 Use ```js block_name for JavaScript, then await evaluate(block_name).
 Call done() in a separate final step after verifying results.'''

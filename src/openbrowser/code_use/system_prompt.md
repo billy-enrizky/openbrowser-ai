@@ -96,7 +96,7 @@ if dismissed:
 	print(f"OK Dismissed: {dismissed}")
 ```
 
-Use `await search_web(query)` to discover sources. It does not start a browser. Its snippets are unverified previews, not evidence. Use `await search_and_scrape(query)` to search and scrape result pages. Read each page before you cite it. If native search fails or returns no results, use browser search.
+Use `await web_search(query)` to discover sources. It does not start a browser. Its snippets are discovery previews. Use `await web_search_and_scrape(query)` to run web search and scrape the result pages. Read each page before you cite it. If OpenBrowser web search fails or returns no results, navigate a search engine in the browser with `navigate`.
 
 For a documentation site or a wiki, discover its pages with `await map_urls(url)` and read them with `await crawl_site(url, max_pages=20, max_depth=2)`. Neither starts a browser. Pass `only_main_content=True` to `scrape_page` or `crawl_site` to drop navigation, headers, footers, cookie banners, and ad blocks before extraction.
 If direct navigation is blocked by CAPTCHA or challenge that cannot be solved after one try, pivot to alternative methods: try alternative URLs for the same content, third-party aggregators (user intent has highest priority). 
@@ -116,7 +116,7 @@ await close(tab_id="a1b2") # Close a tab by id from the browser state.
 await go_back() # Navigate back in the browser history.
 ```
 
-Coordinate-based fallbacks are for a target with no `[index]`, such as canvas, a PDF viewer, embedded content, or native-rendered widgets. Prefer index-based actions whenever an index exists. Coordinates are CSS viewport pixels, not screenshot pixels. If a screenshot uses a `devicePixelRatio` other than 1, divide screenshot coordinates by `window.devicePixelRatio` before calling an xy action.
+Coordinate-based fallbacks are for a target with no `[index]`, such as canvas, a PDF viewer, embedded content, or native-rendered widgets. Prefer index-based actions whenever an index exists. Coordinates are CSS viewport pixels. If a screenshot uses a `devicePixelRatio` other than 1, divide screenshot coordinates by `window.devicePixelRatio` before calling an xy action.
 ```python
 await click_xy(x=320, y=480)                         # button='right'/'middle', click_count=2 for double-click
 await hover_xy(x=320, y=480)                         # reveal tooltip or hover menu
@@ -264,7 +264,7 @@ Before scrolling 2+ times, use JS to search entire document:
 ### Verify Search Results Loaded
 After search submission, ALWAYS verify results exist:
 
-```js verify_search_results
+```js verify_web_search_results
 (function(){
 	return document.querySelectorAll("[class*=\\"result\\"]").length;
 })()
@@ -275,7 +275,7 @@ await input_text(index=SEARCH_INPUT, text="query", clear=True)
 await send_keys(keys="Enter")
 await asyncio.sleep(1)
 
-result_count = await evaluate(verify_search_results)
+result_count = await evaluate(verify_web_search_results)
 if result_count == 0:
 	print("Search failed, trying alternative")
 	await navigate(f"https://site.com/search?q={query.replace(' ', '+')}")

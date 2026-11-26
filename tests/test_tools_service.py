@@ -11,7 +11,7 @@ import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from openbrowser.models import ActionResult
 from openbrowser.tools.registry.views import ActionModel
@@ -122,15 +122,110 @@ class TestToolsInit:
         assert "click" in actions
         assert "done" in actions
         assert "scroll" in actions
-        assert "search" in actions
+        assert "browser_web_search" in actions
 
     def test_exclude_actions(self):
-        tools = Tools(exclude_actions=["search", "scroll"])
+        tools = Tools(exclude_actions=["browser_web_search", "scroll"])
         actions = tools.registry.registry.actions
-        assert "search" not in actions
+        assert "browser_web_search" not in actions
         assert "scroll" not in actions
         # Other actions should still be there
         assert "navigate" in actions
+
+    def test_legacy_search_exclusion_maps_to_browser_web_search(self):
+        tools = Tools(exclude_actions=["search"])
+        actions = tools.registry.registry.actions
+        assert "browser_web_search" not in actions
+        assert "search" in tools.registry.exclude_actions
+        assert "browser_web_search" in tools.registry.exclude_actions
+
+    def test_create_action_model_include_actions_accepts_legacy_alias(self):
+        tools = Tools()
+        model = tools.registry.create_action_model(include_actions=["search"])
+
+        assert "browser_web_search" in model.model_fields
+
+    def test_custom_search_action_wins_over_legacy_alias(self):
+        from pydantic import BaseModel as PydanticModel
+
+        class CustomSearchParams(PydanticModel):
+            term: str
+
+        tools = Tools()
+        calls: list[str] = []
+
+        @tools.registry.action("Custom provider search", param_model=CustomSearchParams)
+        async def search(params: CustomSearchParams):
+            calls.append(params.term)
+            return ActionResult(extracted_content=params.term)
+
+        assert tools.registry.resolve_action_name("search") == "search"
+        model = tools.registry.create_action_model()
+        action = model(**{"search": {"term": "custom"}})
+        assert action.model_dump(exclude_unset=True) == {"search": {"term": "custom"}}
+
+    @pytest.mark.asyncio
+    async def test_execute_action_resolves_legacy_search_alias(self):
+        tools = Tools()
+        session = MagicMock()
+        session.get_current_page_url = AsyncMock(return_value="https://example.com/")
+        session.navigate_to = AsyncMock()
+
+        result = await tools.registry.execute_action(
+            "search",
+            {"query": "offline query", "engine": "bing"},
+            browser_session=session,
+        )
+
+        assert result.error is None
+        session.navigate_to.assert_awaited_once()
+        assert "bing.com/search" in session.navigate_to.await_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_execute_action_resolves_alias_before_domain_lookup(self):
+        from openbrowser.tools.registry.service import Registry as ActionServiceRegistry
+
+        registry = ActionServiceRegistry()
+        calls: list[str] = []
+
+        @registry.action("Domain gated browser search", domains=["allowed.invalid"])
+        async def browser_web_search(query: str):
+            calls.append(query)
+            return ActionResult(extracted_content=query)
+
+        session = MagicMock()
+        session.get_current_page_url = AsyncMock(return_value="https://allowed.invalid/page")
+
+        result = await registry.execute_action(
+            "search",
+            {"query": "offline"},
+            browser_session=session,
+        )
+
+        assert calls == ["offline"]
+        assert result.extracted_content == "offline"
+
+    def test_action_model_accepts_legacy_search_payload(self):
+        tools = Tools()
+        model = tools.registry.create_action_model()
+
+        action = model(**{"search": {"query": "legacy query", "engine": "google"}})
+
+        assert action.model_dump(exclude_unset=True) == {
+            "browser_web_search": {"query": "legacy query", "engine": "google"}
+        }
+
+    def test_action_model_rejects_ambiguous_search_payload(self):
+        tools = Tools()
+        model = tools.registry.create_action_model()
+
+        with pytest.raises(ValidationError):
+            model(
+                **{
+                    "search": {"query": "legacy query", "engine": "google"},
+                    "browser_web_search": {"query": "new query", "engine": "duckduckgo"},
+                }
+            )
 
     def test_controller_alias(self):
         """Controller should be an alias for Tools."""
@@ -305,7 +400,7 @@ class TestCodeAgentTools:
         assert "extract" not in actions
         assert "find_text" not in actions
         assert "screenshot" not in actions
-        assert "search" not in actions
+        assert "browser_web_search" not in actions
         assert "write_file" not in actions
         assert "read_file" not in actions
         assert "replace_file" not in actions

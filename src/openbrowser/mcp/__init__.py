@@ -2,7 +2,7 @@
 
 Provides a CodeAgent-based MCP server. Modern 2026-07-28 clients use
 ``create_context``, ``execute_code``, ``get_status``, ``reset_browser``,
-``close_context``, and stateless ``search_web``. Stateful calls use an explicit
+``close_context``, and stateless ``web_search``. Stateful calls use an explicit
 context handle. Older clients receive a four-tool catalog with a legacy
 no-handle context.
 

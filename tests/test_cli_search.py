@@ -8,20 +8,20 @@ from unittest.mock import AsyncMock, patch
 from click.testing import CliRunner
 
 from openbrowser.cli import main
-from openbrowser.search import SearchError, SearchResult
+from openbrowser.web_search import WebSearchError, WebSearchResult
 
 
 def _results():
     return [
-        SearchResult("OpenBrowser Docs", "https://docs.example/", "Search preview only."),
-        SearchResult("Python Docs", "https://python.example/", "Another preview."),
+        WebSearchResult("OpenBrowser Docs", "https://docs.example/", "Search preview only."),
+        WebSearchResult("Python Docs", "https://python.example/", "Another preview."),
     ]
 
 
-def test_search_prints_compact_table_and_does_not_start_browser(monkeypatch):
-    monkeypatch.setattr("openbrowser.search.search", lambda *_args, **_kwargs: _results())
+def test_web_search_prints_compact_table_and_does_not_start_browser(monkeypatch):
+    monkeypatch.setattr("openbrowser.web_search.web_search", lambda *_args, **_kwargs: _results())
     with patch("openbrowser.browser.BrowserSession.start", new_callable=AsyncMock) as start:
-        result = CliRunner().invoke(main, ["search", "browser automation"])
+        result = CliRunner().invoke(main, ["web-search", "browser automation"])
 
     assert result.exit_code == 0
     assert "Title" in result.output
@@ -32,16 +32,16 @@ def test_search_prints_compact_table_and_does_not_start_browser(monkeypatch):
     start.assert_not_awaited()
 
 
-def test_search_json_emits_result_array(monkeypatch):
-    monkeypatch.setattr("openbrowser.search.search", lambda *_args, **_kwargs: _results())
+def test_web_search_json_emits_result_array(monkeypatch):
+    monkeypatch.setattr("openbrowser.web_search.web_search", lambda *_args, **_kwargs: _results())
 
-    result = CliRunner().invoke(main, ["search", "browser automation", "--json"])
+    result = CliRunner().invoke(main, ["web-search", "browser automation", "--json"])
 
     assert result.exit_code == 0
     assert json.loads(result.output) == [item.as_dict() for item in _results()]
 
 
-def test_search_keeps_provider_logs_off_json_stdout(monkeypatch):
+def test_web_search_keeps_provider_logs_off_json_stdout(monkeypatch):
     root = logging.getLogger()
     original_handlers = root.handlers
     original_level = root.level
@@ -53,10 +53,10 @@ def test_search_keeps_provider_logs_off_json_stdout(monkeypatch):
         logging.getLogger("primp").info("provider diagnostic")
         return _results()
 
-    monkeypatch.setattr("openbrowser.search.search", noisy_search)
+    monkeypatch.setattr("openbrowser.web_search.web_search", noisy_search)
     monkeypatch.setattr("openbrowser.cli._quiet_stderr_logging", lambda: None)
     try:
-        result = CliRunner().invoke(main, ["search", "browser automation", "--json"])
+        result = CliRunner().invoke(main, ["web-search", "browser automation", "--json"])
     finally:
         root.handlers = original_handlers
         root.setLevel(original_level)
@@ -65,30 +65,30 @@ def test_search_keeps_provider_logs_off_json_stdout(monkeypatch):
     assert json.loads(result.output) == [item.as_dict() for item in _results()]
 
 
-def test_search_urls_only_emits_one_url_per_line(monkeypatch):
-    monkeypatch.setattr("openbrowser.search.search", lambda *_args, **_kwargs: _results())
+def test_web_search_urls_only_emits_one_url_per_line(monkeypatch):
+    monkeypatch.setattr("openbrowser.web_search.web_search", lambda *_args, **_kwargs: _results())
 
-    result = CliRunner().invoke(main, ["search", "browser automation", "--urls-only"])
+    result = CliRunner().invoke(main, ["web-search", "browser automation", "--urls-only"])
 
     assert result.exit_code == 0
     assert result.output.splitlines() == ["https://docs.example/", "https://python.example/"]
 
 
-def test_search_urls_only_can_write_scrape_input_file(monkeypatch, tmp_path):
+def test_web_search_urls_only_can_write_scrape_input_file(monkeypatch, tmp_path):
     destination = tmp_path / "search-urls.txt"
-    monkeypatch.setattr("openbrowser.search.search", lambda *_args, **_kwargs: _results())
+    monkeypatch.setattr("openbrowser.web_search.web_search", lambda *_args, **_kwargs: _results())
 
     result = CliRunner().invoke(
         main,
-        ["search", "browser automation", "--urls-only", "--output", str(destination)],
+        ["web-search", "browser automation", "--urls-only", "--output", str(destination)],
     )
 
     assert result.exit_code == 0
     assert destination.read_text(encoding="utf-8") == "https://docs.example/\nhttps://python.example/\n"
-    assert "Wrote search output" in result.output
+    assert "Wrote OpenBrowser web search output" in result.output
 
 
-def test_search_rejects_conflicting_output_modes_before_provider_call(monkeypatch):
+def test_web_search_rejects_conflicting_output_modes_before_provider_call(monkeypatch):
     called = False
 
     def fail_if_called(*_args, **_kwargs):
@@ -96,16 +96,16 @@ def test_search_rejects_conflicting_output_modes_before_provider_call(monkeypatc
         called = True
         return _results()
 
-    monkeypatch.setattr("openbrowser.search.search", fail_if_called)
+    monkeypatch.setattr("openbrowser.web_search.web_search", fail_if_called)
 
-    result = CliRunner().invoke(main, ["search", "query", "--json", "--urls-only"])
+    result = CliRunner().invoke(main, ["web-search", "query", "--json", "--urls-only"])
 
     assert result.exit_code == 2
     assert "cannot be used together" in result.output
     assert called is False
 
 
-def test_search_passes_options_to_package_api(monkeypatch):
+def test_web_search_passes_options_to_package_api(monkeypatch):
     received = {}
 
     def fake_search(query, **kwargs):
@@ -113,7 +113,7 @@ def test_search_passes_options_to_package_api(monkeypatch):
         received.update(kwargs)
         return _results()
 
-    monkeypatch.setattr("openbrowser.search.search", fake_search)
+    monkeypatch.setattr("openbrowser.web_search.web_search", fake_search)
 
     result = CliRunner().invoke(
         main,
@@ -145,25 +145,36 @@ def test_search_passes_options_to_package_api(monkeypatch):
     }
 
 
-def test_search_provider_error_has_actionable_cli_message(monkeypatch):
+def test_web_search_provider_error_has_actionable_cli_message(monkeypatch):
     def fail(*_args, **_kwargs):
-        raise SearchError("Use browser search as fallback.", attempts=3)
+        raise WebSearchError("Use browser search as fallback.", attempts=3)
 
-    monkeypatch.setattr("openbrowser.search.search", fail)
+    monkeypatch.setattr("openbrowser.web_search.web_search", fail)
 
-    result = CliRunner().invoke(main, ["search", "query"])
+    result = CliRunner().invoke(main, ["web-search", "query"])
 
     assert result.exit_code == 1
     assert "Use browser search as fallback." in result.output
 
 
-def test_search_empty_results_keep_json_and_urls_output_well_formed(monkeypatch):
-    monkeypatch.setattr("openbrowser.search.search", lambda *_args, **_kwargs: [])
+def test_web_search_empty_results_keep_json_and_urls_output_well_formed(monkeypatch):
+    monkeypatch.setattr("openbrowser.web_search.web_search", lambda *_args, **_kwargs: [])
 
-    json_result = CliRunner().invoke(main, ["search", "query", "--json"])
-    urls_result = CliRunner().invoke(main, ["search", "query", "--urls-only"])
+    json_result = CliRunner().invoke(main, ["web-search", "query", "--json"])
+    urls_result = CliRunner().invoke(main, ["web-search", "query", "--urls-only"])
 
     assert json_result.exit_code == 0
     assert json.loads(json_result.output) == []
     assert urls_result.exit_code == 0
     assert urls_result.output == ""
+
+
+def test_web_search_command_is_visible_and_search_alias_still_works(monkeypatch):
+    monkeypatch.setattr("openbrowser.web_search.web_search", lambda *_args, **_kwargs: _results())
+    runner = CliRunner()
+    help_result = runner.invoke(main, ["--help"])
+    assert help_result.exit_code == 0
+    assert "web-search" in help_result.output
+    alias_result = runner.invoke(main, ["search", "browser automation"])
+    assert alias_result.exit_code == 0
+    assert "OpenBrowser Docs" in alias_result.output

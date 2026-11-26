@@ -60,7 +60,7 @@ class ExtractAction(BaseModel):
 	)
 
 
-class SearchAction(BaseModel):
+class BrowserWebSearchAction(BaseModel):
 	query: str
 	engine: str = Field(
 		default='duckduckgo', description='duckduckgo, google, bing (use duckduckgo by default because less captchas)'
@@ -68,7 +68,7 @@ class SearchAction(BaseModel):
 
 
 # Backward compatibility alias
-SearchAction = SearchAction
+SearchAction = BrowserWebSearchAction
 
 
 class NavigateAction(BaseModel):

@@ -64,7 +64,7 @@ async def main():
 
 ## 3. Important Notes
 
-- **Not Playwright**: Actor is built on CDP, not Playwright. The API resembles Playwright as much as possible for easy migration, but is sorta subset.
+- **Built on CDP**: Actor uses CDP. The API resembles Playwright to ease migration and is a subset.
 - **Immediate Returns**: `get_elements_by_css_selector()` doesn't wait for visibility
 - **Manual Timing**: You handle navigation timing and waiting
 - **JavaScript Format**: `evaluate()` requires arrow function format: `() => {}`

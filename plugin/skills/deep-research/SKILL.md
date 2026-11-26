@@ -161,15 +161,22 @@ EOF
 
 ### 2.2. Step 0.5 -- Run `/search` to discover sources
 
-Run this step after Step 0 for `/search`, web search, or source-discovery requests. Use the run directory from Step 0. The search command calls the package-native DDGS client at `openbrowser.search`. It does not start Chromium and it is not a shell call to a `ddgs` CLI.
+Run this step after Step 0 for `/search`, web search, or source-discovery requests. Use the run directory from Step 0. The search command calls the package-native DDGS client at `openbrowser.web_search`. It runs in-process with the package DDGS client and starts no Chromium.
 
 Set `SEARCH_QUERY` to the user's exact query. Do not install DDGS separately.
+
+Use the canonical `web-search` command when the installed CLI provides it. Fall back to `search` only for releases that predate the canonical name, such as PyPI `0.1.60`. To install the canonical CLI from source, run `uv tool install --force "openbrowser-ai @ git+https://github.com/billy-enrizky/openbrowser-ai.git@main"`. To run it once without changing the installed CLI, use `uvx --from git+https://github.com/billy-enrizky/openbrowser-ai.git@main openbrowser-ai web-search "OpenBrowser MCP docs"`.
 
 ```bash
 . "<RUN_ENV_FILE>"
 SEARCH_QUERY="<USER_QUERY>"
-SEARCH_RESULTS="$DEEP_RESEARCH_RUN_DIR/search-results.json"
-SEARCH_URLS="$DEEP_RESEARCH_RUN_DIR/search-urls.txt"
+if openbrowser-ai web-search --help >/dev/null 2>&1; then
+    OPENBROWSER_WEB_SEARCH=(openbrowser-ai web-search)
+else
+    OPENBROWSER_WEB_SEARCH=(openbrowser-ai search)
+fi
+SEARCH_RESULTS="$DEEP_RESEARCH_RUN_DIR/web-search-results.json"
+SEARCH_URLS="$DEEP_RESEARCH_RUN_DIR/web-search-urls.txt"
 SCRAPE_JSONL="$DEEP_RESEARCH_RUN_DIR/scraped-pages.jsonl"
 : > "$SEARCH_RESULTS"
 : > "$SEARCH_URLS"
@@ -180,7 +187,7 @@ if [ -z "$SEARCH_QUERY" ]; then
     exit 1
 fi
 
-if openbrowser-ai search "$SEARCH_QUERY" --max-results 10 --json --output "$SEARCH_RESULTS"; then
+if "${OPENBROWSER_WEB_SEARCH[@]}" "$SEARCH_QUERY" --max-results 10 --json --output "$SEARCH_RESULTS"; then
     if python3 - "$SEARCH_RESULTS" "$SEARCH_URLS" <<'PYTHON'
 import json
 import sys
@@ -206,34 +213,34 @@ PYTHON
             if openbrowser-ai scrape --urls-file "$SEARCH_URLS" --no-browser --output "$SCRAPE_JSONL" --output-format jsonl; then
                 echo "Scraped search results. Read successful page content before citing it."
             else
-                echo "Native scraping failed. Continue with browser search in Step 2a."
+                echo "Native scraping failed. Continue with browser navigation in Step 2a."
             fi
         else
-            echo "Native search returned no results. Continue with browser search in Step 2a."
+            echo "OpenBrowser web search returned no results. Continue with browser navigation in Step 2a."
         fi
     else
         printf '[]\n' > "$SEARCH_RESULTS"
         : > "$SEARCH_URLS"
-        echo "Native search output was invalid. Continue with browser search in Step 2a."
+        echo "OpenBrowser web search output was invalid. Continue with browser navigation in Step 2a."
     fi
 else
     printf '[]\n' > "$SEARCH_RESULTS"
     : > "$SEARCH_URLS"
-    echo "Native search failed. Continue with browser search in Step 2a."
+    echo "OpenBrowser web search failed. Continue with browser navigation in Step 2a."
 fi
 ```
 
 The search JSON contains `title`, `url`, and `snippet` fields. The URL file contains up to five result URLs in provider order. OpenBrowser removes duplicate and non-HTTP URLs before it writes the JSON.
 
-`openbrowser-ai scrape --no-browser` uses OpenBrowser no-browser mode for the selected URLs. It starts no Chrome, Blink, or V8 process, never falls back to a browser, and cannot run JavaScript, take screenshots, or use browser cookies. A JavaScript-only page is recorded as a failure, and the workflow continues with browser search in Step 2a.
+`openbrowser-ai scrape --no-browser` uses OpenBrowser no-browser mode for the selected URLs. It starts no Chrome, Blink, or V8 process, never falls back to a browser, and cannot run JavaScript, take screenshots, or use browser cookies. A JavaScript-only page is recorded as a failure, and the workflow continues with browser navigation in Step 2a.
 
-Search snippets do not count as evidence. Do not cite them. Read the scraped `content` field and cite its page URL. If native search fails or returns no results, use the Google search in Step 2a. The package retries provider failures twice with short backoff. It retries a no-results response once. Two consecutive no-results responses produce an empty list.
+Search snippets are discovery previews. Do not cite them. Read the scraped `content` field and cite its page URL. If OpenBrowser web search fails or returns no results, use the Google search in Step 2a. The package retries provider failures twice with short backoff. It retries a no-results response once. Two consecutive no-results responses produce an empty list.
 
-The search backend lives in the package at `openbrowser.search`, so `openbrowser-ai search` and the CodeAgent `search_web()` helper use the same provider path. Nothing is installed at run time.
+The search backend lives in the package at `openbrowser.web_search`, so `openbrowser-ai web-search` and the CodeAgent `web_search()` helper use the same provider path. Nothing is installed at run time.
 
-In a CodeAgent context, run the same flow with package functions: `await search_web(query)` calls `openbrowser.search`, then `await search_and_scrape(query)` or `await scrape_pages(urls, engine='http')` scrapes the selected URLs. `engine='http'` is OpenBrowser no-browser mode. Read the returned page content, then write the cited report. Do not cite search snippets.
+In a CodeAgent context, run the same flow with package functions: `await web_search(query)` calls `openbrowser.web_search`, then `await web_search_and_scrape(query)` or `await scrape_pages(urls, engine='http')` scrapes the selected URLs. `engine='http'` is OpenBrowser no-browser mode. Read the returned page content, then write the cited report with that content.
 
-When a source is a documentation site or a wiki rather than a single page, discover its pages before scraping. This does not start a browser:
+When a source is a documentation site or a wiki, discover its pages before scraping. This does not start a browser:
 
 ```bash
 openbrowser-ai map https://docs.example.com --max-urls 50 --include '/guide/'
@@ -349,12 +356,12 @@ Agent index: <AGENT_INDEX>
 Project root: <PROJECT_ROOT>
 Deep-research run directory: <DEEP_RESEARCH_RUN_DIR>
 
-Native search seeds:
+OpenBrowser web search seeds:
 
 - Read successful rows from `<DEEP_RESEARCH_RUN_DIR>/scraped-pages.jsonl` before Google search.
 - Use only rows where `ok` is true and `content` is non-empty.
 - Use page `content` as evidence. Cite the row's `url`.
-- Use `search-results.json` only to find URLs. Do not cite its `snippet` values.
+- Use `web-search-results.json` only to find URLs. Do not cite its `snippet` values.
 - If the files are missing or no page is relevant, continue with Google search.
 
 Hard constraints:
@@ -828,7 +835,7 @@ fi
 - **Heredoc quoting:** always use `<<'EOF'` (single-quoted) so `$`, backticks, and `!` inside Python don't expand in the shell.
 - **Daemon namespace:** `_plan`, `_findings`, `_sources` persist across orchestrator `-c` calls. Sub-agents share the same daemon and so see the same namespace, but each operates in its own tab. Don't restart the daemon mid-run.
 - **Partial files as the contract:** sub-agents write to `$DEEP_RESEARCH_PARTIAL_DIR/agent-NN.json`, the orchestrator reads them back. Sub-agents do NOT communicate findings via stdout. If a partial file is missing or empty, that sub-agent failed; rerun it or fall through to Step 2b.
-- **`exact_url` normalization:** sub-agents may write `exact_url` instead of `url`. All merge steps (Step 2a, 2b, 3) normalize this automatically. Step 4 has a final safety pass. Never rely on `url` being set before the merge step runs.
+- **`exact_url` normalization:** the merge accepts `exact_url` as an alias for `url`. All merge steps (Step 2a, 2b, 3) normalize this automatically. Step 4 has a final safety pass. Never rely on `url` being set before the merge step runs.
 - **Daemon restart recovery:** if the daemon restarts mid-session, `_plan`/`_findings`/`_sources` are lost from namespace. Partial JSON files under `$DEEP_RESEARCH_PARTIAL_DIR` survive. Source the same run environment and re-run the Step 2a merge block. Re-run Step 1 with the same `QUERY` and project root to restore `_plan`; the slug-collision bump avoids overwriting the existing output file.
 - **No `-p`, ever:** this skill never shells out to `openbrowser-ai -p`. The `-p` mode runs the full Browser Agent loop with LLM-driven navigation and requires an OpenAI / Anthropic / Google API key. The `-c` daemon path needs no API key. If you see `-p` anywhere in skill code, that is a bug.
 - **Source diversity:** if dedup leaves <60% of findings (heavy domain repetition), rerun the affected sub-agent with explicit "prefer different domains than: <list>" appended to its prompt.
@@ -873,5 +880,5 @@ Anti-patterns:
 
 - Do NOT `daemon stop` when reusing an existing session; that kills the user's open tabs.
 - Do NOT rely on the 600s idle timeout; that wastes a Chrome process for 10 minutes.
-- Do NOT use `done()` as a substitute; it only ends the agent loop, browser stays open.
-- Do NOT mix `--mcp` mode with the daemon in one workflow; they have separate persistent namespaces and browser profiles.
+- Use `done()` only to end the agent loop. The browser stays open; stop the daemon to close it.
+- Run `--mcp` mode and the daemon in separate workflows. They have separate persistent namespaces and browser profiles.

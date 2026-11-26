@@ -2404,8 +2404,9 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 		action_model = self.ActionModel
 		for action_dict in actions:
 			# Each action_dict should have a single key-value pair
-			action_name = next(iter(action_dict))
-			params = action_dict[action_name]
+			action_key = next(iter(action_dict))
+			action_name = self.tools.registry.resolve_action_name(action_key)
+			params = action_dict[action_key]
 
 			# Get the parameter model for this action from registry
 			action_info = self.tools.registry.registry.actions[action_name]

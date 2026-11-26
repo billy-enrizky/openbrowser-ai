@@ -17,7 +17,7 @@ Run the same navigation, JavaScript input assignment, and POST through OpenBrows
 
 Use Python 3.12 or later. The coordinator and each worker need `psutil` and `websockets>=15.0.1`. The OpenBrowser worker also needs the selected source revision's dependencies. Use an existing environment or prepare an isolated environment before measurement. The script never installs packages or downloads browsers.
 
-The adapter versions used for the 2026-11-15 diagnostic were Lightpanda `1.0.4`, agent-browser `0.43.0`, browser-use `1.0.5`, and browser-harness `0.1.13`. That run is historical. The checked-in example pin uses browser-use `1.0.6`. A pinned run must refresh the pin from official metadata before anyone calls the result current. The browser-use adapter uses the `Browser('chromium')` API introduced in 1.0.5, not the older `BrowserSession` API. A later incompatible API fails startup rather than silently removing the arm.
+The adapter versions used for the 2026-11-15 diagnostic were Lightpanda `1.0.4`, agent-browser `0.43.0`, browser-use `1.0.5`, and browser-harness `0.1.13`. That run is historical. The checked-in example pin uses browser-use `1.0.6`. A pinned run must refresh the pin from official metadata before anyone calls the result current. The browser-use adapter uses the `Browser('chromium')` API introduced in 1.0.5. A later incompatible API fails startup.
 
 To prepare a separate browser-use environment, run these commands outside the measurement. The 2026-11-15 historical run used browser-use 1.0.5; to rebuild that historical environment, replace `browser-use==1.0.6` with `browser-use==1.0.5` in the command below. The current example pin uses 1.0.6.
 
@@ -64,7 +64,7 @@ A pinned run requires `--pins` with a canonical pin file:
 }
 ```
 
-Every pin has a `version`, except OpenBrowser, which must use a `source_commit` prefix. An installed-package version is not accepted for OpenBrowser, because the worker imports the selected source tree. Chrome is a shared pin for every Chrome-based arm. A pinned run requires `captured_utc` in the pin file, exact version-token matches rather than substring matches, and a verified clean OpenBrowser source tree for a pinned OpenBrowser run. The commit prefix must be at least seven characters. The harness retains the raw pin file, its SHA-256, the recorded executable and package versions, and the verification result. A pin only proves that the run matches the recorded versions. It does not prove that those versions are still the latest. Refresh the pin file from official metadata before a pinned run, and check the pins before calling the result current.
+Every pin has a `version`, except OpenBrowser, which must use a `source_commit` prefix. OpenBrowser uses a `source_commit` prefix, because the worker imports the selected source tree. Chrome is a shared pin for every Chrome-based arm. A pinned run requires `captured_utc` in the pin file, exact version-token matches, and a verified clean OpenBrowser source tree for a pinned OpenBrowser run. The commit prefix must be at least seven characters. The harness retains the raw pin file, its SHA-256, the recorded executable and package versions, and the verification result. A pin only proves that the run matches the recorded versions. It does not prove that those versions are still the latest. Refresh the pin file from official metadata before a pinned run, and check the pins before calling the result current.
 
 A pinned run:
 
@@ -98,9 +98,9 @@ Set `RESULTS` to a results parent directory. Each output directory must be new. 
 
 Every executable variable also has a CLI option. Use `--source`, `--openbrowser-python`, `--chrome`, `--lightpanda`, `--agent-browser`, and `--browser-use-python` to override the corresponding environment variable.
 
-All five arms are requested by default. Missing optional tools are recorded as `unavailable`, with zero successes and no latency value. They make the run and verification exit with code 1. An installed tool that fails startup is recorded as `failed`. Its unexecuted samples remain `not_run`, not successes. Invalid configuration exits with code 2.
+All five arms are requested by default. Missing optional tools are recorded as `unavailable`, with zero successes and no latency value. They make the run and verification exit with code 1. An installed tool that fails startup is recorded as `failed`. Its unexecuted samples remain `not_run`. Invalid configuration exits with code 2.
 
-To test only OpenBrowser and raw CDP, add `--arms raw-cdp openbrowser`. This produces a two-arm result, not a five-arm comparison. For a smoke check, use `--samples 1`. Use at least five samples per workload and arm before interpreting latency. The pure contract tests require no browsers:
+To test only OpenBrowser and raw CDP, add `--arms raw-cdp openbrowser`. This produces a two-arm result. For a smoke check, use `--samples 1`. Use at least five samples per workload and arm before interpreting latency. The pure contract tests require no browsers:
 
 ```sh
 uv run --no-sync --offline pytest tests/test_navigation_benchmark.py -q
@@ -120,9 +120,9 @@ The timed interval includes all of this work:
 4. Recheck the final document and retained input value.
 5. Read the loopback server's audit snapshot and assert one successful document response, one POST response, and the delayed script response when required. Each required request must begin and finish inside the timed interval.
 
-Assertions finish before the timer stops. The server audit and final observation add work beyond navigation latency. Later settling cannot repair a failed sample. A final server snapshot also detects duplicate side effects after a sample returns. Startup, warmup, ownership scans, and shutdown are outside measured latency. The input operation is DOM assignment, not keyboard input.
+Assertions finish before the timer stops. The server audit and final observation add work beyond navigation latency. Later settling cannot repair a failed sample. A final server snapshot also detects duplicate side effects after a sample returns. Startup, warmup, ownership scans, and shutdown are outside measured latency. The input operation is DOM assignment.
 
-`results.json` retains integer nanoseconds, observations, failures, timeout flags, server timestamps, source manifests, runtime versions, executable hashes, load averages, and process ownership. Load averages are `null` when the platform has no load-average API or the operating system reports that the value is unavailable. `samples.jsonl` retains each immediate trial result. `results.json` contains the final server snapshots. `sha256.json` covers the result files and worker logs. The verifier checks hashes, measured-attempt accounting, workload assertions, source stability, and recorded cleanup identities. It does not establish a browser engine's CPU limiter or authenticate a third-party release digest.
+`results.json` retains integer nanoseconds, observations, failures, timeout flags, server timestamps, source manifests, runtime versions, executable hashes, load averages, and process ownership. Load averages are `null` when the platform has no load-average API or the operating system reports that the value is unavailable. `samples.jsonl` retains each immediate trial result. `results.json` contains the final server snapshots. `sha256.json` covers the result files and worker logs. The verifier checks hashes, measured-attempt accounting, workload assertions, source stability, and recorded cleanup identities. Browser-engine CPU limiting and third-party release authentication sit outside its scope.
 
 Each workload summary separates `expected`, `attempted`, `successful`, `failures`, `timeouts`, `unavailable`, and `not_run`. Timeouts are a subset of failures. Successful samples alone enter the median and range. Failures remain in the attempted denominator. Missing samples prevent successful verification.
 
@@ -142,6 +142,6 @@ The adapters do not have the same engine, IPC cost, or wait policy:
 
 The Chrome executable and mock-keychain isolation flag are shared across the Chrome arms. Other library launch defaults are not forced into one common configuration. Effective command lines remain in the ownership records. The deferred-script workload avoids making rendering-engine image support a prerequisite.
 
-The script labels cross-tool performance inconclusive. No universal winner follows from these numbers. This is the `native-navigation` lane only. It does not measure CodeAgent task success, MCP tool behavior, CLI or daemon behavior, agent framework behavior, cold-start latency, public-site compatibility, or production behavior. It is not a basis for a comparison-page update. Each result records `claim_scope` with those unmeasured surfaces. Record unrelated host load, profile the limiter in a separate untimed diagnostic, and alternate source revisions for a before-and-after claim.
+The script labels cross-tool performance inconclusive. No universal winner follows from these numbers. This is the `native-navigation` lane only. Its scope covers navigation latency. CodeAgent task success, MCP tool behavior, CLI or daemon behavior, agent framework behavior, cold-start latency, public-site compatibility, and production behavior belong to other lanes. Each result records `claim_scope` with those surfaces. Record unrelated host load, profile the limiter in a separate untimed diagnostic, and alternate source revisions for a before-and-after claim.
 
-Compare only records with identical claim scope, harness revision, and timer boundaries. Smoke checks are not timing evidence.
+Compare only records with identical claim scope, harness revision, and timer boundaries. Smoke checks validate plumbing. Use at least five samples for timing evidence.

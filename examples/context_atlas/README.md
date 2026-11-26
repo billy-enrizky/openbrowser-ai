@@ -33,7 +33,7 @@ search.
 
 ## 2. Run the separate localhost page
 
-The localhost page is a companion workspace, not the page being searched. The
+The localhost page is a companion workspace beside the page being searched. The
 extension panel stays on the current webpage while the companion page remains
 open in its own tab.
 

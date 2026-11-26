@@ -48,7 +48,7 @@ mode: "wide"
 
 ## 2. Run Lifecycle
 
-`code_agent.status` returns a `CodeAgentRunStatus` snapshot. Read it instead of inferring state from logs:
+`code_agent.status` returns a `CodeAgentRunStatus` snapshot. Read the snapshot directly:
 
 - `phase`: `idle`, `starting`, `running`, `executing`, `validating`, `succeeded`, `failed`, `max_steps`, or `cancelled`
 - `terminal`: `true` only for `succeeded`, `failed`, `max_steps`, or `cancelled`
@@ -62,6 +62,6 @@ A caller cancellation does not prove that the worker stopped. Inspect `status` a
 
 ## 3. Browser Ownership
 
-CodeAgent does not rebuild a caller-provided `BrowserSession` and does not transfer its Python namespace. If the browser fails, inspect `status`, rebuild the browser, and create a new CodeAgent. Namespace transfer with scalar-only preservation applies to MCP context recovery, not to a local CodeAgent run.
+CodeAgent does not rebuild a caller-provided `BrowserSession` and does not transfer its Python namespace. If the browser fails, inspect `status`, rebuild the browser, and create a new CodeAgent. Namespace transfer with scalar-only preservation applies to MCP context recovery. A local CodeAgent run keeps its own Python namespace.
 
 `download_file`, `wait_for_download`, `download_outcomes`, `download_failures`, and `list_downloads` are available in the execution namespace. Start `wait_for_download` before the click that triggers a download. A `download_ref` resolves only in the attached session's live download registry; after the session stops or is replaced, read the completed history instead.

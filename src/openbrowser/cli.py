@@ -1128,7 +1128,7 @@ def _quiet_stderr_logging() -> None:
 		logger_obj.propagate = False
 
 
-def _render_search_table(results: list[Any]) -> str:
+def _render_web_search_table(results: list[Any]) -> str:
 	"""Render search results as a plain-text table."""
 	from io import StringIO
 
@@ -1162,29 +1162,47 @@ def _render_search_table(results: list[Any]) -> str:
 	return buffer.getvalue()
 
 
-@main.command(name='search')
-@click.argument("query")
-@click.option(
-	"--max-results",
-	type=click.IntRange(min=1),
-	default=5,
-	show_default=True,
-	help="Maximum results to return. Values above 20 are capped at 20.",
+_WEB_SEARCH_OPTIONS = (
+	click.argument("query"),
+	click.option(
+		"--max-results",
+		type=click.IntRange(min=1),
+		default=5,
+		show_default=True,
+		help="Maximum OpenBrowser web search results to return. Values above 20 are capped at 20.",
+	),
+	click.option(
+		"--backend",
+		default="auto",
+		show_default=True,
+		help="DDGS backend or comma-delimited backends for OpenBrowser web search.",
+	),
+	click.option("--region", default="us-en", show_default=True, help="OpenBrowser web search region."),
+	click.option(
+		"--safe-search",
+		type=click.Choice(["on", "moderate", "off"]),
+		default="moderate",
+		show_default=True,
+		help="Safe search level for OpenBrowser web search.",
+	),
+	click.option(
+		"--timelimit",
+		type=str,
+		help="Limit OpenBrowser web search results by age, for example d, w, m, or y.",
+	),
+	click.option("--json", "as_json", is_flag=True, help="Print a JSON array of OpenBrowser web search results."),
+	click.option("--urls-only", is_flag=True, help="Print one OpenBrowser web search result URL per line."),
+	click.option("--output", type=click.Path(dir_okay=False), help="Write OpenBrowser web search output to a file."),
 )
-@click.option("--backend", default="auto", show_default=True, help="DDGS backend or comma-delimited backends.")
-@click.option("--region", default="us-en", show_default=True, help="Search region.")
-@click.option(
-	"--safe-search",
-	type=click.Choice(["on", "moderate", "off"]),
-	default="moderate",
-	show_default=True,
-	help="Safe search level.",
-)
-@click.option("--timelimit", type=str, help="Limit results by age, for example d, w, m, or y.")
-@click.option("--json", "as_json", is_flag=True, help="Print a JSON array of search results.")
-@click.option("--urls-only", is_flag=True, help="Print one result URL per line.")
-@click.option("--output", type=click.Path(dir_okay=False), help="Write output to a file.")
-def source_discovery_command(
+
+
+def _web_search_options(func):
+	for decorator in _WEB_SEARCH_OPTIONS:
+		func = decorator(func)
+	return func
+
+
+def _run_web_search(
 	query: str,
 	max_results: int,
 	backend: str,
@@ -1195,7 +1213,7 @@ def source_discovery_command(
 	urls_only: bool,
 	output: str | None,
 ) -> None:
-	"""Search the web. Scrape and read source pages before citing results."""
+	"""Run OpenBrowser web search. Read source pages before citing."""
 	import json
 	from pathlib import Path
 
@@ -1207,11 +1225,10 @@ def source_discovery_command(
 	setup_logging(stream=sys.stderr, log_level='critical', force_setup=True)
 	_quiet_stderr_logging()
 
-	from openbrowser.search import SearchError
-	from openbrowser.search import search as search_web
+	from openbrowser.web_search import WebSearchError, web_search
 
 	try:
-		results = search_web(
+		results = web_search(
 			query,
 			max_results=max_results,
 			backend=backend,
@@ -1219,7 +1236,7 @@ def source_discovery_command(
 			safe_search=safe_search,
 			timelimit=timelimit,
 		)
-	except SearchError as error:
+	except WebSearchError as error:
 		raise click.ClickException(str(error)) from error
 	except (TypeError, ValueError) as error:
 		raise click.BadParameter(str(error)) from error
@@ -1229,17 +1246,51 @@ def source_discovery_command(
 	elif urls_only:
 		rendered = "\n".join(result.url for result in results)
 	else:
-		rendered = _render_search_table(results) if results else "No search results."
+		rendered = _render_web_search_table(results) if results else "No OpenBrowser web search results."
 
 	if output:
 		path = Path(output)
 		try:
 			path.write_text(rendered + ("" if not rendered or rendered.endswith("\n") else "\n"), encoding="utf-8")
 		except OSError as error:
-			raise click.ClickException(f"Could not write search output to {path}: {error}") from error
-		click.echo(f"Wrote search output to {path}", err=True)
+			raise click.ClickException(f"Could not write OpenBrowser web search output to {path}: {error}") from error
+		click.echo(f"Wrote OpenBrowser web search output to {path}", err=True)
 	elif rendered:
 		click.echo(rendered, nl=not rendered.endswith("\n"))
+
+
+@main.command(name="web-search")
+@_web_search_options
+def web_search_command(
+	query: str,
+	max_results: int,
+	backend: str,
+	region: str,
+	safe_search: Literal['on', 'moderate', 'off'],
+	timelimit: str | None,
+	as_json: bool,
+	urls_only: bool,
+	output: str | None,
+) -> None:
+	"""Run OpenBrowser web search. Read source pages before citing."""
+	_run_web_search(query, max_results, backend, region, safe_search, timelimit, as_json, urls_only, output)
+
+
+@main.command(name="search", hidden=True)
+@_web_search_options
+def search_compat_command(
+	query: str,
+	max_results: int,
+	backend: str,
+	region: str,
+	safe_search: Literal['on', 'moderate', 'off'],
+	timelimit: str | None,
+	as_json: bool,
+	urls_only: bool,
+	output: str | None,
+) -> None:
+	"""Deprecated alias for web-search."""
+	_run_web_search(query, max_results, backend, region, safe_search, timelimit, as_json, urls_only, output)
 
 
 @main.command()

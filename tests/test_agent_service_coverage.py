@@ -121,6 +121,16 @@ def _make_mock_tools():
     registry.get_prompt_description = MagicMock(return_value=None)
     registry.registry = MagicMock()
     registry.registry.actions = {}
+
+    def _resolve_action_name(name):
+        if name in registry.registry.actions:
+            return name
+        canonical = "browser_web_search" if name == "search" else name
+        if canonical in registry.registry.actions:
+            return canonical
+        return name
+
+    registry.resolve_action_name = MagicMock(side_effect=_resolve_action_name)
     tools.registry = registry
     return tools
 
@@ -633,6 +643,63 @@ class TestAgentInit:
         actions = [{"navigate": {"url": "https://example.com", "new_tab": False}}]
         result = agent._convert_initial_actions(actions)
         assert len(result) == 1
+
+    def test_convert_initial_actions_maps_legacy_search_to_browser_web_search(self):
+        agent = self._create_agent()
+
+        class BrowserWebSearchParams(BaseModel):
+            query: str
+            engine: str = "duckduckgo"
+
+        ActionModelWithBrowserSearch = create_model(
+            "ActionModelWithBrowserSearch",
+            __base__=_get_action_model_base(),
+            browser_web_search=(BrowserWebSearchParams | None, None),
+            done=(dict | None, None),
+        )
+        agent.ActionModel = ActionModelWithBrowserSearch
+
+        action_info = MagicMock()
+        action_info.param_model = BrowserWebSearchParams
+        agent.tools.registry.registry.actions = {"browser_web_search": action_info}
+
+        actions = [{"search": {"query": "legacy query", "engine": "google"}}]
+        result = agent._convert_initial_actions(actions)
+        dumped = result[0].model_dump(exclude_unset=True)
+        assert dumped["browser_web_search"] == {"query": "legacy query", "engine": "google"}
+
+    def test_convert_initial_actions_keeps_registered_custom_search(self):
+        agent = self._create_agent()
+
+        class CustomSearchParams(BaseModel):
+            term: str
+
+        class BrowserWebSearchParams(BaseModel):
+            query: str
+            engine: str = "duckduckgo"
+
+        ActionModelWithCustomSearch = create_model(
+            "ActionModelWithCustomSearch",
+            __base__=_get_action_model_base(),
+            search=(CustomSearchParams | None, None),
+            browser_web_search=(BrowserWebSearchParams | None, None),
+            done=(dict | None, None),
+        )
+        agent.ActionModel = ActionModelWithCustomSearch
+
+        custom_info = MagicMock()
+        custom_info.param_model = CustomSearchParams
+        browser_info = MagicMock()
+        browser_info.param_model = BrowserWebSearchParams
+        agent.tools.registry.registry.actions = {
+            "search": custom_info,
+            "browser_web_search": browser_info,
+        }
+
+        actions = [{"search": {"term": "custom query"}}]
+        result = agent._convert_initial_actions(actions)
+        dumped = result[0].model_dump(exclude_unset=True)
+        assert dumped["search"] == {"term": "custom query"}
 
     def test_verify_and_setup_llm_already_verified(self):
         agent = self._create_agent()

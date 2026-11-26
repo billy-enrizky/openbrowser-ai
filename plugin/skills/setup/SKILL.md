@@ -35,7 +35,7 @@ Use this skill once per machine or project. It installs the CLI and browser, con
 - Prefer `uv`, then `pipx`, then `pip`.
 - Python 3.12 or newer is required.
 - Use `openbrowser-ai -c` for CLI verification and `openbrowser-ai --mcp` for the installed MCP server.
-- For stateful MCP calls, create a context and pass its `context_id`. Call `close_context` when finished. The stateless `search_web` tool needs no context and does not start a browser.
+- For stateful MCP calls, create a context and pass its `context_id`. Call `close_context` when finished. The stateless `web_search` tool needs no context and does not start a browser.
 - Verify with a temporary socket and profile. Never stop a user daemon that this setup did not start.
 - Do not install optional provider packages unless the user wants that provider.
 
@@ -43,16 +43,16 @@ Use this skill once per machine or project. It installs the CLI and browser, con
 
 ```bash
 openbrowser-ai --version 2>/dev/null || true
-openbrowser-ai search --help 2>/dev/null || true
+openbrowser-ai web-search --help 2>/dev/null || openbrowser-ai search --help 2>/dev/null || true
 command -v uv || true
 command -v pipx || true
 python3 --version || python --version
 ```
 
-Run `openbrowser-ai search --help`. This shows whether the installed CLI has native search.
-If it succeeds, skip only the CLI upgrade commands in Step 2.
+Run `openbrowser-ai web-search --help`. This shows whether the installed CLI has native web search. If the canonical command fails but `openbrowser-ai search --help` succeeds, the installed release predates the canonical name. Use `search` for that install, or install from source to use `web-search`.
+If either command succeeds, skip only the CLI upgrade commands in Step 2.
 Always run `openbrowser-ai install` to repair Chromium.
-If it fails, upgrade the CLI.
+If both commands fail, upgrade the CLI.
 If Python is below 3.12, install a supported Python. Then repeat this step.
 
 ## 3. Step 2 -- Install or upgrade OpenBrowser
@@ -100,16 +100,18 @@ openbrowser-ai install
 
 ### 3.1. Native web search
 
-The base OpenBrowser package includes the DDGS client at `openbrowser.search`. Do not install DDGS separately and do not shell out to a `ddgs` CLI. The `search` command does not start a browser.
+The base OpenBrowser package includes the DDGS client at `openbrowser.web_search`. Do not install DDGS separately and do not shell out to a `ddgs` CLI. The `web-search` command does not start a browser.
+
+The canonical `web-search` command is on the current source branch. PyPI `0.1.60` exposes the same feature as `openbrowser-ai search`. To install the canonical CLI from source, run `uv tool install --force "openbrowser-ai @ git+https://github.com/billy-enrizky/openbrowser-ai.git@main"`. To run it once without changing the installed CLI, use `uvx --from git+https://github.com/billy-enrizky/openbrowser-ai.git@main openbrowser-ai web-search "OpenBrowser MCP docs"`.
 
 ```bash
-openbrowser-ai search "OpenBrowser MCP docs"
-openbrowser-ai search "OpenBrowser MCP docs" --json --output search-results.json
-openbrowser-ai search "OpenBrowser MCP docs" --urls-only --output search-urls.txt
-openbrowser-ai scrape --urls-file search-urls.txt --no-browser --output scraped-pages.jsonl --output-format jsonl
+openbrowser-ai web-search "OpenBrowser MCP docs"
+openbrowser-ai web-search "OpenBrowser MCP docs" --json --output web-search-results.json
+openbrowser-ai web-search "OpenBrowser MCP docs" --urls-only --output web-search-urls.txt
+openbrowser-ai scrape --urls-file web-search-urls.txt --no-browser --output scraped-pages.jsonl --output-format jsonl
 ```
 
-Search snippets do not count as evidence. Scrape and read the source page before citing it. The package caps `max_results` at 20.
+Search snippets are discovery previews. Scrape and read the source page before citing it. The package caps `max_results` at 20.
 
 `--no-browser` is OpenBrowser no-browser mode. It starts no Chrome, Blink, or V8 process, never falls back to a browser, and cannot run JavaScript, take screenshots, or use browser cookies. Use the default `auto` engine or `--engine browser` when a page needs JavaScript.
 
@@ -144,7 +146,7 @@ MCP and `openbrowser-ai -c` do not need an LLM key. Do not print the value.
 
 ## 5. Step 4 -- Configure MCP
 
-The installed server command is `openbrowser-ai --mcp`. The zero-install form is `uvx openbrowser-ai --mcp`. The default stdio transport is a lean JSON-RPC loop that answers discovery and `tools/list` before it imports the MCP SDK. Set `OPENBROWSER_MCP_TRANSPORT=sdk` to use the MCP SDK 2.3 escape hatch. Invalid values exit with code 2. Modern `2026-07-28` clients see seven tools: `create_context`, `execute_code`, `get_status`, `reset_browser`, `close_context`, `search_web`, and `scrape_web`. The legacy handshakes `2024-11-05`, `2025-03-26`, `2025-06-18`, and `2025-11-25` see four tools: `execute_code`, `get_status`, `reset_browser`, and `search_web`. Both catalogs include stateless `search_web`. The modern catalog adds stateless `scrape_web`, which fetches one HTTP(S) page in OpenBrowser no-browser mode: it starts no Chrome, Blink, or V8 process and cannot run JavaScript, take screenshots, or use browser cookies. Neither stateless tool needs a `context_id` or starts a browser. Use the handle returned by `create_context` for stateful calls.
+The installed server command is `openbrowser-ai --mcp`. The zero-install form is `uvx openbrowser-ai --mcp`. The default stdio transport is a lean JSON-RPC loop that answers discovery and `tools/list` before it imports the MCP SDK. Set `OPENBROWSER_MCP_TRANSPORT=sdk` to use the MCP SDK 2.3 escape hatch. Invalid values exit with code 2. Modern `2026-07-28` clients see seven tools: `create_context`, `execute_code`, `get_status`, `reset_browser`, `close_context`, `web_search`, and `scrape_web`. The legacy handshakes `2024-11-05`, `2025-03-26`, `2025-06-18`, and `2025-11-25` see four tools: `execute_code`, `get_status`, `reset_browser`, and `web_search`. Both catalogs include stateless `web_search`. The modern catalog adds stateless `scrape_web`, which fetches one HTTP(S) page in OpenBrowser no-browser mode: it starts no Chrome, Blink, or V8 process and stays on the HTTP path. JavaScript, screenshots, and browser cookies are unavailable on this path. Neither stateless tool needs a `context_id` or starts a browser. Use the handle returned by `create_context` for stateful calls. The current source server also accepts `search_web` as a call alias. The published `0.1.60` package advertises and accepts `search_web`; the current source server uses `web_search`. Update the installed server or run it from source to see `web_search`.
 
 Add it to the agent's native MCP configuration.
 

@@ -32,7 +32,7 @@ Measure OpenBrowser render modes on deterministic local pages. No external netwo
 - The memory lane is from 2026-11-25. The Firecrawl Local and Lightpanda reference lanes are from 2026-11-24.
 - No AWS or cloud browser was used.
 - The brief does not report host load for these scraping lanes. Historical sections state their own recorded load where available.
-- Published Lightpanda and Firecrawl figures are non-comparable context, not measurements from this run.
+- Published Lightpanda and Firecrawl figures provide context and come from other measurement scopes.
 
 ## 2. Current results, 2026-11-25, and reference lanes
 
@@ -57,7 +57,7 @@ Raw evidence:
 
 Chart: [native-mcp-http-memory-2026-11-25.png](https://github.com/billy-enrizky/openbrowser-ai/blob/main/docs/images/native-mcp-http-memory-2026-11-25.png). The chart has been regenerated from the same artifact with these medians and is labeled `Lower is better ↓` for memory. It shows only OpenBrowser process-tree RSS and does not overlay Lightpanda or Firecrawl.
 
-Non-comparable published context, not measured in this run and not a direct win claim:
+Published context from other measurement scopes:
 
 - Lightpanda: 21.2 MB for one automation page, and 123 MB PSS for 25 parallel crawler processes on Ubuntu AWS.
 - Firecrawl Local static: about 155 MiB in an earlier local measurement with a different process boundary.
@@ -68,7 +68,7 @@ Scope rules:
 
 - Our numbers are process-tree RSS in MiB, divided by 1048576. RSS can count shared pages more than once. RSS and PSS are not directly comparable.
 - Our 25-call number is one server process that handles 25 concurrent calls. Lightpanda's 123 MB is PSS for 25 separate processes crawling 933 pages on Ubuntu AWS.
-- The lane uses one local static fixture, not the live web.
+- The lane uses one local static fixture.
 - The Python MCP server process and any observed descendants are included.
 - The no-browser mode cannot execute JavaScript, take screenshots, or use browser cookies.
 - State our numbers only as OpenBrowser process-tree RSS for this local fixture.
@@ -123,7 +123,7 @@ All 100 runs passed.
 
 Chart: [native-lightpanda-current-p50.png](https://github.com/billy-enrizky/openbrowser-ai/blob/main/docs/images/native-lightpanda-current-p50.png). The chart is labeled `Lower is better ↓` for latency.
 
-Caveat: Lightpanda starts one process per sample, so its startup dominates static tasks. Use the ordering, not the absolute Lightpanda value. OpenBrowser no-render keeps Blink and V8 and blocks CSS, images, fonts, and media. It is not the same engine as Lightpanda.
+Caveat: Lightpanda starts one process per sample, so its startup dominates static tasks. Use the ordering across arms. Read the Lightpanda absolute value within its per-sample startup scope. OpenBrowser no-render keeps Blink and V8 and blocks CSS, images, fonts, and media. Lightpanda uses its own engine.
 
 Raw evidence:
 
@@ -154,7 +154,7 @@ falls back to Chromium when the page is a thin JavaScript shell.
 | `asset_heavy` | 20 images, 2 stylesheets, a web font, and 20 JavaScript-rendered headlines |
 
 The fixture server records every request and response body size. Correctness is
-checked before latency counts. A failed run is a failure, not a fast success.
+checked before latency counts. A failed run counts as a failure.
 
 ## 5. Run
 
@@ -271,7 +271,7 @@ blocked page.
 - Firecrawl Local skips the `json` format and ignores `actions`. Every Firecrawl
   task therefore returns markdown, while the OpenBrowser arms can return
   structured JSON rows for `js_list`, `pagination`, and `table`. Output bytes are
-  the bytes each tool returned, not a normalized artifact.
+  the raw bytes each tool returned.
 
 ### 7.3. Correctness oracles
 
@@ -287,17 +287,16 @@ The oracle is exact for every task and runs before latency counts.
 
 ### 7.4. Limits for this lane
 
-- This is Firecrawl Local 0.1.1, not Firecrawl Cloud. It has no `json` or
+- This is Firecrawl Local 0.1.1. It has no `json` or
   `summary` format, no screenshots without Chrome, no page actions, and
   in-memory crawl jobs. Do not compare these numbers to Cloud latency.
 - `serve` refuses loopback and private targets unless `--allow-private` is set.
   The harness sets it for the fixture only.
 - Ten samples on a shared host are a smoke-scale result. Sub 10 ms ratios are
-  order-of-magnitude values, not stable rankings.
+  order-of-magnitude values.
 - Local fixtures do not cover anti-bot behavior, real login providers, or live
   sites.
-- Do not claim a universal Firecrawl win or a universal OpenBrowser win from
-  this lane. Report the split.
+- Report the split on each task. Scope every claim to the measured task.
 
 ## 8. Limits
 
@@ -308,8 +307,8 @@ The oracle is exact for every task and runs before latency counts.
 - The HTTP path strips scripts before extraction. A browser page with a
   trivial script but substantial server text correctly uses the HTTP path.
 - `no-render` still runs Blink layout internally. It disables screenshots and
-  visual-only actions, not layout. Do not claim Lightpanda-level memory or
-  startup.
+  visual-only actions while Blink layout continues. Do not claim Lightpanda-level
+  memory or startup.
 - The latency lanes do not measure peak RSS or CPU. Use the resource lane and
   the 2026-11-25 MCP memory lane for memory results, and state their process
   boundaries before comparing them.

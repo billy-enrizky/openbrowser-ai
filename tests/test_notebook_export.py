@@ -212,7 +212,13 @@ def session_to_python_script(agent):
     lines.append('\tclick = namespace["click"]\n')
     lines.append('\tinput_text = namespace["input"]\n')
     lines.append('\tevaluate = namespace["evaluate"]\n')
-    lines.append('\tsearch = namespace["search"]\n')
+    lines.append('\tweb_search = namespace["web_search"]\n')
+    lines.append('\tweb_search_and_scrape = namespace["web_search_and_scrape"]\n')
+    lines.append('\tsearch_web = namespace["search_web"]\n')
+    lines.append('\tsearch_and_scrape = namespace["search_and_scrape"]\n')
+    lines.append('\tif "browser_web_search" in namespace:\n')
+    lines.append('\t\tbrowser_web_search = namespace["browser_web_search"]\n')
+    lines.append('\t\tsearch = browser_web_search\n')
     lines.append('\textract = namespace["extract"]\n')
     lines.append('\tscroll = namespace["scroll"]\n')
     lines.append('\tdone = namespace["done"]\n')
@@ -498,7 +504,10 @@ class TestSessionToPythonScript:
             "click",
             "input_text",
             "evaluate",
-            "search",
+            "web_search",
+            "web_search_and_scrape",
+            "search_web",
+            "search_and_scrape",
             "extract",
             "scroll",
             "done",
@@ -516,6 +525,8 @@ class TestSessionToPythonScript:
 
         for func in expected_functions:
             assert func in script
+        assert 'if "browser_web_search" in namespace:' in script
+        assert 'if "browser_web_search" in namespace:' in script
 
     def test_empty_session_script(self) -> None:
         """Test script generation for empty session."""

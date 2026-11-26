@@ -50,7 +50,7 @@ def test_comparison_page_has_current_sections_only():
         '5. Other native local lanes, 2026-11-24',
         '6. How to choose a surface',
         '7. What these lanes show',
-        '8. What this page does not measure',
+        '8. Scope and open measurements',
     ]
 
 
@@ -132,7 +132,7 @@ def test_cli_comparison_route_redirects_to_comparison():
 
 def test_comparison_page_does_not_claim_a_universal_winner():
     page = _page('comparison.mdx')
-    assert 'No universal winner is claimed' in page
+    assert 'Every result is scoped to the listed tasks and surfaces' in page
     assert 'navigation_compare' not in page
     assert 'navigation_results' not in page
 

@@ -44,13 +44,13 @@ Without `timeout_ms`, the deadline uses the event timeout: 15 seconds by default
 
 The public method refuses overlapping requests with `NavigationBusyError` and propagates caller cancellation to the request owner. It never retries a navigation automatically. Raw event dispatch keeps the event bus's queue semantics; cancelling a raw event waiter alone does not cancel its handler.
 
-Read `session.lifecycle_snapshot()["navigation"]` for the active or last operation. A terminal phase is `succeeded`, `download`, `failed`, `timed_out`, or `cancelled`. A download phase acknowledges a handoff, not a completed file or loaded document. `NavigationFinishedEvent` reports the correlated outcome; legacy `NavigationCompleteEvent` remains an observation also used for focus and PDF discovery. Terminal status delivery is not durable across event-bus shutdown.
+Read `session.lifecycle_snapshot()["navigation"]` for the active or last operation. A terminal phase is `succeeded`, `download`, `failed`, `timed_out`, or `cancelled`. A download phase acknowledges a handoff. The file and the document load are separate states. `NavigationFinishedEvent` reports the correlated outcome; legacy `NavigationCompleteEvent` remains an observation also used for focus and PDF discovery. Terminal status delivery is not durable across event-bus shutdown.
 
-Requested URLs are checked before navigation. While a request owns its captured target, policy also checks observed top-level commits independently of acknowledgment and document readiness. A forbidden committed document triggers conditional, document-bound containment to `about:blank`, even when a resource stalls. This is not a network filter or a continuous watcher after request retirement.
+Requested URLs are checked before navigation. While a request owns its captured target, policy also checks observed top-level commits independently of acknowledgment and document readiness. A forbidden committed document triggers conditional, document-bound containment to `about:blank`, even when a resource stalls. This is a document containment check that runs during an active request.
 
 `navigation.containment` reports cleanup separately from the primary navigation outcome. Timeout or cancellation does not discard a security action that might already have been sent. Preparation has a one-second deadline. After the action acknowledges initiation, verification uses a separate one-second polling deadline and one-second bounds on each CDP frame read. These are not a total cleanup timeout. An already-sent action can outlive those waits and remains tracked. `contained` means verification observed `about:blank`.
 
-If sent authority remains unconfirmed, the runtime stays failed and refuses replacement. Inspect status before retrying. To recover, close the actual browser and create a new `BrowserSession`. `kill()` can verify the exit of a managed local browser. A lost remote connection does not prove that the remote browser exited. If delayed cleanup is later verified, only its own unchanged lifecycle failure can move to `degraded`, not `ready`; explicit recovery is then available.
+If sent authority remains unconfirmed, the runtime stays failed and refuses replacement. Inspect status before retrying. To recover, close the actual browser and create a new `BrowserSession`. `kill()` can verify the exit of a managed local browser. A lost remote connection does not prove that the remote browser exited. If delayed cleanup is later verified, only its own unchanged lifecycle failure can move it to `degraded`. `ready` requires explicit recovery.
 
 ## 3. Display & Appearance
 
@@ -83,7 +83,7 @@ If sent authority remains unconfirmed, the runtime stays failed and refuses repl
 
 ## 5. User Data & Profiles
 
-- `user_data_dir` (default: auto-generated temp): Directory for browser profile data. `None` creates a throwaway temporary profile directory with `tempfile.mkdtemp`, not Chrome incognito mode.
+- `user_data_dir` (default: auto-generated temp): Directory for browser profile data. `None` creates a regular Chrome profile in a throwaway directory with `tempfile.mkdtemp`.
 - `profile_directory` (default: `'Default'`): Chrome profile subdirectory name (`'Profile 1'`, `'Work Profile'`, etc.)
 - `storage_state`: Browser storage state (cookies, localStorage). Can be file path string or dict object
 
@@ -123,7 +123,7 @@ If sent authority remains unconfirmed, the runtime stays failed and refuses repl
 
 - `accept_downloads` (default: `True`): Automatically accept all downloads
 - `downloads_path` (default: unique `/tmp/openbrowser-downloads-<id>`): Directory for downloaded files. Use a string like `'./downloads'` or a `Path` object.
-- `auto_download_pdfs` (default: `True`): Automatically download PDFs instead of viewing in browser
+- `auto_download_pdfs` (default: `True`): Download PDFs automatically.
 
 ## 11. Device Emulation
 

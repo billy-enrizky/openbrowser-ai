@@ -162,7 +162,7 @@ async def test_real_entrypoint_modern_first_catalog_and_status_without_handshake
             "get_status",
             "reset_browser",
             "close_context",
-            "search_web",
+            "web_search",
             "scrape_web",
         ]
         identity = catalog["_meta"]["io.modelcontextprotocol/serverInfo"]
@@ -723,7 +723,7 @@ async def test_exact_catalog_input_contracts_and_annotations(monkeypatch):
         "get_status",
         "reset_browser",
         "close_context",
-        "search_web",
+        "web_search",
         "scrape_web",
     ]
     create, execute, status, reset, close, search_tool, scrape_tool = catalog.tools
@@ -848,7 +848,7 @@ async def test_exact_catalog_input_contracts_and_annotations(monkeypatch):
         "additionalProperties": False,
     }
     assert "context_id" not in search_tool.input_schema["properties"]
-    assert "Snippets do not count as evidence." in search_tool.description
+    assert "Snippets are discovery previews." in search_tool.description
     assert [tool.annotations.model_dump(by_alias=True, exclude_none=True) for tool in catalog.tools] == [
         {
             "readOnlyHint": False,
@@ -899,7 +899,7 @@ async def test_exact_catalog_input_contracts_and_annotations(monkeypatch):
         "execute_code",
         "get_status",
         "reset_browser",
-        "search_web",
+        "web_search",
     ]
     legacy_execute, legacy_status, legacy_reset, legacy_search = legacy.tools
     assert "context_id" not in legacy_search.input_schema["properties"]
@@ -1461,7 +1461,7 @@ async def test_all_allowlisted_legacy_versions_keep_four_tools(tmp_path, version
             "execute_code",
             "get_status",
             "reset_browser",
-            "search_web",
+            "web_search",
         ]
         status_tool = next(tool for tool in catalog["tools"] if tool["name"] == "get_status")
         assert "does not start a browser or probe CDP health" in status_tool["description"]

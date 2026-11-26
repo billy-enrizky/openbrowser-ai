@@ -194,7 +194,7 @@ AWS_SECRET_ACCESS_KEY=
 AWS_DEFAULT_REGION=us-east-1
 ```
 
-You can also use AWS profiles or IAM roles instead of environment variables. The implementation supports:
+You can also use AWS profiles or IAM roles. The implementation supports:
 
 - Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION`)
 - AWS profiles and credential files
@@ -277,7 +277,7 @@ llm = ChatOllama(model="llama3.1:8b")
 ## 10. Qwen [example](https://github.com/billy-enrizky/openbrowser-ai/blob/main/examples/models/qwen.py)
 
 Currently, only `qwen-vl-max` is recommended for OpenBrowser. Other Qwen models, including `qwen-max`, have issues with the action schema format.
-Smaller Qwen models may return incorrect action schema formats (e.g., `actions: [{"navigate": "google.com"}]` instead of `[{"navigate": {"url": "google.com"}}]`). If you want to use other models, add concrete examples of the correct action format to your prompt.
+Smaller Qwen models may return incorrect action schema formats, such as `actions: [{"navigate": "google.com"}]`. The correct format is `[{"navigate": {"url": "google.com"}}]`. If you want to use other models, add concrete examples of the correct action format to your prompt.
 
 ```python
 from openbrowser import Agent, ChatOpenAI

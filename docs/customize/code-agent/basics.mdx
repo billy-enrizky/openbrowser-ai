@@ -121,15 +121,15 @@ The agent has access to browser control functions:
 - `download_file`, `wait_for_download`, `download_outcomes`, `download_failures`, `list_downloads` - Download helpers
 - `scrape_page`, `scrape_pages` - Deterministic scraping without an LLM. `scrape_page` handles one URL. `scrape_pages` runs HTTP requests concurrently and browser fallbacks sequentially. Pass `engine='http'` for a static batch that must not start a browser.
 - `click_selector`, `fill_selector`, `wait_for_selector`, `click_selector_and_wait_for_new_tab` - CSS fast paths that skip the browser state summary when a stable selector is available.
-- `search_web(query, max_results=5, backend='auto', region='us-en', safe_search='moderate', timelimit=None)` - Search with DDGS and return title, URL, and snippet fields.
-- `search_and_scrape(query, max_results=5, concurrency=4, format='markdown', ...)` - Search, then scrape result URLs through `scrape_pages`.
+- `web_search(query, max_results=5, backend='auto', region='us-en', safe_search='moderate', timelimit=None)` - Search with DDGS and return title, URL, and snippet fields.
+- `web_search_and_scrape(query, max_results=5, concurrency=4, format='markdown', ...)` - Search, then scrape result URLs through `scrape_pages`.
 - `done(text, success, files_to_display=[])` - Mark task complete
 
-Search snippets do not count as evidence. Read each scraped page before you cite it. The package caps `max_results` at 20. Set `engine='http'` to prevent browser fallback. The CLI's explicit `--engine http` path uses a light console entry and starts no browser.
+Search snippets are discovery previews. Read each scraped page before you cite it. The package caps `max_results` at 20. Set `engine='http'` to prevent browser fallback. The CLI's explicit `--engine http` path uses a light console entry and starts no browser.
 
-CodeAgent excludes the Agent-only actions `extract`, `find_text`, `screenshot`, and `search`, plus the file-system tools. Use `search_web` for provider-backed search. Use `evaluate` and `browser.get_browser_state_summary()` for page extraction and inspection.
+CodeAgent excludes the Agent-only actions `extract`, `find_text`, `screenshot`, and `browser_web_search`, plus the file-system tools. Use `web_search` for provider-backed search. Use `evaluate` and `browser.get_browser_state_summary()` for page extraction and inspection.
 
-Prefer indexed actions whenever an element index exists. The `*_xy` coordinates are CSS viewport pixels, not screenshot pixels. If a screenshot uses a `devicePixelRatio` other than 1, divide its coordinates by `window.devicePixelRatio` first.
+Prefer indexed actions whenever an element index exists. The `*_xy` coordinates are CSS viewport pixels. If a screenshot uses a `devicePixelRatio` other than 1, divide its coordinates by `window.devicePixelRatio` first.
 
 ## 5. Exporting Sessions
 
@@ -165,7 +165,7 @@ Both formats include:
 
 ## 6. Run lifecycle and cancellation
 
-`agent.status` returns a `CodeAgentRunStatus`. Use it instead of inferring state from logs:
+`agent.status` returns a `CodeAgentRunStatus`. Read the snapshot directly:
 
 - `phase`: `idle`, `starting`, `running`, `executing`, `validating`, `succeeded`, `failed`, `max_steps`, or `cancelled`
 - `terminal`: `true` only for `succeeded`, `failed`, `max_steps`, or `cancelled`

@@ -33,11 +33,11 @@ SERP_API_KEY = os.getenv('SERPER_API_KEY')
 if not SERP_API_KEY:
 	raise ValueError('SERPER_API_KEY is not set')
 
-tools = Tools(exclude_actions=['search'], output_model=PersonList)
+tools = Tools(exclude_actions=['browser_web_search'], output_model=PersonList)
 
 
 @tools.registry.action('Search the web for a specific query. Returns a short description and links of the results.')
-async def search_web(query: str):
+async def web_search(query: str):
 	# do a serp search for the query
 	conn = http.client.HTTPSConnection('google.serper.dev')
 	payload = json.dumps({'q': query})
@@ -90,7 +90,7 @@ names = [
 
 
 async def main():
-	task = 'use search_web with "find email address of the following ETH professor:" for each of the following persons in a list of actions. Finally return the list with name and email if provided - do always 5 at once'
+	task = 'use web_search with "find email address of the following ETH professor:" for each of the following persons in a list of actions. Finally return the list with name and email if provided - do always 5 at once'
 	task += '\n' + '\n'.join(names)
 	model = ChatOpenAI(model='gpt-4.1-mini')
 	browser_profile = BrowserProfile()

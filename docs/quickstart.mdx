@@ -118,11 +118,15 @@ To get started with OpenBrowser you need to install the package and set up an AP
 
 ## 2. Try it without an LLM
 
-Search and scrape work immediately. Neither command needs an API key.
+OpenBrowser web search and scrape work immediately. Neither command needs an API key.
+
+<Note>
+The canonical `web-search` command, `openbrowser.web_search` module, and MCP `web_search` tool are on the current source branch. PyPI `0.1.60` exposes the same feature as `openbrowser-ai search`, `openbrowser.search`, and MCP `search_web`. To install the canonical CLI from source, run `uv tool install --force "openbrowser-ai @ git+https://github.com/billy-enrizky/openbrowser-ai.git@main"`. To run it once without changing the installed CLI, use `uvx --from git+https://github.com/billy-enrizky/openbrowser-ai.git@main openbrowser-ai web-search "OpenBrowser MCP docs"`.
+</Note>
 
 ```bash
-# Search with the package-native DDGS client. This does not start a browser.
-openbrowser-ai search "OpenBrowser MCP docs" --max-results 5
+# Run OpenBrowser web search with the package-native DDGS client. This does not start a browser.
+openbrowser-ai web-search "OpenBrowser MCP docs" --max-results 5
 
 # OpenBrowser no-browser mode: no Chrome, Blink, or V8 process.
 openbrowser-ai scrape https://example.com --no-browser --format markdown
@@ -131,9 +135,9 @@ openbrowser-ai scrape https://example.com --no-browser --format markdown
 openbrowser-ai scrape https://a.example https://b.example --no-browser --jsonl --concurrency 8
 ```
 
-Search snippets are not evidence. Scrape and read the source page before you cite it.
+Search snippets are discovery previews. Scrape and read the source page before you cite it.
 
-`--no-browser` starts no Chrome, Blink, or V8 process, never falls back to a browser, and cannot run JavaScript, take screenshots, or use browser cookies. The asset flags `--no-css`, `--no-images`, `--no-fonts`, `--no-media`, and `--render-mode` control the browser fallback, not the no-browser HTTP path. Use the default `auto` engine when a page may need JavaScript.
+`--no-browser` starts no Chrome, Blink, or V8 process and stays on the HTTP path. JavaScript, screenshots, and browser cookies are unavailable on this path. The asset flags `--no-css`, `--no-images`, `--no-fonts`, `--no-media`, and `--render-mode` control the browser fallback and leave the no-browser HTTP path unchanged. Use the default `auto` engine when a page may need JavaScript.
 
 ## 3. Choose your favorite LLM
 Create a `.env` file and add your API key.
@@ -243,7 +247,7 @@ The portable MCP server command is:
 uvx openbrowser-ai --mcp
 ```
 
-Modern `2026-07-28` clients see seven tools: `create_context`, `execute_code`, `get_status`, `reset_browser`, `close_context`, `search_web`, and `scrape_web`. The legacy handshakes `2024-11-05`, `2025-03-26`, `2025-06-18`, and `2025-11-25` see four tools: `execute_code`, `get_status`, `reset_browser`, and `search_web`. `scrape_web` is stateless and uses OpenBrowser no-browser mode: it starts no Chrome, Blink, or V8 process and cannot run JavaScript, take screenshots, or use browser cookies.
+Modern `2026-07-28` clients see seven tools: `create_context`, `execute_code`, `get_status`, `reset_browser`, `close_context`, `web_search`, and `scrape_web`. The legacy handshakes `2024-11-05`, `2025-03-26`, `2025-06-18`, and `2025-11-25` see four tools: `execute_code`, `get_status`, `reset_browser`, and `web_search`. `scrape_web` is stateless and uses OpenBrowser no-browser mode: it starts no Chrome, Blink, or V8 process and cannot run JavaScript, take screenshots, or use browser cookies.
 
 This uses the lean stdio transport by default. Set `OPENBROWSER_MCP_TRANSPORT=sdk` to opt into the MCP SDK transport. Invalid values exit with code 2.
 

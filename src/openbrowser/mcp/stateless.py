@@ -11,12 +11,14 @@ from .catalog import load_tool_definitions
 if TYPE_CHECKING:
     from .schema import CompiledSchema
 
-STATELESS_TOOL_NAMES = frozenset({"search_web", "scrape_web"})
+STATELESS_TOOL_NAMES = frozenset({"web_search", "search_web", "scrape_web"})
+_CANONICAL_TOOL_NAMES = {"search_web": "web_search"}
 
 
 @lru_cache(maxsize=2)
 def _compiled_schema(name: str) -> CompiledSchema:
     """Compile the advertised schema once without importing jsonschema."""
+    name = _CANONICAL_TOOL_NAMES.get(name, name)
     from .schema import compile_schema
 
     for tool in load_tool_definitions(modern=True):
@@ -40,11 +42,11 @@ def _json_error(error: str, message: str) -> tuple[str, bool]:
     return json.dumps({"error": error, "message": message}, ensure_ascii=False), True
 
 
-async def _search_web(arguments: dict[str, Any]) -> tuple[str, bool]:
-    from openbrowser.search import SearchError, asearch
+async def _web_search(arguments: dict[str, Any]) -> tuple[str, bool]:
+    from openbrowser.web_search import WebSearchError, aweb_search
 
     try:
-        results = await asearch(
+        results = await aweb_search(
             arguments["query"],
             max_results=arguments.get("max_results", 5),
             backend=arguments.get("backend", "auto"),
@@ -52,7 +54,7 @@ async def _search_web(arguments: dict[str, Any]) -> tuple[str, bool]:
             safe_search=arguments.get("safe_search", "moderate"),
             timelimit=arguments.get("timelimit"),
         )
-    except SearchError as error:
+    except WebSearchError as error:
         return _json_error("search_failed", str(error))
     except (TypeError, ValueError) as error:
         return _json_error("invalid_search_arguments", str(error))
@@ -95,6 +97,6 @@ async def execute_stateless_tool(name: str, arguments: dict[str, Any]) -> tuple[
     if name not in STATELESS_TOOL_NAMES:
         raise ValueError(f"Unknown stateless tool: {name}")
     validate_stateless_arguments(name, arguments)
-    if name == "search_web":
-        return await _search_web(arguments)
+    if name in {"web_search", "search_web"}:
+        return await _web_search(arguments)
     return await _scrape_web(arguments)

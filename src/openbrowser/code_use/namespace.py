@@ -1801,7 +1801,7 @@ def create_namespace(
 			complete.append(result)
 		return complete
 
-	async def search_web(
+	async def web_search(
 		query: str,
 		max_results: int = 5,
 		*,
@@ -1810,10 +1810,10 @@ def create_namespace(
 		safe_search: Literal['on', 'moderate', 'off'] = 'moderate',
 		timelimit: str | None = None,
 	) -> list[dict[str, str]]:
-		"""Search the web. Snippets are previews, not evidence."""
-		from openbrowser.search import asearch
+		"""Run OpenBrowser web search. Read source pages before citing."""
+		from openbrowser.web_search import aweb_search
 
-		results = await asearch(
+		results = await aweb_search(
 			query,
 			max_results=max_results,
 			backend=backend,
@@ -1823,7 +1823,7 @@ def create_namespace(
 		)
 		return [result.as_dict() for result in results]
 
-	async def search_and_scrape(
+	async def web_search_and_scrape(
 		query: str,
 		max_results: int = 5,
 		concurrency: int = 4,
@@ -1842,7 +1842,7 @@ def create_namespace(
 		engine: str = 'auto',
 	) -> dict[str, Any]:
 		"""Search and scrape each result through the namespace scraper."""
-		results = await search_web(
+		results = await web_search(
 			query,
 			max_results=max_results,
 			backend=backend,
@@ -1864,8 +1864,17 @@ def create_namespace(
 		)
 		return {
 			'query': query.strip(),
-			'search_results': results,
+			'web_search_results': results,
 			'page_results': page_results,
+		}
+
+	async def search_and_scrape(*args: Any, **kwargs: Any) -> dict[str, Any]:
+		"""Legacy alias that returns the historical ``search_results`` key."""
+		result = await web_search_and_scrape(*args, **kwargs)
+		return {
+			'query': result['query'],
+			'search_results': result['web_search_results'],
+			'page_results': result['page_results'],
 		}
 
 	async def map_urls(
@@ -1919,7 +1928,9 @@ def create_namespace(
 	namespace['scrape_page'] = scrape_page
 	namespace['scrape'] = scrape_page
 	namespace['scrape_pages'] = scrape_pages
-	namespace['search_web'] = search_web
+	namespace['web_search'] = web_search
+	namespace['web_search_and_scrape'] = web_search_and_scrape
+	namespace['search_web'] = web_search
 	namespace['search_and_scrape'] = search_and_scrape
 	namespace['map_urls'] = map_urls
 	namespace['crawl_site'] = crawl_site
