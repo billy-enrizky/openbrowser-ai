@@ -111,13 +111,26 @@ def test_openbrowser_warmup_parses_json():
         patch("benchmarks.interactive.adapters.openbrowser._write_config"),
         patch("benchmarks.interactive.adapters.openbrowser._env", return_value={}),
         patch(
+            "benchmarks.interactive.adapters.openbrowser.verify_mock_keychain",
+            return_value=True,
+        ),
+        patch(
+            "benchmarks.interactive.adapters.openbrowser.capture_launch_proof",
+            return_value=None,
+        ),
+        patch(
+            "benchmarks.interactive.adapters.openbrowser.read_pid_file",
+            return_value=None,
+        ),
+        patch(
             "benchmarks.interactive.adapters.openbrowser.run_process",
             return_value=(0, json.dumps(payload), "", 1.0),
         ),
     ):
         result, elapsed_ms = arm.warmup(_ctx())
 
-    assert result == payload
+    assert result["keychain_verified"] is True
+    assert {key: value for key, value in result.items() if key != "keychain_verified"} == payload
     assert elapsed_ms >= 0
 
 
@@ -297,6 +310,9 @@ def test_cli_warmup_writes_profile_before_starting_native_daemon(tmp_path, monke
         return 0, '{"ok":true}', "", 1.0
 
     monkeypatch.setattr(openbrowser, "run_process", run)
+    monkeypatch.setattr(openbrowser, "verify_mock_keychain", lambda marker: True)
+    monkeypatch.setattr(openbrowser, "read_pid_file", lambda path: None)
+    monkeypatch.setattr(openbrowser, "capture_launch_proof", lambda *args, **kwargs: None)
     payload, _ = arm.warmup(ctx)
     assert payload["ok"] is True
     assert calls == [["/fake/openbrowser", "warm"]]

@@ -20,6 +20,7 @@ from .base import (
     terminate_matching,
     verify_mock_keychain,
 )
+from .launch_proof import LaunchProof, capture_launch_proof, proof_status, read_pid_file
 
 HEADER = """
 import asyncio
@@ -392,6 +393,7 @@ class OpenBrowserArm:
         self.fast_selectors = fast_selectors
         self.name = "openbrowser-fast" if fast_selectors else "openbrowser"
         self._result = ArmResult(ok=False)
+        self._launch_proof: LaunchProof | None = None
 
     def _invoke(self, ctx: RunContext, code: str, timeout: float) -> tuple[int, str, str]:
         returncode, stdout, stderr, _elapsed = run_process(
@@ -419,6 +421,12 @@ class OpenBrowserArm:
                     continue
         return {}
 
+    def _keychain_profile(self, ctx: RunContext) -> str:
+        return str(ctx.config / "profiles" / "daemon")
+
+    def _server_pid(self, ctx: RunContext) -> int | None:
+        return read_pid_file(ctx.home / ".openbrowser" / "daemon.pid")
+
     def run(
         self,
         ctx: RunContext,
@@ -429,7 +437,21 @@ class OpenBrowserArm:
         self._result = ArmResult(ok=False)
         _write_config(ctx, extensions=self.extensions)
         url = ctx.base_url
+        proof = self._launch_proof
+        if ctx.task == "auth":
+            self._launch_proof = None
+            proof = None
         try:
+            if proof is not None:
+                before = proof_status(
+                    proof,
+                    profile_marker=self._keychain_profile(ctx),
+                    server_pid=self._server_pid(ctx),
+                    context_id=None,
+                )
+                if before != "valid":
+                    self._launch_proof = None
+                    raise RuntimeError(f"launch proof invalid before task: {before}")
             if ctx.task == "wizard":
                 program = _fast_wizard(url + "/wizard") if self.fast_selectors else _wizard(url + "/wizard")
                 self._invoke(ctx, program, 120)
@@ -450,7 +472,19 @@ class OpenBrowserArm:
                 self._invoke(ctx, _read_account(url + "/account"), 120)
             else:
                 raise ValueError(f"unknown task {ctx.task}")
-            verified = verify_mock_keychain(str(ctx.config / "profiles" / "daemon"))
+            if proof is not None:
+                after = proof_status(
+                    proof,
+                    profile_marker=self._keychain_profile(ctx),
+                    server_pid=self._server_pid(ctx),
+                    context_id=None,
+                )
+                if after != "valid":
+                    self._launch_proof = None
+                    raise RuntimeError(f"launch proof invalid after task: {after}")
+                verified = True
+            else:
+                verified = verify_mock_keychain(self._keychain_profile(ctx))
             self._result.keychain_verified = verified
             if verified is False:
                 raise RuntimeError("OpenBrowser Chrome launched without --use-mock-keychain")
@@ -466,6 +500,7 @@ class OpenBrowserArm:
 
     def warmup(self, ctx: RunContext) -> tuple[dict, float]:
         """Start the daemon and browser once and return its JSON plus wall time."""
+        self._launch_proof = None
         _write_config(ctx, extensions=self.extensions)
         started = time.monotonic()
         returncode, stdout, stderr, _elapsed = run_process(
@@ -480,10 +515,22 @@ class OpenBrowserArm:
             payload = json.loads(stdout)
         except json.JSONDecodeError as exc:
             raise RuntimeError(f"openbrowser-ai warm returned invalid JSON: {stdout[:600]}") from exc
+        profile_marker = self._keychain_profile(ctx)
+        verified = verify_mock_keychain(profile_marker)
+        payload["keychain_verified"] = verified
+        if verified is False:
+            raise RuntimeError("OpenBrowser Chrome launched without --use-mock-keychain")
+        self._launch_proof = capture_launch_proof(
+            profile_marker,
+            self._server_pid(ctx),
+            context_id=None,
+            keychain_verified=verified,
+        )
         return payload, elapsed_ms
 
     def _reset_browser(self, ctx: RunContext) -> None:
         """Use the native reset command to close the browser and retain the daemon."""
+        self._launch_proof = None
         returncode, stdout, stderr, _elapsed = run_process([self.binary, "daemon", "reset"], env=_env(ctx), timeout=60)
         self._result.process_starts += 1
         self._result.tool_calls += 1
@@ -500,6 +547,7 @@ class OpenBrowserArm:
             raise RuntimeError("daemon reset did not confirm the stopped browser phase")
 
     def _stop_daemon(self, ctx: RunContext) -> None:
+        self._launch_proof = None
         pid_file = ctx.home / ".openbrowser" / "daemon.pid"
         socket_file = ctx.home / ".openbrowser" / "daemon.sock"
         with contextlib.suppress(Exception):
@@ -518,6 +566,7 @@ class OpenBrowserArm:
         time.sleep(0.5)
 
     def cleanup(self, ctx: RunContext) -> None:
+        self._launch_proof = None
         with contextlib.suppress(Exception):
             run_process([self.binary, "daemon", "force-stop"], env=_env(ctx), timeout=30)
         kill_pidfile(ctx.home / ".openbrowser" / "daemon.pid")
