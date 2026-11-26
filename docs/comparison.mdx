@@ -15,7 +15,7 @@ icon: "scale-balanced"
     - [3.2.1. Paired results, 5 of 5](#321-paired-results-5-of-5)
     - [3.2.2. Why the MCP surface](#322-why-the-mcp-surface)
   - [3.3. Interactive resource lane](#33-interactive-resource-lane)
-- [4. OpenBrowser no-browser memory, 2026-11-25](#4-openbrowser-no-browser-memory-2026-11-25)
+- [4. OpenBrowser no-browser memory, 2026-11-26](#4-openbrowser-no-browser-memory-2026-11-26)
   - [4.1. Published context from other scopes](#41-published-context-from-other-scopes)
 - [5. Other native local lanes, 2026-11-24](#5-other-native-local-lanes-2026-11-24)
   - [5.1. Scraping latency against Firecrawl Local](#51-scraping-latency-against-firecrawl-local)
@@ -190,22 +190,22 @@ Raw data: [results-interactive-resources-2026-11-25-n5-final.jsonl](https://gith
 
 <a id="no-browser-memory"></a>
 
-## 4. OpenBrowser no-browser memory, 2026-11-25
+## 4. OpenBrowser no-browser memory, 2026-11-26
 
 Peak process-tree RSS (MiB) ↓ **Lower is better**.
 
-<img src="/images/native-mcp-http-memory-2026-11-25.png" alt="Bar chart of peak process-tree RSS in MiB for one scrape_web call and 25 concurrent scrape_web calls. Both use no browser process." />
+<img src="/images/native-mcp-http-memory-2026-11-26.png" alt="Bar chart of peak process-tree RSS in MiB for one scrape_web call and 25 concurrent scrape_web calls. Each series has five independent observations. Lower memory is better." />
 
 The `scrape_web` MCP tool runs without Chromium, Blink, or V8. It performs an HTTP fetch and parses the response. JavaScript, screenshots, and browser cookies are outside its scope, and it stays on the HTTP path. A page that needs JavaScript uses `execute_code` with a browser.
 
 Peak process-tree RSS (MiB) ↓ **Lower is better**.
 
-| Mode | Peak process-tree RSS | Browser processes | Correct results |
+| Mode | Peak process-tree RSS | Browser processes observed | Correct results |
 | --- | ---: | ---: | ---: |
-| One `scrape_web` call | 48.1 MiB median (47.55 to 50.17, N=5) | 0 | 5 of 5 |
-| 25 concurrent `scrape_web` calls | 62.4 MiB median (62.31 to 64.30, N=3) | 0 | 25 of 25 in 3 of 3 runs |
+| One `scrape_web` call | 46.188 MiB median (45.859 to 51.641, N=5) | 0 | 5 of 5 |
+| 25 concurrent `scrape_web` calls | 63.188 MiB median (60.781 to 65.250, N=5) | 0 | 25 of 25 in 5 of 5 runs |
 
-Sequential latency was 77 to 90 ms per call after discovery. The 25 concurrent calls completed in 155 to 169 ms. These timings are for one local static fixture and are not a general throughput claim.
+Each of the ten observations started a fresh MCP server. All 130 calls passed the exact content, truncation, length, and HTTP-engine checks. The chart reports sampled memory on one local fixture. The raw artifact records every observation, including both range endpoints.
 
 ### 4.1. Published context from other scopes
 
@@ -220,7 +220,7 @@ Our values are process-tree RSS in MiB, divided by 1048576. RSS can count shared
 
 This lane supports comparisons within one measurement scope. Read Lightpanda's 21.2 MB as published context from another scope.
 
-Raw data: [results-mcp-scrape-web-resource-2026-11-25-n5.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-mcp-scrape-web-resource-2026-11-25-n5.json).
+Raw data: [results-mcp-scrape-web-resource-2026-11-26-n5.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-mcp-scrape-web-resource-2026-11-26-n5.json). Build, source, and sampler details: [provenance](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-mcp-scrape-web-resource-2026-11-26-n5.provenance.json).
 
 ## 5. Other native local lanes, 2026-11-24
 
@@ -381,7 +381,7 @@ Task time and memory: **Lower is better** ↓. Pair counts: **Higher is better**
 | --- | --- | --- |
 | Cold interactive p50 | Both OpenBrowser arms are lowest on all five tasks against all three other frameworks. Both won 5 of 5 pairs on every task against every other framework. | Cleanup runs once after the timed interval for every arm. The timer excludes harness teardown. |
 | Warm interactive p50 | Both OpenBrowser arms are lowest on all four tasks against all three other frameworks. Both won 5 of 5 pairs on every task against every other framework. | `auth` is cold only because it restarts the browser. |
-| No-browser memory | One `scrape_web` call: 48.1 MiB median. 25 concurrent calls: 62.4 MiB median. Zero browser processes. | Process-tree RSS on one local fixture. Not comparable to Lightpanda PSS or the Firecrawl controller-inclusive figure. |
+| No-browser memory | One `scrape_web` call: 46.188 MiB median. 25 concurrent calls: 63.188 MiB median. N=5 per series. Zero browser processes observed. | Process-tree RSS on one local fixture. Lightpanda and Firecrawl figures have separate workloads and process boundaries. |
 | Interactive memory | Both OpenBrowser arms have the lowest child footprint, tree RSS, and median CPU on all five tasks in the N=5 resource lane. | All 150 eligible pairs won for footprint, RSS, and CPU. N=5 in every cell. |
 | Sequential scraping vs Firecrawl Local | 50 of 50 pairs. Lower p50 on all five tasks for both OpenBrowser arms. | Firecrawl Local only. Different output artifacts. |
 | Batch vs Firecrawl Local | 10 of 10 pairs. 2.834 ms against 13.448 ms p50. 4.75 times faster. | Firecrawl poll interval contributes. Different artifacts. |
