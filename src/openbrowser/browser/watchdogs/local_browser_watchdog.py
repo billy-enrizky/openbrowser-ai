@@ -125,7 +125,6 @@ class LocalBrowserWatchdog(BaseWatchdog):
 			# self.logger.debug('[LocalBrowserWatchdog] Calling _launch_browser...')
 			process, cdp_url = await self._launch_browser()
 			self._subprocess = process
-			# self.logger.debug(f'[LocalBrowserWatchdog] _launch_browser returned: process={process}, cdp_url={cdp_url}')
 
 			return BrowserLaunchResult(cdp_url=cdp_url)
 		except Exception as e:
@@ -242,14 +241,17 @@ class LocalBrowserWatchdog(BaseWatchdog):
 					]
 				)
 				assert '--user-data-dir' in str(launch_args), (
-					'User data dir must be set somewhere in launch args to a non-default path, otherwise Chrome will not let us attach via CDP'
+					'User data dir must be set somewhere in launch args to a non-default path, '
+					'otherwise Chrome will not let us attach via CDP'
 				)
 
 				# Get browser executable
 				# Priority: custom executable > fallback paths > playwright subprocess
 				if profile.executable_path:
 					browser_path = profile.executable_path
-					self.logger.debug(f'[LocalBrowserWatchdog] Using custom local browser executable_path= {browser_path}')
+					self.logger.debug(
+						f'[LocalBrowserWatchdog] Using custom local browser executable_path= {browser_path}'
+					)
 				else:
 					# Try fallback paths first (system browsers preferred)
 					browser_path = self._find_installed_browser_path(
@@ -261,18 +263,24 @@ class LocalBrowserWatchdog(BaseWatchdog):
 					)
 					if not browser_path:
 						self.logger.error(
-							'[LocalBrowserWatchdog] No local browser binary found, installing browser using playwright subprocess...'
+							'[LocalBrowserWatchdog] No local browser binary found, '
+							'installing browser using playwright subprocess...'
 						)
 						browser_path = await self._install_browser_with_playwright()
 
-				self.logger.debug(f'[LocalBrowserWatchdog] Found local browser installed at executable_path= {browser_path}')
+				self.logger.debug(
+					f'[LocalBrowserWatchdog] Found local browser installed at executable_path= {browser_path}'
+				)
 				if not browser_path:
 					raise RuntimeError('No local Chrome/Chromium install found, and failed to install with playwright')
 
 				# Launch browser subprocess directly
-				self.logger.debug(f'[LocalBrowserWatchdog] Launching browser subprocess with {len(launch_args)} args...')
 				self.logger.debug(
-					f'[LocalBrowserWatchdog] user_data_dir={profile.user_data_dir}, profile_directory={profile.profile_directory}'
+					f'[LocalBrowserWatchdog] Launching browser subprocess with {len(launch_args)} args...'
+				)
+				self.logger.debug(
+					f'[LocalBrowserWatchdog] user_data_dir={profile.user_data_dir}, '
+					f'profile_directory={profile.profile_directory}'
 				)
 				subprocess = await asyncio.create_subprocess_exec(
 					browser_path,
@@ -282,7 +290,8 @@ class LocalBrowserWatchdog(BaseWatchdog):
 				)
 				self._spawned_subprocess = subprocess
 				self.logger.debug(
-					f'[LocalBrowserWatchdog] Browser running with browser_pid= {subprocess.pid} listening on CDP port :{debug_port}'
+					f'[LocalBrowserWatchdog] Browser running with browser_pid= {subprocess.pid} '
+					f'listening on CDP port :{debug_port}'
 				)
 
 				# Convert to psutil.Process
@@ -629,7 +638,9 @@ class LocalBrowserWatchdog(BaseWatchdog):
 			browser_path = self._find_installed_browser_path()
 			if browser_path:
 				return browser_path
-			self.logger.error(f'[LocalBrowserWatchdog] ❌ Playwright local browser installation error: \n{stdout}\n{stderr}')
+			self.logger.error(
+			f'[LocalBrowserWatchdog] ❌ Playwright local browser installation error: \n{stdout}\n{stderr}'
+		)
 			raise RuntimeError('No local browser path found after: uvx playwright install chrome')
 		except TimeoutError:
 			# Kill the subprocess if it times out
@@ -833,11 +844,15 @@ class LocalBrowserWatchdog(BaseWatchdog):
 				root_exited = await LocalBrowserWatchdog._wait_for_process_exit(process)
 				if not LocalBrowserWatchdog._merge_owned_descendants(owned_children, browser_record):
 					return False
-				children_exited = await LocalBrowserWatchdog._cleanup_owned_descendants(owned_children, force_kill=False)
+				children_exited = await LocalBrowserWatchdog._cleanup_owned_descendants(
+					owned_children, force_kill=False
+				)
 				return root_exited and children_exited
 
 			# POSIX: give the owned browser its normal shutdown path first.
-			root_state = LocalBrowserWatchdog._recorded_process_state(process, browser_record) if browser_record else 'match'
+			root_state = (
+				LocalBrowserWatchdog._recorded_process_state(process, browser_record) if browser_record else 'match'
+			)
 			if root_state != 'match':
 				if root_state == 'gone' and browser_record:
 					if not LocalBrowserWatchdog._merge_owned_descendants(owned_children, browser_record):
@@ -1033,7 +1048,11 @@ class LocalBrowserWatchdog(BaseWatchdog):
 							if isinstance(item, dict) and item.get('id') is not None
 						}
 					else:
-						process_ids = {int(process_info['id'])} if isinstance(process_info, dict) and process_info.get('id') is not None else set()
+						process_ids = (
+						{int(process_info['id'])}
+						if isinstance(process_info, dict) and process_info.get('id') is not None
+						else set()
+					)
 					if payload.get('id') != request_id or int(expected_pid) not in process_ids:
 						return False
 				await websocket.send(json.dumps({'id': 2, 'method': 'Browser.close'}))
