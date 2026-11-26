@@ -18,6 +18,7 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import ExitStack
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -168,6 +169,12 @@ def _binary_version(binary: str) -> str:
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
+def _cleanup_warm_arm(arm: Any, ctx: RunContext, *, keep_runs: bool) -> None:
+    arm.cleanup(ctx)
+    if not keep_runs:
+        shutil.rmtree(ctx.root, ignore_errors=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--arms", nargs="+", default=list(DEFAULT_ARMS))
@@ -198,99 +205,95 @@ def main() -> int:
     records: list[dict] = []
     environments: dict[str, dict] = {}
     prepared: dict[str, tuple[RunContext, Any, dict, float]] = {}
-    for arm_name in args.arms:
-        root_ctx = make_context(args.workdir, arm_name)
-        if arm_name in {"openbrowser", "openbrowser-fast", "openbrowser-mcp", "openbrowser-mcp-fast"}:
-            _write_config(root_ctx, extensions=False)
-        arm = make_arm(arm_name)
-        try:
-            warmup_payload, warmup_ms = arm.warmup(root_ctx)
-        except FileNotFoundError as error:
-            print(f"{arm_name:<20} unavailable: {error}", flush=True)
-            environments[arm_name] = {"unavailable": str(error)}
-            arm.cleanup(root_ctx)
-            if not args.keep_runs:
-                shutil.rmtree(root_ctx.root, ignore_errors=True)
-            continue
-        prepared[arm_name] = (root_ctx, arm, warmup_payload, warmup_ms)
-        environments[arm_name] = {
-            "platform": platform.platform(),
-            "machine": platform.machine(),
-            "binary": redact(getattr(arm, "binary", "")),
-            "version": warmup_payload.get("browser_version")
-            or (_binary_version(getattr(arm, "binary", "")) if getattr(arm, "binary", "") else ""),
-            "warmup_ms": round(warmup_ms, 3),
-            "warmup_payload": warmup_payload,
-        }
-        print(
-            f"{arm_name:<20} warmup {warmup_ms:.0f} ms {json.dumps(warmup_payload, ensure_ascii=False)[:180]}",
-            flush=True,
-        )
+    with ExitStack() as ownership:
+        for arm_name in args.arms:
+            root_ctx = make_context(args.workdir, arm_name)
+            if arm_name in {"openbrowser", "openbrowser-fast", "openbrowser-mcp", "openbrowser-mcp-fast"}:
+                _write_config(root_ctx, extensions=False)
+            arm = make_arm(arm_name)
+            arm_ownership = ownership.enter_context(ExitStack())
+            arm_ownership.callback(_cleanup_warm_arm, arm, root_ctx, keep_runs=args.keep_runs)
+            try:
+                warmup_payload, warmup_ms = arm.warmup(root_ctx)
+            except FileNotFoundError as error:
+                print(f"{arm_name:<20} unavailable: {error}", flush=True)
+                environments[arm_name] = {"unavailable": str(error)}
+                arm_ownership.close()
+                continue
+            prepared[arm_name] = (root_ctx, arm, warmup_payload, warmup_ms)
+            environments[arm_name] = {
+                "platform": platform.platform(),
+                "machine": platform.machine(),
+                "binary": redact(getattr(arm, "binary", "")),
+                "version": warmup_payload.get("browser_version")
+                or (_binary_version(getattr(arm, "binary", "")) if getattr(arm, "binary", "") else ""),
+                "warmup_ms": round(warmup_ms, 3),
+                "warmup_payload": warmup_payload,
+            }
+            print(
+                f"{arm_name:<20} warmup {warmup_ms:.0f} ms {json.dumps(warmup_payload, ensure_ascii=False)[:180]}",
+                flush=True,
+            )
 
-    active_arms = [arm for arm in args.arms if arm in prepared]
-    load_before = _loads()
-    for sample in range(args.samples):
-        for task in args.tasks:
-            arm_order = list(active_arms)
-            if args.rotate_arms and arm_order:
-                shift = sample % len(arm_order)
-                arm_order = arm_order[shift:] + arm_order[:shift]
-            for order_index, arm_name in enumerate(arm_order):
-                root_ctx, arm, warmup_payload, warmup_ms = prepared[arm_name]
-                server, thread = start_fixture()
-                ctx = replace(root_ctx, task=task, sample=sample, base_url=server.base_url)
-                if task == "download":
-                    clean_downloads(ctx.downloads)
-                try:
-                    started = time.monotonic()
-                    result = arm.run(ctx, cleanup=False)
-                    latency_ms = (time.monotonic() - started) * 1000.0
-                    state = server.state.snapshot()
-                    oracle = ORACLES[task](state, result.reported, ctx.downloads)
-                finally:
-                    stop_fixture(server, thread)
-                record = {
-                    "run_id": f"warm-{arm_name}-{task}-s{sample}",
-                    "timestamp": datetime.now(UTC).isoformat(),
-                    "lane": "warm",
-                    "methodology": WARM_METHOD_ID,
-                    "task": task,
-                    "arm": arm_name,
-                    "sample": sample,
-                    "arm_order": arm_order,
-                    "order": order_index,
-                    "ok": bool(result.ok and oracle.ok),
-                    "adapter_ok": result.ok,
-                    "oracle_ok": oracle.ok,
-                    "oracle_detail": oracle.detail,
-                    "error": result.error,
-                    "latency_ms": latency_ms,
-                    "warmup_ms": warmup_ms,
-                    "warmup_payload": warmup_payload,
-                    "tool_calls": result.tool_calls,
-                    "process_starts": result.process_starts,
-                    "output_bytes": len(result.stdout.encode()),
-                    "stderr_bytes": len(result.stderr.encode()),
-                    "browser_version": result.browser_version,
-                    "reported": result.reported,
-                    "requests": state.get("request_count", 0),
-                    "request_bytes": state.get("request_bytes", 0),
-                    "keychain_verified": result.keychain_verified,
-                }
-                records.append(record)
-                status = "ok" if record["ok"] else "fail"
-                print(
-                    f"{arm_name:<20} {task:<10} sample {sample} {status} {latency_ms:.0f} ms "
-                    f"calls={result.tool_calls} procs={result.process_starts}",
-                    flush=True,
-                )
-                if record["error"]:
-                    print(f"    error: {record['error'][:200]}", flush=True)
-
-    for _arm_name, (root_ctx, arm, _payload, _ms) in prepared.items():
-        arm.cleanup(root_ctx)
-        if not args.keep_runs:
-            shutil.rmtree(root_ctx.root, ignore_errors=True)
+        active_arms = [arm for arm in args.arms if arm in prepared]
+        load_before = _loads()
+        for sample in range(args.samples):
+            for task in args.tasks:
+                arm_order = list(active_arms)
+                if args.rotate_arms and arm_order:
+                    shift = sample % len(arm_order)
+                    arm_order = arm_order[shift:] + arm_order[:shift]
+                for order_index, arm_name in enumerate(arm_order):
+                    root_ctx, arm, warmup_payload, warmup_ms = prepared[arm_name]
+                    server, thread = start_fixture()
+                    ctx = replace(root_ctx, task=task, sample=sample, base_url=server.base_url)
+                    if task == "download":
+                        clean_downloads(ctx.downloads)
+                    try:
+                        started = time.monotonic()
+                        result = arm.run(ctx, cleanup=False)
+                        latency_ms = (time.monotonic() - started) * 1000.0
+                        state = server.state.snapshot()
+                        oracle = ORACLES[task](state, result.reported, ctx.downloads)
+                    finally:
+                        stop_fixture(server, thread)
+                    record = {
+                        "run_id": f"warm-{arm_name}-{task}-s{sample}",
+                        "timestamp": datetime.now(UTC).isoformat(),
+                        "lane": "warm",
+                        "methodology": WARM_METHOD_ID,
+                        "task": task,
+                        "arm": arm_name,
+                        "sample": sample,
+                        "arm_order": arm_order,
+                        "order": order_index,
+                        "ok": bool(result.ok and oracle.ok),
+                        "adapter_ok": result.ok,
+                        "oracle_ok": oracle.ok,
+                        "oracle_detail": oracle.detail,
+                        "error": result.error,
+                        "latency_ms": latency_ms,
+                        "warmup_ms": warmup_ms,
+                        "warmup_payload": warmup_payload,
+                        "tool_calls": result.tool_calls,
+                        "process_starts": result.process_starts,
+                        "output_bytes": len(result.stdout.encode()),
+                        "stderr_bytes": len(result.stderr.encode()),
+                        "browser_version": result.browser_version,
+                        "reported": result.reported,
+                        "requests": state.get("request_count", 0),
+                        "request_bytes": state.get("request_bytes", 0),
+                        "keychain_verified": result.keychain_verified,
+                    }
+                    records.append(record)
+                    status = "ok" if record["ok"] else "fail"
+                    print(
+                        f"{arm_name:<20} {task:<10} sample {sample} {status} {latency_ms:.0f} ms "
+                        f"calls={result.tool_calls} procs={result.process_starts}",
+                        flush=True,
+                    )
+                    if record["error"]:
+                        print(f"    error: {record['error'][:200]}", flush=True)
 
     with args.output.open("w", encoding="utf-8") as handle:
         for record in records:
@@ -323,7 +326,7 @@ def main() -> int:
     print()
     print(f"jsonl: {args.output}")
     print(f"summary: {summary_path}")
-    return 0 if all(row["ok"] == row["runs"] for row in rows) else 1
+    return 0 if len(prepared) == len(args.arms) and rows and all(row["ok"] == row["runs"] for row in rows) else 1
 
 
 if __name__ == "__main__":
