@@ -28,12 +28,14 @@ from typing import Any
 
 import psutil
 
+from .arms import CANONICAL_ARMS
+
 ROOT = Path(__file__).resolve().parents[2]
 MODULE = "benchmarks.interactive.resource_compare"
 LOGGER = logging.getLogger(__name__)
 DEFAULT_WORKDIR = Path("/tmp") if os.name != "nt" else Path(tempfile.gettempdir())
 SAMPLE_PREFIX = "r-"
-DEFAULT_ARMS = ["openbrowser-fast", "openbrowser-mcp-fast", "chrome-devtools-mcp", "agent-browser", "browser-use"]
+DEFAULT_ARMS = list(CANONICAL_ARMS)
 METRICS = (
     "peak_tree_rss_bytes",
     "peak_worker_rss_bytes",

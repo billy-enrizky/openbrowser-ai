@@ -31,6 +31,7 @@ from .adapters.browser_use import BrowserUseArm
 from .adapters.chrome_devtools import ChromeDevToolsArm
 from .adapters.openbrowser import OpenBrowserArm
 from .adapters.openbrowser_mcp import OpenBrowserMcpArm
+from .arms import CANONICAL_ARMS
 from .fixtures.server import FixtureServer
 from .tasks import ORACLES, TASKS
 
@@ -84,6 +85,14 @@ def make_arm(name: str, *, openbrowser_extensions: bool = False):
         return AgentBrowserArm()
     if name == "browser-use":
         return BrowserUseArm()
+    if name == "playwright-mcp":
+        from .adapters.playwright_mcp import PlaywrightMcpArm
+
+        return PlaywrightMcpArm()
+    if name == "playwright-cli":
+        from .adapters.playwright_cli import PlaywrightCliArm
+
+        return PlaywrightCliArm()
     raise ValueError(f"unknown arm {name}")
 
 
@@ -277,7 +286,7 @@ def main() -> int:
     parser.add_argument(
         "--arms",
         nargs="+",
-        default=["openbrowser", "chrome-devtools-mcp", "agent-browser", "browser-use"],
+        default=list(CANONICAL_ARMS),
     )
     parser.add_argument("--tasks", nargs="+", default=list(TASKS))
     parser.add_argument("--samples", type=int, default=1)

@@ -1,4 +1,4 @@
-"""Run warm-session interactive benchmarks for OpenBrowser and competitors.
+"""Run warm-session interactive benchmarks for native browser interfaces.
 
 The cold lane starts a new process tree, daemon, and browser for every task.
 This lane starts each arm once, then runs every task against a fresh fixture
@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .arms import CANONICAL_ARMS, SUPPORTED_ARMS, WARM_METHOD_ID, WARM_METHOD_LABEL
 from .adapters.base import RunContext
 from .adapters.openbrowser import _write_config
 from .fixtures.server import FixtureServer
@@ -34,15 +35,7 @@ DEFAULT_OUTPUT = HERE / "results" / "results-warm.jsonl"
 DEFAULT_WORKDIR = Path("/tmp/obib-warm-runs")
 DEFAULT_COLD_RESULTS = None
 WARM_TASKS = ("wizard", "modal", "download", "tabs")
-DEFAULT_ARMS = (
-    "openbrowser",
-    "openbrowser-fast",
-    "openbrowser-mcp",
-    "openbrowser-mcp-fast",
-    "chrome-devtools-mcp",
-    "agent-browser",
-    "browser-use",
-)
+DEFAULT_ARMS = CANONICAL_ARMS
 
 
 def percentile(values: list[float], fraction: float) -> float | None:
@@ -99,7 +92,7 @@ def summarize(records: list[dict], cold: dict[tuple[str, str], float | None]) ->
         groups.setdefault((record["task"], record["arm"]), []).append(record)
     rows: list[dict] = []
     for task in WARM_TASKS:
-        for arm in DEFAULT_ARMS:
+        for arm in SUPPORTED_ARMS:
             items = groups.get((task, arm), [])
             if not items:
                 continue
@@ -196,7 +189,7 @@ def main() -> int:
         parser.error(f"unknown tasks: {unknown_tasks}")
     if "auth" in args.tasks:
         parser.error("auth belongs to the cold lane because it restarts the browser")
-    unknown_arms = [arm for arm in args.arms if arm not in DEFAULT_ARMS]
+    unknown_arms = [arm for arm in args.arms if arm not in SUPPORTED_ARMS]
     if unknown_arms:
         parser.error(f"unknown arms: {unknown_arms}")
 
@@ -260,6 +253,7 @@ def main() -> int:
                     "run_id": f"warm-{arm_name}-{task}-s{sample}",
                     "timestamp": datetime.now(UTC).isoformat(),
                     "lane": "warm",
+                    "methodology": WARM_METHOD_ID,
                     "task": task,
                     "arm": arm_name,
                     "sample": sample,
@@ -308,6 +302,8 @@ def main() -> int:
         json.dumps(
             {
                 "environment": {
+                    "methodology": WARM_METHOD_ID,
+                    "methodology_label": WARM_METHOD_LABEL,
                     "cold_results": str(args.cold_results) if args.cold_results is not None else None,
                     "tasks": args.tasks,
                     "samples": args.samples,

@@ -10,6 +10,7 @@ import time
 from contextlib import suppress
 from pathlib import Path
 
+from ..arms import WARM_METHOD_ID
 from ..fixtures.server import ACCOUNT_SECRET, BENCH_PASSWORD, BENCH_USER
 from .base import (
     ArmResult,
@@ -30,9 +31,9 @@ BINARY = os.environ.get(
     str(Path.home() / ".cache" / "openbrowser-interactive-bench" / "browser-use-venv" / "bin" / "browser-use"),
 )
 
-ADAPTER_VERSION = "browser-use-native-readiness-v2"
+ADAPTER_VERSION = WARM_METHOD_ID
 STDERR_TAIL_BYTES = 32768
-WARMUP_SENTINEL = "BROWSER_USE_NATIVE_READY_V2"
+WARMUP_SENTINEL = "NATIVE_SESSION_READY_V3"
 WARMUP_CODE = f"""
 import json
 tabs = list_tabs()

@@ -15,7 +15,7 @@ from benchmarks.interactive.adapters.base import ArmResult
 from benchmarks.interactive.adapters.openbrowser import OpenBrowserArm
 from benchmarks.interactive.run_benchmark import make_arm
 from benchmarks.interactive.tasks import oracle_tabs
-from benchmarks.interactive.warm_benchmark import DEFAULT_ARMS, WARM_TASKS, cold_p50, redact, summarize
+from benchmarks.interactive.warm_benchmark import DEFAULT_ARMS, SUPPORTED_ARMS, WARM_TASKS, cold_p50, redact, summarize
 
 
 def _ctx() -> SimpleNamespace:
@@ -57,7 +57,8 @@ def test_openbrowser_fast_is_a_distinct_warm_arm():
     semantic_arm = make_arm("openbrowser")
     fast_arm = make_arm("openbrowser-fast")
 
-    assert "openbrowser" in DEFAULT_ARMS
+    assert "openbrowser" in SUPPORTED_ARMS
+    assert "openbrowser" not in DEFAULT_ARMS
     assert "openbrowser-fast" in DEFAULT_ARMS
     assert isinstance(semantic_arm, OpenBrowserArm)
     assert isinstance(fast_arm, OpenBrowserArm)

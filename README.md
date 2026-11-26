@@ -674,7 +674,7 @@ The `scrape` browser fallback uses the Playwright headless shell by default. `OP
 
 Warm interactive v2, N=5, rotated arm order. Latency (ms) ↓ **Lower is better**.
 
-Warm v2 uses `browser-use-native-readiness-v2` with OpenBrowser app `5a88fb97`. Each arm starts once and every task gets a fresh fixture server. All 100 observations passed the adapter, exact oracle, and keychain checks. Warm tables show milliseconds to three decimal places. The raw file keeps full precision.
+Warm-session readiness uses the native session workflow with OpenBrowser app `5a88fb97`. Each arm starts once and every task gets a fresh fixture server. All 100 observations passed the adapter, exact oracle, and keychain checks. Warm tables show milliseconds to three decimal places. The raw file keeps full precision.
 
 | Task | OpenBrowser MCP p50 ms | OpenBrowser CLI p50 ms | chrome-devtools-mcp p50 ms | agent-browser p50 ms | browser-use p50 ms |
 | --- | ---: | ---: | ---: | ---: | ---: |
