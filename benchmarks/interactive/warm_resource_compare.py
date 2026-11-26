@@ -26,7 +26,9 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from .adapters.base import RunContext
+from .adapters.base import ArmResult, RunContext
+from .engine_preflight import configured_engine_pin
+from .engine_session import EngineSession
 from .resource_compare import (
     ProcessTreeSampler,
     arm_versions,
@@ -217,6 +219,7 @@ def make_owned_context(root: Path, arm_name: str) -> RunContext:
 
 def run_worker(arm_name: str, workdir: Path) -> int:
     try:
+        engine_session = EngineSession(configured_engine_pin())
         arm = make_arm(arm_name)
         root_ctx = make_owned_context(workdir, arm_name)
     except Exception as error:
@@ -225,6 +228,9 @@ def run_worker(arm_name: str, workdir: Path) -> int:
     try:
         try:
             payload, warmup_ms = arm.warmup(root_ctx)
+            engine_warmup = engine_session.capture_warm(arm, root_ctx)
+            if engine_warmup is not None:
+                payload = {**payload, "engine": engine_warmup.public_proof()}
         except Exception as error:
             _emit({"type": "fatal", "error": f"warmup failed: {type(error).__name__}"})
             return 2
@@ -273,7 +279,13 @@ def run_worker(arm_name: str, workdir: Path) -> int:
             try:
                 if ctx.downloads.exists():
                     clean_downloads(ctx.downloads)
-                result = arm.run(ctx, cleanup=False)
+                engine_before = engine_session.verify_warm(arm, ctx)
+                result = (
+                    arm.run(ctx, cleanup=False)
+                    if engine_before is None or engine_before.eligible
+                    else ArmResult(ok=False, error=f"matched_engine_before:{engine_before.status}")
+                )
+                engine_after = engine_session.verify_warm(arm, ctx)
                 record = {
                     "task": ctx.task,
                     "arm": arm_name,
@@ -288,6 +300,7 @@ def run_worker(arm_name: str, workdir: Path) -> int:
                     "stdout": result.stdout,
                     "stderr": result.stderr,
                 }
+                engine_session.stamp(record, engine_after, before=engine_before)
             except Exception as error:
                 record = {
                     "task": ctx.task,

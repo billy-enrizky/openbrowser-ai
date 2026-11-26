@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -90,3 +91,20 @@ def test_invalid_pin_cannot_partially_mutate_launch_environment():
     with pytest.raises(EngineBindingError):
         engine_preflight.configure_engine_environment(invalid, env)
     assert env == {"CHROME_BIN": "unchanged"}
+
+
+def test_resource_manifest_rehashes_the_engine_outside_worker_capture(monkeypatch, tmp_path):
+    from benchmarks.interactive import resource_compare, resource_provenance
+    from benchmarks.interactive.measurement import MEASUREMENT_METHOD
+
+    checks = []
+    pin = SimpleNamespace(refresh=lambda: checks.append("rehash"), public_proof=lambda: {"version": "159.0.8154.6"})
+    monkeypatch.setattr(resource_compare, "ROOT", tmp_path)
+    monkeypatch.setattr(resource_compare.platform, "platform", lambda: "fake-platform")
+    monkeypatch.setattr(resource_compare, "configured_engine_pin", lambda: pin, raising=False)
+    monkeypatch.setattr(resource_compare.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stdout="ref"))
+    monkeypatch.setattr(resource_provenance, "application_digest", lambda *a: "app")
+    manifest = resource_compare.source_manifest()
+    assert manifest["engine_pin"] == {"version": "159.0.8154.6"}
+    assert manifest["measurement_method"] == MEASUREMENT_METHOD
+    assert checks == ["rehash"]

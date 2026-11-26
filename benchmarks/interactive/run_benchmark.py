@@ -34,6 +34,8 @@ from .adapters.chrome_devtools import ChromeDevToolsArm
 from .adapters.openbrowser import OpenBrowserArm
 from .adapters.openbrowser_mcp import OpenBrowserMcpArm
 from .arms import CANONICAL_ARMS
+from .engine_preflight import configured_engine_pin
+from .engine_session import EngineSession
 from .fixtures.server import FixtureServer
 from .measurement import MEASUREMENT_METHOD, TaskTimer
 from .tasks import ORACLES, TASKS
@@ -151,6 +153,8 @@ def run_one(
     openbrowser_extensions: bool = False,
     record_binary_version: bool = True,
 ) -> dict:
+    engine_session = EngineSession(configured_engine_pin())
+    engine_observation = None
     server, thread = start_fixture()
     ctx = make_context(task, arm_name, sample, server.base_url, workdir)
     arm = None
@@ -168,6 +172,8 @@ def run_one(
     finally:
         measurement = timer.public()
         elapsed_ms = measurement["task_ns"] / 1_000_000
+        if arm is not None:
+            engine_observation = engine_session.observe(arm, ctx)
         if arm is not None:
             with contextlib.suppress(Exception):
                 arm.cleanup(ctx)
@@ -236,6 +242,7 @@ def run_one(
         shutil.rmtree(ctx.root, ignore_errors=True)
     record["measurement_method"] = MEASUREMENT_METHOD
     record["measurement"] = measurement
+    engine_session.stamp(record, engine_observation)
     return record
 
 

@@ -29,6 +29,8 @@ from typing import Any
 import psutil
 
 from .arms import CANONICAL_ARMS
+from .engine_preflight import configured_engine_pin
+from .measurement import MEASUREMENT_METHOD
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE = "benchmarks.interactive.resource_compare"
@@ -615,6 +617,9 @@ def summarize_resources(records: list[dict], *, provenance_verified: bool = Fals
 def source_manifest() -> dict:
     from .resource_provenance import application_digest
 
+    engine_pin = configured_engine_pin()
+    if engine_pin is not None:
+        engine_pin.refresh()
     digest = hashlib.sha256()
     for path in sorted((ROOT / "benchmarks" / "interactive").rglob("*")):
         relative = path.relative_to(ROOT)
@@ -642,6 +647,8 @@ def source_manifest() -> dict:
         "mcp_transport": os.environ.get("OPENBROWSER_MCP_TRANSPORT", "package default"),
         "method": "fresh worker plus owned descendants, through native runner cleanup",
         "sampler_method_version": SAMPLER_METHOD_VERSION,
+        "engine_pin": engine_pin.public_proof() if engine_pin is not None else None,
+        "measurement_method": MEASUREMENT_METHOD,
         "limitations": [
             "Includes common Python worker and task-driver overhead.",
             "Summed RSS can double-count shared pages.",

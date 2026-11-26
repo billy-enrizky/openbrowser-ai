@@ -24,9 +24,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .adapters.base import RunContext
+from .adapters.base import ArmResult, RunContext
 from .adapters.openbrowser import _write_config
 from .arms import CANONICAL_ARMS, SUPPORTED_ARMS, WARM_METHOD_ID, WARM_METHOD_LABEL
+from .engine_preflight import configured_engine_pin
+from .engine_session import EngineSession
 from .fixtures.server import FixtureServer
 from .measurement import MEASUREMENT_METHOD, TaskTimer
 from .run_benchmark import _loads, make_arm
@@ -205,23 +207,28 @@ def main() -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     records: list[dict] = []
     environments: dict[str, dict] = {}
-    prepared: dict[str, tuple[RunContext, Any, dict, float]] = {}
+    prepared: dict[str, tuple[RunContext, Any, dict, float, EngineSession]] = {}
+    engine_pin = configured_engine_pin()
     with ExitStack() as ownership:
         for arm_name in args.arms:
             root_ctx = make_context(args.workdir, arm_name)
             if arm_name in {"openbrowser", "openbrowser-fast", "openbrowser-mcp", "openbrowser-mcp-fast"}:
                 _write_config(root_ctx, extensions=False)
             arm = make_arm(arm_name)
+            engine_session = EngineSession(engine_pin)
             arm_ownership = ownership.enter_context(ExitStack())
             arm_ownership.callback(_cleanup_warm_arm, arm, root_ctx, keep_runs=args.keep_runs)
             try:
                 warmup_payload, warmup_ms = arm.warmup(root_ctx)
+                engine_warmup = engine_session.capture_warm(arm, root_ctx)
+                if engine_warmup is not None:
+                    warmup_payload = {**warmup_payload, "engine": engine_warmup.public_proof()}
             except FileNotFoundError as error:
                 print(f"{arm_name:<20} unavailable: {error}", flush=True)
                 environments[arm_name] = {"unavailable": str(error)}
                 arm_ownership.close()
                 continue
-            prepared[arm_name] = (root_ctx, arm, warmup_payload, warmup_ms)
+            prepared[arm_name] = (root_ctx, arm, warmup_payload, warmup_ms, engine_session)
             environments[arm_name] = {
                 "platform": platform.platform(),
                 "machine": platform.machine(),
@@ -245,16 +252,22 @@ def main() -> int:
                     shift = sample % len(arm_order)
                     arm_order = arm_order[shift:] + arm_order[:shift]
                 for order_index, arm_name in enumerate(arm_order):
-                    root_ctx, arm, warmup_payload, warmup_ms = prepared[arm_name]
+                    root_ctx, arm, warmup_payload, warmup_ms, engine_session = prepared[arm_name]
                     server, thread = start_fixture()
                     ctx = replace(root_ctx, task=task, sample=sample, base_url=server.base_url)
                     if task == "download":
                         clean_downloads(ctx.downloads)
                     try:
+                        engine_before = engine_session.verify_warm(arm, ctx)
                         with TaskTimer() as timer:
-                            result = arm.run(ctx, cleanup=False)
+                            result = (
+                                arm.run(ctx, cleanup=False)
+                                if engine_before is None or engine_before.eligible
+                                else ArmResult(ok=False, error=f"matched_engine_before:{engine_before.status}")
+                            )
                         measurement = timer.public()
                         latency_ms = measurement["task_ns"] / 1_000_000
+                        engine_after = engine_session.verify_warm(arm, ctx)
                         state = server.state.snapshot()
                         oracle = ORACLES[task](state, result.reported, ctx.downloads)
                     finally:
@@ -289,6 +302,7 @@ def main() -> int:
                         "request_bytes": state.get("request_bytes", 0),
                         "keychain_verified": result.keychain_verified,
                     }
+                    engine_session.stamp(record, engine_after, before=engine_before)
                     records.append(record)
                     status = "ok" if record["ok"] else "fail"
                     print(
