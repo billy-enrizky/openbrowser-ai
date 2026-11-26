@@ -499,6 +499,7 @@ def test_mcp_restart_closes_browser_before_transport(tmp_path, monkeypatch):
     arm = playwright_mcp.PlaywrightMcpArm(binary="/bin/playwright-mcp")
     arm._start(ctx)
     arm._restart(ctx)
+    assert arm._result.tool_calls == 1  # the in-task browser_close is a real native call
     first = FakeMcpClient.instances[0]
     assert ("tool", "browser_close") in first.sequence
     assert first.sequence.index(("tool", "browser_close")) < first.sequence.index(("close", ""))
