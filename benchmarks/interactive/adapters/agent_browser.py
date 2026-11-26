@@ -8,12 +8,8 @@ import time
 from pathlib import Path
 
 from ..fixtures.server import ACCOUNT_SECRET, BENCH_PASSWORD, BENCH_USER
-from .base import ArmResult, RunContext, run_process, terminate_matching, verify_mock_keychain
+from .base import ArmResult, RunContext, matched_chrome, run_process, terminate_matching, verify_mock_keychain
 
-CHROME = os.environ.get(
-    "CHROME_BIN",
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-)
 BINARY = os.environ.get(
     "AGENT_BROWSER_BIN",
     str(Path.home() / ".cache" / "openbrowser-interactive-bench" / "npm" / "node_modules" / ".bin" / "agent-browser"),
@@ -35,7 +31,7 @@ class AgentBrowserArm:
             ctx.session,
             "--json",
             "--executable-path",
-            CHROME,
+            matched_chrome(),
             "--args",
             "--use-mock-keychain",
             "--profile",

@@ -96,3 +96,87 @@ def test_blank_declared_browser_does_not_write_a_config(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="CHROME_BIN"):
         openbrowser._write_config(ctx, extensions=False)
     assert not ctx.config.exists()
+
+
+def test_agent_browser_command_uses_call_time_engine(monkeypatch, tmp_path):
+    from benchmarks.interactive.adapters.agent_browser import AgentBrowserArm
+
+    arm = AgentBrowserArm()
+    ctx = context(tmp_path)
+    for path in ("/fake/first-engine", "/fake/second-engine"):
+        monkeypatch.setenv("CHROME_BIN", path)
+        command = arm._command(ctx, "open", "about:blank")
+        assert command[command.index("--executable-path") + 1] == path
+
+
+def test_chrome_devtools_start_uses_call_time_engine(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from benchmarks.interactive.adapters import chrome_devtools
+
+    commands = []
+
+    def client(command, **kwargs):
+        commands.append(command)
+        return SimpleNamespace(initialize=lambda: {"serverInfo": {"version": "fake"}})
+
+    monkeypatch.setattr(chrome_devtools, "StdioMcpClient", client)
+    monkeypatch.setattr(chrome_devtools, "verify_mock_keychain", lambda *args: True)
+    monkeypatch.setattr(chrome_devtools, "_write_download_preferences", lambda *args: None)
+    arm = chrome_devtools.ChromeDevToolsArm()
+    monkeypatch.setattr(arm, "_pages", lambda: [(1, "about:blank")])
+    for path in ("/fake/first-engine", "/fake/second-engine"):
+        monkeypatch.setenv("CHROME_BIN", path)
+        arm._start(context(tmp_path))
+        assert commands[-1][commands[-1].index("--executablePath") + 1] == path
+
+
+def test_browser_use_launch_uses_call_time_engine(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from benchmarks.interactive.adapters import browser_use
+
+    paths = []
+
+    def chrome(path, *args, **kwargs):
+        paths.append(path)
+        return SimpleNamespace(start=lambda: None)
+
+    monkeypatch.setattr(browser_use, "ChromeInstance", chrome)
+    monkeypatch.setattr(browser_use, "verify_mock_keychain", lambda *args: True)
+    arm = browser_use.BrowserUseArm()
+    for path in ("/fake/first-engine", "/fake/second-engine"):
+        monkeypatch.setenv("CHROME_BIN", path)
+        arm._start_chrome(context(tmp_path))
+        assert paths[-1] == path
+
+
+def test_both_playwright_configurations_use_call_time_engine(monkeypatch, tmp_path):
+    from benchmarks.interactive.adapters import playwright_common
+
+    ctx = context(tmp_path)
+    ctx.config.mkdir()
+    for path in ("/fake/first-engine", "/fake/second-engine"):
+        monkeypatch.setenv("CHROME_BIN", path)
+        config = json.loads(playwright_common.write_browser_config(ctx).read_text())
+        assert config["browser"]["launchOptions"]["executablePath"] == path
+
+
+def test_playwright_version_cache_is_scoped_to_the_current_engine(monkeypatch):
+    from types import SimpleNamespace
+
+    from benchmarks.interactive.adapters import playwright_common
+
+    monkeypatch.delenv("PLAYWRIGHT_BENCH_BROWSER_VERSION", raising=False)
+    monkeypatch.setattr(playwright_common, "_VERSION_CACHE", {})
+    commands = []
+
+    def version(command, **kwargs):
+        commands.append(command)
+        return SimpleNamespace(stdout="Chromium 159.0.0.1", stderr="")
+
+    monkeypatch.setattr(playwright_common.subprocess, "run", version)
+    for path in ("/fake/first-engine", "/fake/second-engine"):
+        monkeypatch.setenv("CHROME_BIN", path)
+        assert playwright_common.chrome_version() == "Chromium 159.0.0.1"
+    assert commands == [["/fake/first-engine", "--version"], ["/fake/second-engine", "--version"]]

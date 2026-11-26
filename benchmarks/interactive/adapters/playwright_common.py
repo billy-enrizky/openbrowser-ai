@@ -10,16 +10,12 @@ import time
 from pathlib import Path
 
 from ..fixtures.server import BENCH_PASSWORD, REPORT_SHA256, REPORT_SIZE
-from .base import RunContext, verify_mock_keychain
+from .base import RunContext, matched_chrome, verify_mock_keychain
 from .playwright_tasks import SECRET_PASSWORD
 
 MCP_VERSION = "0.0.86"
 CLI_VERSION = "0.1.25"
 PLAYWRIGHT_VERSION = "1.66.0-alpha-2026-11-18"
-CHROME = os.environ.get(
-    "CHROME_BIN",
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-)
 CACHE_ROOT = Path.home() / ".cache" / "openbrowser-interactive-bench" / f"playwright-native-{MCP_VERSION}-{CLI_VERSION}"
 DEFAULT_MCP_BINARY = CACHE_ROOT / "node_modules" / ".bin" / "playwright-mcp"
 DEFAULT_CLI_BINARY = CACHE_ROOT / "node_modules" / ".bin" / "playwright-cli"
@@ -36,10 +32,11 @@ def chrome_version() -> str:
     configured = os.environ.get("PLAYWRIGHT_BENCH_BROWSER_VERSION")
     if configured:
         return configured
-    if CHROME not in _VERSION_CACHE:
+    chrome = matched_chrome()
+    if chrome not in _VERSION_CACHE:
         try:
             completed = subprocess.run(
-                [CHROME, "--version"],
+                [chrome, "--version"],
                 capture_output=True,
                 text=True,
                 timeout=15,
@@ -48,8 +45,8 @@ def chrome_version() -> str:
             value = (completed.stdout or completed.stderr).strip()
         except (OSError, subprocess.TimeoutExpired):
             value = ""
-        _VERSION_CACHE[CHROME] = value
-    return _VERSION_CACHE[CHROME]
+        _VERSION_CACHE[chrome] = value
+    return _VERSION_CACHE[chrome]
 
 
 def write_secrets(ctx: RunContext) -> Path:
@@ -68,7 +65,7 @@ def write_browser_config(ctx: RunContext) -> Path:
             {
                 "browser": {
                     "launchOptions": {
-                        "executablePath": CHROME,
+                        "executablePath": matched_chrome(),
                         "headless": True,
                         "args": ["--use-mock-keychain"],
                         "downloadsPath": str(ctx.downloads),

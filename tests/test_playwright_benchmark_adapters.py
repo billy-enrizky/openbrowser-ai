@@ -184,7 +184,7 @@ def test_mcp_server_command_and_execute_program(tmp_path, monkeypatch):
     assert client.command[client.command.index("--snapshot-mode") + 1] == "none"
     assert client.command[client.command.index("--viewport-size") + 1] == "1280x800"
     config = json.loads((ctx.config / "playwright-config.json").read_text())
-    assert config["browser"]["launchOptions"]["executablePath"] == playwright_common.CHROME
+    assert config["browser"]["launchOptions"]["executablePath"] == playwright_common.matched_chrome()
     assert config["browser"]["launchOptions"]["args"] == ["--use-mock-keychain"]
     assert config["browser"]["launchOptions"]["headless"] is True
     assert config["browser"]["launchOptions"]["downloadsPath"] == str(ctx.downloads)
@@ -287,7 +287,7 @@ def test_cli_commands_and_execute_program(tmp_path, monkeypatch):
     assert config["outputDir"] == str(ctx.downloads)
     assert config["codegen"] == "none"
     assert config["timeouts"]["settle"] == 0
-    assert config["browser"]["launchOptions"]["executablePath"] == playwright_common.CHROME
+    assert config["browser"]["launchOptions"]["executablePath"] == playwright_common.matched_chrome()
     assert config["browser"]["launchOptions"]["args"] == ["--use-mock-keychain"]
     assert config["browser"]["contextOptions"]["viewport"] == {"width": 1280, "height": 800}
 

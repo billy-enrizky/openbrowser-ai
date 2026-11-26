@@ -9,13 +9,9 @@ import time
 from pathlib import Path
 
 from ..fixtures.server import ACCOUNT_SECRET, BENCH_PASSWORD, BENCH_USER
-from .base import ArmResult, RunContext, terminate_matching, verify_mock_keychain
+from .base import ArmResult, RunContext, matched_chrome, terminate_matching, verify_mock_keychain
 from .mcp_stdio import McpError, StdioMcpClient
 
-CHROME = os.environ.get(
-    "CHROME_BIN",
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-)
 SERVER = os.environ.get(
     "CHROME_DEVTOOLS_MCP_BIN",
     str(
@@ -120,7 +116,7 @@ class ChromeDevToolsArm:
             SERVER,
             "--headless",
             "--executablePath",
-            CHROME,
+            matched_chrome(),
             "--userDataDir",
             str(ctx.profile),
             "--viewport",

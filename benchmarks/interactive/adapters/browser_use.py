@@ -17,15 +17,12 @@ from .base import (
     ChromeInstance,
     RunContext,
     kill_pidfile,
+    matched_chrome,
     run_process,
     terminate_matching,
     verify_mock_keychain,
 )
 
-CHROME = os.environ.get(
-    "CHROME_BIN",
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-)
 BINARY = os.environ.get(
     "BROWSER_USE_BIN",
     str(Path.home() / ".cache" / "openbrowser-interactive-bench" / "browser-use-venv" / "bin" / "browser-use"),
@@ -306,7 +303,7 @@ class BrowserUseArm:
         return env
 
     def _start_chrome(self, ctx: RunContext) -> None:
-        self._chrome = ChromeInstance(CHROME, ctx.profile, downloads=ctx.downloads, headless=True)
+        self._chrome = ChromeInstance(matched_chrome(), ctx.profile, downloads=ctx.downloads, headless=True)
         self._chrome.start()
         verified = verify_mock_keychain(str(ctx.profile))
         self._warm_keychain_verified = verified
