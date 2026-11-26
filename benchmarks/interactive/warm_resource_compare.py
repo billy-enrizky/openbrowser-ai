@@ -47,9 +47,10 @@ from .warm_benchmark import (
 )
 
 LOGGER = logging.getLogger(__name__)
-METHOD = "warm-session-resources-v1"
+METHOD = "warm-session-resources-v2"
 FINISH_GRACE_SECONDS = 5.0
 FINISH_WAIT_SECONDS = 5.0
+WORKER_GATE_TIMEOUT_SECONDS = 120.0
 HERE = Path(__file__).resolve().parent
 
 
@@ -217,6 +218,92 @@ def make_owned_context(root: Path, arm_name: str) -> RunContext:
     )
 
 
+class _WorkerInbox:
+    """Read JSON-line parent messages off stdin with bounded gate waits."""
+
+    def __init__(self, stream=None) -> None:
+        self._stream = stream or sys.stdin
+        self._queue: queue.Queue[dict | None] = queue.Queue()
+        self._reader = threading.Thread(target=self._read, daemon=True)
+        self._reader.start()
+
+    def _read(self) -> None:
+        try:
+            for line in self._stream:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    message = json.loads(line)
+                except json.JSONDecodeError:
+                    self._queue.put({"type": "fatal", "error": "invalid worker message"})
+                    continue
+                self._queue.put(message)
+        finally:
+            self._queue.put(None)
+
+    def next(self, timeout: float | None = None) -> dict:
+        try:
+            message = self._queue.get(timeout=timeout)
+        except queue.Empty as error:
+            raise TimeoutError("worker message timeout") from error
+        if message is None:
+            raise EOFError
+        if not isinstance(message, dict):
+            raise ValueError("worker message is not an object")
+        return message
+
+
+def _task_context(message: dict, arm_name: str) -> tuple[str, int, str, Path]:
+    if message.get("type") != "task" or message.get("arm") != arm_name:
+        raise ValueError("worker task message does not match the arm")
+    task = message.get("task")
+    sample = message.get("sample")
+    nonce = message.get("nonce")
+    base_url = message.get("base_url")
+    record = message.get("record")
+    if not isinstance(task, str) or task not in ORACLES:
+        raise ValueError("worker task is invalid")
+    if type(sample) is not int or sample < 0:
+        raise ValueError("worker sample is invalid")
+    if not isinstance(nonce, str) or not nonce:
+        raise ValueError("worker nonce is invalid")
+    if not isinstance(base_url, str) or not base_url:
+        raise ValueError("worker base URL is invalid")
+    if not isinstance(record, str) or not record:
+        raise ValueError("worker record path is invalid")
+    return task, sample, nonce, Path(record)
+
+
+def _gate_message(
+    channel: _WorkerInbox,
+    expected_type: str,
+    *,
+    arm_name: str,
+    task: str,
+    sample: int,
+    nonce: str,
+) -> dict | None:
+    try:
+        message = channel.next(WORKER_GATE_TIMEOUT_SECONDS)
+    except TimeoutError:
+        _emit({"type": "fatal", "error": f"{expected_type} gate timeout"})
+        return None
+    except EOFError:
+        _emit({"type": "fatal", "error": f"{expected_type} gate EOF"})
+        return None
+    if (
+        message.get("type") != expected_type
+        or message.get("arm") != arm_name
+        or message.get("task") != task
+        or message.get("sample") != sample
+        or message.get("nonce") != nonce
+    ):
+        _emit({"type": "fatal", "error": f"{expected_type} gate mismatch"})
+        return None
+    return message
+
+
 def run_worker(arm_name: str, workdir: Path) -> int:
     try:
         engine_session = EngineSession(configured_engine_pin())
@@ -243,53 +330,77 @@ def run_worker(arm_name: str, workdir: Path) -> int:
                 "downloads": str(root_ctx.downloads),
             }
         )
+        channel = _WorkerInbox()
         while True:
-            line = sys.stdin.readline()
-            if not line:
+            try:
+                message = channel.next()
+            except EOFError:
                 return 0
-            message = json.loads(line)
+            except ValueError:
+                _emit({"type": "fatal", "error": "invalid worker message"})
+                return 2
             if message.get("type") == "finish":
                 _emit({"type": "finished"})
                 return 0
-            if message.get("type") != "task":
-                _emit({"type": "fatal", "error": "unknown worker message"})
-                return 2
-            nonce = str(message.get("nonce") or "")
-            record_path = Path(message["record"])
-            ctx = replace(
-                root_ctx,
-                task=message["task"],
-                sample=int(message["sample"]),
-                base_url=message["base_url"],
-            )
             try:
+                task, sample, nonce, record_path = _task_context(message, arm_name)
+                ctx = replace(
+                    root_ctx,
+                    task=task,
+                    sample=sample,
+                    base_url=message["base_url"],
+                )
                 _task_downloads(message, ctx)
-            except ValueError as error:
-                _emit({"type": "fatal", "error": str(error)})
+            except Exception:
+                _emit({"type": "fatal", "error": "invalid worker task"})
                 return 2
+            setup_error: str | None = None
+            engine_before = None
+            try:
+                engine_before = engine_session.verify_warm(arm, ctx)
+                if ctx.downloads.exists():
+                    clean_downloads(ctx.downloads)
+            except Exception as error:
+                setup_error = f"worker exception: {type(error).__name__}"
+            if engine_before is not None and not engine_before.eligible:
+                setup_error = setup_error or f"matched_engine_before:{engine_before.status}"
             _emit(
                 {
                     "type": "started",
                     "arm": arm_name,
-                    "task": ctx.task,
-                    "sample": ctx.sample,
+                    "task": task,
+                    "sample": sample,
+                    "nonce": nonce,
+                    "before": engine_before.public_proof() if engine_before is not None else None,
+                }
+            )
+            if _gate_message(channel, "capture", arm_name=arm_name, task=task, sample=sample, nonce=nonce) is None:
+                return 2
+            if setup_error is None:
+                try:
+                    result = arm.run(ctx, cleanup=False)
+                except Exception as error:
+                    result = ArmResult(ok=False, error=f"worker exception: {type(error).__name__}")
+            else:
+                result = ArmResult(ok=False, error=setup_error)
+            _emit(
+                {
+                    "type": "native_done",
+                    "arm": arm_name,
+                    "task": task,
+                    "sample": sample,
                     "nonce": nonce,
                 }
             )
+            if _gate_message(channel, "verify", arm_name=arm_name, task=task, sample=sample, nonce=nonce) is None:
+                return 2
+            engine_after = None
             try:
-                if ctx.downloads.exists():
-                    clean_downloads(ctx.downloads)
-                engine_before = engine_session.verify_warm(arm, ctx)
-                result = (
-                    arm.run(ctx, cleanup=False)
-                    if engine_before is None or engine_before.eligible
-                    else ArmResult(ok=False, error=f"matched_engine_before:{engine_before.status}")
-                )
                 engine_after = engine_session.verify_warm(arm, ctx)
                 record = {
-                    "task": ctx.task,
+                    "task": task,
                     "arm": arm_name,
-                    "sample": ctx.sample,
+                    "sample": sample,
                     "nonce": nonce,
                     "ok": result.ok,
                     "adapter_ok": result.ok,
@@ -303,9 +414,9 @@ def run_worker(arm_name: str, workdir: Path) -> int:
                 engine_session.stamp(record, engine_after, before=engine_before)
             except Exception as error:
                 record = {
-                    "task": ctx.task,
+                    "task": task,
                     "arm": arm_name,
-                    "sample": ctx.sample,
+                    "sample": sample,
                     "nonce": nonce,
                     "ok": False,
                     "adapter_ok": False,
@@ -322,8 +433,8 @@ def run_worker(arm_name: str, workdir: Path) -> int:
                 {
                     "type": "done",
                     "arm": arm_name,
-                    "task": ctx.task,
-                    "sample": ctx.sample,
+                    "task": task,
+                    "sample": sample,
                     "nonce": nonce,
                     "record": str(record_path),
                 }
@@ -354,7 +465,7 @@ def _sample_tree(sampler) -> None:
     sampler.sample()
 
 
-def _receive_until_done(session, sampler, *, interval: float, deadline: float) -> dict:
+def _receive_until(session, sampler, expected_type: str, *, interval: float, deadline: float) -> dict:
     while time.monotonic() < deadline:
         remaining = max(0.01, min(interval, deadline - time.monotonic()))
         try:
@@ -362,10 +473,11 @@ def _receive_until_done(session, sampler, *, interval: float, deadline: float) -
         except TimeoutError:
             _sample_tree(sampler)
             continue
-        if message.get("type") == "done":
-            return message
         if message.get("type") == "fatal":
             raise RuntimeError(message.get("error", "worker fatal"))
+        if message.get("type") == expected_type:
+            return message
+        raise RuntimeError(f"unexpected worker message: {message.get('type')}")
     raise TimeoutError("warm task exceeded its deadline")
 
 
@@ -516,11 +628,11 @@ def run_warm_lane(
                             ctx_downloads.mkdir(parents=True, exist_ok=True)
                             clean_downloads(ctx_downloads)
                             sampler = sampler_factory(session.pid, warmups[entry.arm]["marker"])
-                            _sample_tree(sampler)
-                            baseline = sampler.result()
                             nonce = uuid.uuid4().hex
                             record_path = diagnostics / f"record-{entry.task}-{entry.arm}-s{entry.sample}-{nonce}.json"
                             started = time.monotonic()
+                            baseline: dict = {}
+                            resources: dict = {}
                         except Exception as error:
                             fixture_errors.append(
                                 {
@@ -537,6 +649,7 @@ def run_warm_lane(
                             session.send(
                                 {
                                     "type": "task",
+                                    "arm": entry.arm,
                                     "task": entry.task,
                                     "sample": entry.sample,
                                     "base_url": server.base_url,
@@ -555,17 +668,50 @@ def run_warm_lane(
                             ):
                                 raise RuntimeError("worker acknowledgement does not match the task")
                             _sample_tree(sampler)
-                            done = _receive_until_done(
-                                session, sampler, interval=interval, deadline=time.monotonic() + worker_timeout
+                            baseline = sampler.result()
+                            session.send(
+                                {
+                                    "type": "capture",
+                                    "arm": entry.arm,
+                                    "task": entry.task,
+                                    "sample": entry.sample,
+                                    "nonce": nonce,
+                                }
+                            )
+                            native_done = _receive_until(
+                                session,
+                                sampler,
+                                "native_done",
+                                interval=interval,
+                                deadline=time.monotonic() + worker_timeout,
                             )
                             if (
-                                done.get("arm") != entry.arm
+                                native_done.get("arm") != entry.arm
+                                or native_done.get("task") != entry.task
+                                or native_done.get("sample") != entry.sample
+                                or native_done.get("nonce") != nonce
+                            ):
+                                raise RuntimeError("worker native completion does not match the task")
+                            _sample_tree(sampler)
+                            resources = sampler.result()
+                            session.send(
+                                {
+                                    "type": "verify",
+                                    "arm": entry.arm,
+                                    "task": entry.task,
+                                    "sample": entry.sample,
+                                    "nonce": nonce,
+                                }
+                            )
+                            done = session.receive(worker_timeout)
+                            if (
+                                done.get("type") != "done"
+                                or done.get("arm") != entry.arm
                                 or done.get("task") != entry.task
                                 or done.get("sample") != entry.sample
                                 or done.get("nonce") != nonce
                             ):
                                 raise RuntimeError("worker completion does not match the task")
-                            _sample_tree(sampler)
                             emitted = done.get("record")
                             if not isinstance(emitted, str) or Path(emitted).resolve() != record_path.resolve():
                                 raise ValueError("worker record path does not match the task")

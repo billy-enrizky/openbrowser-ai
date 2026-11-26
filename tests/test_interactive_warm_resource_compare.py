@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import io
 import json
 import queue
 import socket
 import subprocess
+import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -138,6 +140,11 @@ class FakeSession:
         wrong_record_path: bool = False,
         sibling_root: bool = False,
         wrong_downloads: bool = False,
+        event_log: list[str] | None = None,
+        no_native_done: bool = False,
+        no_verify: bool = False,
+        bad_native_nonce: bool = False,
+        bad_done_nonce: bool = False,
     ) -> None:
         self.arm = arm
         self.workdir = Path(workdir)
@@ -150,6 +157,13 @@ class FakeSession:
         self.task_downloads: list[Path] = []
         self.marker_seen_at_task: list[bool] = []
         self.record_override = record_override or {}
+        self.event_log = event_log
+        self.no_native_done = no_native_done
+        self.no_verify = no_verify
+        self.bad_native_nonce = bad_native_nonce
+        self.bad_done_nonce = bad_done_nonce
+        self.pending_records: dict[str, Path] = {}
+        self.pending_downloads: dict[str, Path] = {}
         self.proactive_fatal = proactive_fatal
         self.ready_timeout = ready_timeout
         self.bad_nonce = bad_nonce
@@ -176,13 +190,20 @@ class FakeSession:
             )
         FakeSession.instances.append(self)
 
+    def _log(self, value: str) -> None:
+        if self.event_log is not None:
+            self.event_log.append(value)
+
     def send(self, message: dict) -> None:
         self.sent.append(message)
+        self._log(f"send:{message.get('type')}")
         if message.get("type") == "task":
             nonce = message.get("nonce")
             message_nonce = "wrong" if self.bad_nonce else nonce
             self.task_downloads.append(Path(message["downloads"]))
             self.marker_seen_at_task.append((Path(message["downloads"]) / "stale.tmp").exists())
+            self.pending_records[str(nonce)] = Path(message["record"])
+            self.pending_downloads[str(nonce)] = Path(message["downloads"])
             self.inbox.put(
                 {
                     "type": "started",
@@ -190,12 +211,15 @@ class FakeSession:
                     "task": message["task"],
                     "sample": message["sample"],
                     "nonce": message_nonce,
+                    "before": {"status": "valid", "eligible": True},
                 }
             )
             if self.proactive_fatal:
                 self.inbox.put({"type": "fatal", "error": "boom"})
                 return
-            path = Path(message["record"])
+        elif message.get("type") == "capture":
+            nonce = message.get("nonce")
+            path = self.pending_records[str(nonce)]
             path.parent.mkdir(parents=True, exist_ok=True)
             emitted = path.with_name(path.stem + "-foreign.json") if self.wrong_record_path else path
             record = {
@@ -211,14 +235,32 @@ class FakeSession:
             }
             emitted.write_text(json.dumps(record))
             if message["task"] == "download":
-                (Path(message["downloads"]) / "report.csv").write_bytes(REPORT_BYTES)
+                downloads = self.pending_downloads[str(nonce)]
+                downloads.mkdir(parents=True, exist_ok=True)
+                (downloads / "report.csv").write_bytes(REPORT_BYTES)
+            if not self.no_native_done:
+                self.inbox.put(
+                    {
+                        "type": "native_done",
+                        "arm": self.arm,
+                        "task": message["task"],
+                        "sample": message["sample"],
+                        "nonce": "wrong" if (self.bad_nonce or self.bad_native_nonce) else nonce,
+                    }
+                )
+        elif message.get("type") == "verify":
+            nonce = message.get("nonce")
+            if self.no_verify:
+                return
+            path = Path(self.pending_records[str(nonce)])
+            emitted = path.with_name(path.stem + "-foreign.json") if self.wrong_record_path else path
             self.inbox.put(
                 {
                     "type": "done",
                     "arm": self.arm,
                     "task": message["task"],
                     "sample": message["sample"],
-                    "nonce": message_nonce,
+                    "nonce": "wrong" if (self.bad_nonce or self.bad_done_nonce) else nonce,
                     "record": str(emitted),
                 }
             )
@@ -295,8 +337,7 @@ def run_lane(
         return FakeSampler(
             [
                 {"cpu": 1.0, "rss": 100, "footprint": 50},
-                {"cpu": 1.5, "rss": 120, "footprint": 60},
-                {"cpu": 2.0, "rss": 110, "footprint": 55},
+                {"cpu": 2.0, "rss": 120, "footprint": 60},
             ]
         )
 
@@ -995,3 +1036,307 @@ def test_warm_lane_rejects_any_native_binding_change(monkeypatch, tmp_path, chan
     assert end["provenance_verified"] is False
     assert end["valid"] is False
     assert all(row["provenance_verified"] is False for row in records)
+
+
+class BarrierSampler(FakeSampler):
+    def __init__(self, log: list[str]):
+        super().__init__([{"cpu": 1.0, "rss": 100, "footprint": 50}, {"cpu": 2.0, "rss": 120, "footprint": 60}])
+        self.log = log
+
+    def sample(self) -> None:
+        self.log.append("sample")
+        super().sample()
+
+
+def test_barriers_place_baseline_after_started_and_final_before_verify(tmp_path):
+    log: list[str] = []
+    _output, records, sessions = run_lane(
+        tmp_path,
+        arms=("a",),
+        session_options={"event_log": log},
+        sampler_factory=lambda pid, marker: BarrierSampler(log),
+    )
+    assert [session.sent[0]["type"] for session in sessions] == ["task"]
+    assert sessions[0].sent[1]["type"] == "capture"
+    assert sessions[0].sent[2]["type"] == "verify"
+    assert log == ["sample", "send:task", "sample", "send:capture", "sample", "send:verify", "send:finish"]
+    assert records[0]["warm_task_tree_cpu_delta_seconds"] == 1.0
+    assert records[0]["resource_ok"] is True
+
+
+def test_method_marks_the_corrected_boundary(tmp_path):
+    output, _records, _sessions = run_lane(tmp_path, arms=("a",))
+    header = json.loads(output.read_text().splitlines()[0])
+    assert header["method"] == "warm-session-resources-v2"
+
+
+def test_native_done_timeout_is_retained_as_failure(tmp_path):
+    output, records, _sessions = run_lane(
+        tmp_path,
+        arms=("a",),
+        session_options={"no_native_done": True},
+        worker_timeout=0.05,
+    )
+    assert records[0]["ok"] is False
+    assert records[0]["resource_ok"] is False
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    assert terminal["valid"] is False
+
+
+def test_parent_rejects_native_done_binding(tmp_path):
+    _output, records, _sessions = run_lane(
+        tmp_path,
+        arms=("a",),
+        session_options={"bad_native_nonce": True},
+    )
+    assert records[0]["ok"] is False
+
+
+def test_parent_rejects_done_binding(tmp_path):
+    _output, records, _sessions = run_lane(
+        tmp_path,
+        arms=("a",),
+        session_options={"bad_done_nonce": True},
+    )
+    assert records[0]["ok"] is False
+
+
+def test_verify_timeout_is_retained_as_failure(tmp_path):
+    output, records, _sessions = run_lane(
+        tmp_path,
+        arms=("a",),
+        session_options={"no_verify": True},
+        worker_timeout=0.05,
+    )
+    assert records[0]["ok"] is False
+    assert records[0]["resource_ok"] is False
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    assert terminal["valid"] is False
+
+
+class WorkerArm:
+    def __init__(self, events: list[str], *, fail: bool = False, invalid_before=None) -> None:
+        self.binary = ""
+        self.events = events
+        self.fail = fail
+        self.invalid_before = invalid_before
+
+    def warmup(self, ctx):
+        self.events.append("warmup")
+        return {"ok": True, "browser_version": "fake"}, 0.0
+
+    def run(self, ctx, *, cleanup=True):
+        self.events.append("native")
+        if self.invalid_before is not None:
+            raise AssertionError("native must not run")
+        if self.fail:
+            raise RuntimeError("task failed")
+        return warm.ArmResult(ok=True, reported={"quote": "Q-1"}, keychain_verified=True)
+
+    def cleanup(self, ctx):
+        self.events.append("cleanup")
+
+
+class WorkerEngine:
+    def __init__(self, events: list[str], *, valid: bool = True) -> None:
+        self.events = events
+        self.valid = valid
+
+    def capture_warm(self, arm, ctx):
+        return SimpleNamespace(public_proof=lambda: {"status": "valid"}, eligible=True, status="valid")
+
+    def verify_warm(self, arm, ctx):
+        self.events.append("proof")
+        if self.valid:
+            return SimpleNamespace(
+                eligible=True,
+                status="valid",
+                keychain_verified=True,
+                public_proof=lambda: {"status": "valid", "eligible": True},
+            )
+        return SimpleNamespace(
+            eligible=False,
+            status="matched_engine_before",
+            keychain_verified=None,
+            public_proof=lambda: {"status": "matched_engine_before", "eligible": False},
+        )
+
+    def stamp(self, row, after, *, before=None):
+        verified = bool(after.eligible and (before is None or before.eligible))
+        row["engine"] = {"verified": verified}
+        row["ok"] = row.get("ok") is True and verified
+        if not verified:
+            row["error"] = "; ".join(value for value in (row.get("error", ""), "matched_engine") if value)
+
+
+def _worker_task(workdir: Path, record: Path, nonce: str = "n") -> dict:
+    ctx = warm.make_owned_context(workdir, "a")
+    return {
+        "type": "task",
+        "arm": "a",
+        "task": "wizard",
+        "sample": 0,
+        "base_url": "http://fixture.invalid",
+        "downloads": str(ctx.downloads),
+        "record": str(record),
+        "nonce": nonce,
+    }
+
+
+def _worker_messages(task: dict, *types: str) -> str:
+    lines = [json.dumps(task)]
+    for kind in types:
+        lines.append(
+            json.dumps(
+                {
+                    "type": kind,
+                    "arm": "a",
+                    "task": "wizard",
+                    "sample": 0,
+                    "nonce": task["nonce"],
+                }
+            )
+        )
+    return "\n".join(lines) + "\n"
+
+
+def test_worker_task_exception_still_completes_handshake(tmp_path, monkeypatch):
+    events: list[str] = []
+    emitted: list[dict] = []
+    record = tmp_path / "record.json"
+    task = _worker_task(tmp_path, record)
+    arm = WorkerArm(events, fail=True)
+    monkeypatch.setattr(warm, "make_arm", lambda name: arm)
+    monkeypatch.setattr(warm, "EngineSession", lambda pin: WorkerEngine(events))
+    monkeypatch.setattr(warm, "configured_engine_pin", lambda: "pin")
+    monkeypatch.setattr(warm, "_emit", emitted.append)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(_worker_messages(task, "capture", "verify")))
+    assert warm.run_worker("a", tmp_path) == 0
+    assert events == ["warmup", "proof", "native", "proof", "cleanup"]
+    assert [item["type"] for item in emitted] == ["ready", "started", "native_done", "done"]
+    row = json.loads(record.read_text())
+    assert row["ok"] is False
+    assert "RuntimeError" in row["error"]
+    assert row["engine"]["verified"] is True
+
+
+def test_worker_invalid_before_skips_native_but_completes_handshake(tmp_path, monkeypatch):
+    events: list[str] = []
+    emitted: list[dict] = []
+    record = tmp_path / "record.json"
+    task = _worker_task(tmp_path, record)
+    arm = WorkerArm(events, invalid_before=False)
+    engine = WorkerEngine(events, valid=False)
+    monkeypatch.setattr(warm, "make_arm", lambda name: arm)
+    monkeypatch.setattr(warm, "EngineSession", lambda pin: engine)
+    monkeypatch.setattr(warm, "configured_engine_pin", lambda: "pin")
+    monkeypatch.setattr(warm, "_emit", emitted.append)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(_worker_messages(task, "capture", "verify")))
+    assert warm.run_worker("a", tmp_path) == 0
+    assert "native" not in events
+    assert [item["type"] for item in emitted] == ["ready", "started", "native_done", "done"]
+    row = json.loads(record.read_text())
+    assert row["ok"] is False
+    assert "matched_engine_before" in row["error"]
+
+
+def test_worker_capture_gate_timeout_is_bounded(tmp_path, monkeypatch):
+    events: list[str] = []
+    emitted: list[dict] = []
+    task = _worker_task(tmp_path, tmp_path / "record.json")
+    monkeypatch.setattr(warm, "make_arm", lambda name: WorkerArm(events))
+    monkeypatch.setattr(warm, "EngineSession", lambda pin: WorkerEngine(events))
+    monkeypatch.setattr(warm, "configured_engine_pin", lambda: "pin")
+    monkeypatch.setattr(warm, "_emit", emitted.append)
+    monkeypatch.setattr(warm, "WORKER_GATE_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(task) + "\n"))
+    assert warm.run_worker("a", tmp_path) == 2
+    assert emitted[-1]["type"] == "fatal"
+    assert "capture" in emitted[-1]["error"]
+    assert "cleanup" in events
+
+
+def test_worker_verify_gate_timeout_is_bounded(tmp_path, monkeypatch):
+    events: list[str] = []
+    emitted: list[dict] = []
+    task = _worker_task(tmp_path, tmp_path / "record.json")
+    monkeypatch.setattr(warm, "make_arm", lambda name: WorkerArm(events))
+    monkeypatch.setattr(warm, "EngineSession", lambda pin: WorkerEngine(events))
+    monkeypatch.setattr(warm, "configured_engine_pin", lambda: "pin")
+    monkeypatch.setattr(warm, "_emit", emitted.append)
+    monkeypatch.setattr(warm, "WORKER_GATE_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(_worker_messages(task, "capture")))
+    assert warm.run_worker("a", tmp_path) == 2
+    assert "native" in events
+    assert emitted[-1]["type"] == "fatal"
+    assert "verify" in emitted[-1]["error"]
+    assert "cleanup" in events
+
+
+def test_worker_rejects_stale_verify_binding(tmp_path, monkeypatch):
+    events: list[str] = []
+    emitted: list[dict] = []
+    task = _worker_task(tmp_path, tmp_path / "record.json")
+    monkeypatch.setattr(warm, "make_arm", lambda name: WorkerArm(events))
+    monkeypatch.setattr(warm, "EngineSession", lambda pin: WorkerEngine(events))
+    monkeypatch.setattr(warm, "configured_engine_pin", lambda: "pin")
+    monkeypatch.setattr(warm, "_emit", emitted.append)
+    stale = {
+        "type": "verify",
+        "arm": "a",
+        "task": "wizard",
+        "sample": 0,
+        "nonce": "other",
+    }
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        io.StringIO(_worker_messages(task, "capture") + json.dumps(stale) + "\n"),
+    )
+    assert warm.run_worker("a", tmp_path) == 2
+    assert "native" in events
+    assert emitted[-1]["type"] == "fatal"
+    assert "verify" in emitted[-1]["error"]
+
+
+def test_worker_gate_timeout_is_closed_and_bounded(monkeypatch):
+    emitted: list[dict] = []
+    monkeypatch.setattr(warm, "_emit", emitted.append)
+
+    class TimeoutChannel:
+        def next(self, timeout):
+            raise TimeoutError("timeout")
+
+    assert (
+        warm._gate_message(
+            TimeoutChannel(),  # pyright: ignore[reportArgumentType]
+            "capture",
+            arm_name="a",
+            task="wizard",
+            sample=0,
+            nonce="n",
+        )
+        is None
+    )
+    assert emitted[-1] == {"type": "fatal", "error": "capture gate timeout"}
+
+
+def test_worker_rejects_stale_capture_binding(tmp_path, monkeypatch):
+    events: list[str] = []
+    emitted: list[dict] = []
+    task = _worker_task(tmp_path, tmp_path / "record.json")
+    monkeypatch.setattr(warm, "make_arm", lambda name: WorkerArm(events))
+    monkeypatch.setattr(warm, "EngineSession", lambda pin: WorkerEngine(events))
+    monkeypatch.setattr(warm, "configured_engine_pin", lambda: "pin")
+    monkeypatch.setattr(warm, "_emit", emitted.append)
+    stale = {
+        "type": "capture",
+        "arm": "a",
+        "task": "wizard",
+        "sample": 0,
+        "nonce": "other",
+    }
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(task) + "\n" + json.dumps(stale) + "\n"))
+    assert warm.run_worker("a", tmp_path) == 2
+    assert "native" not in events
+    assert emitted[-1]["type"] == "fatal"
