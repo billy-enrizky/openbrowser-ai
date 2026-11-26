@@ -139,7 +139,7 @@ Prefer indexed actions whenever an element index exists. Coordinate actions use 
 
 ## 4. Benchmark: Native Local Lanes
 
-Current native evidence lives in [Benchmark Comparison](https://docs.openbrowser.me/comparison). The 2026-11-25 cold and warm lanes both put OpenBrowser MCP and CLI at the lowest p50 on every task against every competitor. The interactive resource lane has the lowest child footprint, tree RSS, and CPU on every eligible pair. The sequential scraping lane won 50 of 50 pairs against Firecrawl Local, and the full arm won 49 of 50 with one static sample 0.13 ms slower.
+Current native evidence lives in [Benchmark Comparison](https://docs.openbrowser.me/comparison). The 2026-11-25 cold and warm lanes both put OpenBrowser MCP and CLI at the lowest p50 on every task against every other framework. The interactive resource lane has the lowest child footprint, tree RSS, and CPU on every eligible pair. The sequential scraping lane won 50 of 50 pairs against Firecrawl Local, and the full arm won 49 of 50 with one static sample 0.13 ms slower.
 
 ## 5. Native web search
 

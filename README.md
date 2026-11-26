@@ -77,6 +77,7 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
   - [12.3. Configuration](#123-configuration)
 - [13. Benchmark: Native Local Lanes](#13-benchmark-native-local-lanes)
   - [13.1. Native Local Benchmarks (2026-11-25)](#131-native-local-benchmarks-2026-11-25)
+  - [13.2. Why OpenBrowser is faster and more efficient](#132-why-openbrowser-is-faster-and-more-efficient)
 - [14. CLI Usage](#14-cli-usage)
 - [15. Project Structure](#15-project-structure)
 - [16. Testing](#16-testing)
@@ -696,9 +697,22 @@ Cold interactive release baseline, N=5, rotated arm order, lower is better. The 
 | `tabs` | **593 ms** | 683 ms | 2220 ms | 1393 ms | 797 ms |
 | `auth` | **1305 ms** | 1604 ms | 3703 ms | 2506 ms | 2476 ms |
 
-In the cold release baseline, both OpenBrowser arms have the lowest p50 on all five tasks and won 5 of 5 pairs against every competitor. All 125 runs passed the exact oracle and keychain check.
+In the cold release baseline, both OpenBrowser arms have the lowest p50 on all five tasks and won 5 of 5 pairs against every other framework. All 125 runs passed the exact oracle and keychain check.
 
 Interactive resource lane, N=5: both OpenBrowser arms have the lowest median child footprint, process-tree RSS, and CPU on all five tasks. Both arms won all 150 eligible pairs per metric. Every cell is N=5 and all 125 observations passed. See [the charted comparison](https://docs.openbrowser.me/comparison).
+
+### 13.2. Why OpenBrowser is faster and more efficient
+
+The measured paths use four areas of work.
+
+1. **Request grouping and state reuse.** The interactive MCP and CLI arms group several browser actions into one Python request for most tasks. The `auth` task uses a login program and an account program around the browser restart. A request can hold several actions and persistent variables. The namespace loads optional libraries on first use. Warm CLI calls use a small standard-library client over IPC, and cold CLI startup loads the full client.
+2. **Lean MCP entry.** The lean stdio transport reads generated definitions for discovery. Stateful application setup stays lazy, and stateless tools use a direct path. The SDK escape hatch uses a different import path. Stateful task startup still includes browser and application work.
+3. **Strict HTTP.** Explicit `--no-browser` and `engine="http"` fetch and parse static pages in a Python process. CLI and namespace batches reuse one pooled HTTP client with bounded concurrency. The stateless MCP `scrape_web` call creates a one-shot client per call.
+4. **Targeted browser work.** Task scripts use selector and CDP helpers for known targets, which avoids a full DOM scan for those operations. Lightweight and no-render policies block selected asset types. The browser still loads Chromium, Blink, and V8.
+
+The tables above show the effect. The warm lane reaches 43.555 ms p50 on `wizard` with one long-lived MCP context. The cold lane puts both OpenBrowser arms lowest on all five tasks. The Firecrawl Local batch is 2.834 ms against 13.448 ms, a 4.75x p50 result. OpenBrowser lightweight won 50 of 50 sequential scraping pairs against Firecrawl Local.
+
+Other frameworks also reuse sessions and batch work. These lanes measure the configured combination. The page assigns no causal share to one mechanism without an ablation. The Firecrawl Local batch uses a 10 ms job-poll workflow and returns markdown pages; OpenBrowser returns selected row dictionaries. A matched single-call Firecrawl Local memory lane remains open, as do model-driven Agent and CodeAgent lanes and matched Lightpanda cold and warm lanes.
 
 ## 14. CLI Usage
 

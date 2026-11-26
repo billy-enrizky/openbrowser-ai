@@ -48,9 +48,10 @@ def test_comparison_page_has_current_sections_only():
         '3. Current interactive lanes, 2026-11-25',
         '4. OpenBrowser no-browser memory, 2026-11-25',
         '5. Other native local lanes, 2026-11-24',
-        '6. How to choose a surface',
-        '7. What these lanes show',
-        '8. Scope and open measurements',
+        '6. Why OpenBrowser is faster and more efficient',
+        '7. How to choose a surface',
+        '8. What these lanes show',
+        '9. Scope and open measurements',
     ]
 
 

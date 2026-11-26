@@ -57,7 +57,7 @@ Lower is better for latency ↓.
 | tabs | 593 | 683 | 2220 | 1393 | 797 |
 | auth | 1305 | 1604 | 3703 | 2506 | 2476 |
 
-Both OpenBrowser arms have the lowest p50 on all five cold tasks against all three competitors. OpenBrowser MCP and OpenBrowser CLI each won every paired sample, 5 of 5, on every task against every competitor. The CLI `tabs` p50 is 683 ms against browser-use at 797 ms.
+Both OpenBrowser arms have the lowest p50 on all five cold tasks against all three other frameworks. OpenBrowser MCP and OpenBrowser CLI each won every paired sample, 5 of 5, on every task against every other framework. The CLI `tabs` p50 is 683 ms against browser-use at 797 ms.
 
 Raw evidence:
 
@@ -124,7 +124,7 @@ The lane runs 125 observations, five tasks by five arms by five samples. All 125
 | tabs | 0.79 | 0.95 | 2.08 | 1.74 | 1.45 |
 | auth | 1.11 | 1.71 | 3.04 | 2.94 | 2.84 |
 
-Both OpenBrowser arms have the lowest median on every task for all three metrics. Across 150 planned OpenBrowser-to-competitor pairs per metric, both arms won all 150 footprint pairs, all 150 RSS pairs, and all 150 CPU pairs.
+Both OpenBrowser arms have the lowest median on every task for all three metrics. Across 150 planned OpenBrowser-to-other-framework pairs per metric, both arms won all 150 footprint pairs, all 150 RSS pairs, and all 150 CPU pairs.
 
 Raw data: [results-interactive-resources-2026-11-25-n5-final.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-interactive-resources-2026-11-25-n5-final.jsonl).
 

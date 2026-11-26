@@ -37,6 +37,7 @@ _CONTRASTIVE_PATTERNS = (
     re.compile(r"\brather\s+than\b", re.IGNORECASE),
     re.compile(r"\binstead\s+of\b", re.IGNORECASE),
 )
+_COMPETITIVE_TERMS = re.compile(r"\bcompetitors?\b", re.IGNORECASE)
 _FENCE = re.compile(r"^\s*(```|~~~)")
 _INLINE_CODE = re.compile(r"`[^`\n]*`")
 
@@ -97,3 +98,22 @@ def test_markdown_scan_prunes_ignored_directories(tmp_path: Path) -> None:
     found = _markdown_files(tmp_path)
 
     assert [path.relative_to(tmp_path).as_posix() for path in found] == ["docs/kept.md"]
+
+
+def test_first_party_markdown_uses_other_framework_terminology() -> None:
+    violations: list[str] = []
+    for path in _markdown_files():
+        for number, line in _prose_lines(path.read_text(encoding="utf-8")):
+            match = _COMPETITIVE_TERMS.search(line)
+            if match is not None:
+                relative = path.relative_to(ROOT)
+                violations.append(f"{relative}:{number}: {match.group(0)!r} in {line.strip()!r}")
+
+    assert not violations, "Use 'other framework' or 'other frameworks' for third-party tools.\n" + "\n".join(
+        violations
+    )
+
+
+def test_competitive_terminology_pattern_matches() -> None:
+    assert _COMPETITIVE_TERMS.search("against every competitor")
+    assert _COMPETITIVE_TERMS.search("all three competitors")
