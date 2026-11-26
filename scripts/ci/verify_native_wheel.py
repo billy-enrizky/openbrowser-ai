@@ -28,6 +28,7 @@ from benchmarks.interactive.resource_provenance import bind_console_entry
 
 NATIVE_ENTRY = "openbrowser-ai"
 BACKEND_ENTRY = "openbrowser-ai-py"
+BACKEND_TARGET = "openbrowser.cli_entry:cli"
 MANIFEST_SUFFIX = "extra_metadata/openbrowser-native.json"
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 _VERSION_TOKEN = re.compile(r"[0-9A-Za-z.+!_-]{1,128}\Z")
@@ -179,7 +180,11 @@ def _inspect_wheel(wheel: Path, expected_package: Path) -> dict[str, object]:
         raise VerifierError("manifest_missing" if not manifest_names else "manifest_duplicate")
     if purelib:
         raise VerifierError("wheel_metadata_invalid")
-    if NATIVE_ENTRY in entry_points or BACKEND_ENTRY not in entry_points:
+    if (
+        NATIVE_ENTRY in entry_points
+        or set(entry_points) != {BACKEND_ENTRY}
+        or entry_points[BACKEND_ENTRY] != BACKEND_TARGET
+    ):
         raise VerifierError("entry_points_invalid")
     data_name = data_names[0]
     manifest_name = manifest_names[0]

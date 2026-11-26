@@ -536,3 +536,27 @@ def test_duplicate_wheel_component_classes_are_rejected(tmp_path, expected_packa
     result = verifier.verify_native_wheel(wheel, expected_package)
     assert result["verified"] is False
     assert result["reason"] == reason
+
+
+def test_backend_entry_point_must_target_the_python_cli(tmp_path, expected_package):
+    wheel = make_wheel(
+        tmp_path,
+        expected_package,
+        entry_points="[console_scripts]\nopenbrowser-ai-py = attacker.module:main\n",
+    )
+    result = verifier.verify_native_wheel(wheel, expected_package)
+    assert result["verified"] is False
+    assert result["reason"] == "entry_points_invalid"
+
+
+def test_native_wheel_exposes_only_the_python_backend_console_script(tmp_path, expected_package):
+    wheel = make_wheel(
+        tmp_path,
+        expected_package,
+        entry_points=(
+            "[console_scripts]\nopenbrowser-ai-py = openbrowser.cli_entry:cli\nunexpected = openbrowser.cli_entry:cli\n"
+        ),
+    )
+    result = verifier.verify_native_wheel(wheel, expected_package)
+    assert result["verified"] is False
+    assert result["reason"] == "entry_points_invalid"
