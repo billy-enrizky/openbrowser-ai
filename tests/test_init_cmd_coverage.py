@@ -360,6 +360,15 @@ class TestMainCommand:
             with runner.isolated_filesystem(temp_dir=tmp_path):
                 result = runner.invoke(init_cmd_mod.main, ["--template", "default"])
 
+        rendered = "".join(
+            call.args[0]
+            for call in MockText.return_value.append.call_args_list
+            if call.args and isinstance(call.args[0], str)
+        )
+        assert result.exit_code == 0
+        assert "This generated Agent template uses ChatOpenAI and needs OPENAI_API_KEY." in rendered
+        assert "MCP and openbrowser-ai -c need no LLM key." in rendered
+
     def test_main_interactive_mode(self, tmp_path):
         """Test main in interactive mode (no template specified)."""
         mock_templates = {

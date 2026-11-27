@@ -24,6 +24,8 @@ Browser automation skills for Codex via native skill discovery. Clone and symlin
 - Chrome or Chromium installed, or the ability to install Chromium with `openbrowser-ai install`
 - Python 3.12+ with [uv](https://docs.astral.sh/uv/)
 
+MCP and `openbrowser-ai -c` need no LLM key.
+
 ## 2. Quick install with skills.sh
 
 ```bash

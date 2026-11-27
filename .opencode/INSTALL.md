@@ -26,6 +26,8 @@
 - Chrome or Chromium installed, or the ability to install Chromium with `openbrowser-ai install`
 - Python 3.12+ with [uv](https://docs.astral.sh/uv/)
 
+MCP and `openbrowser-ai -c` need no LLM key.
+
 ## 2. Quick install with skills.sh
 
 ```bash

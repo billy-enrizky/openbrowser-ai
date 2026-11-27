@@ -347,16 +347,21 @@ def main(
 				next_steps.append('\n')
 		else:
 			# Default workflow for templates without custom next_steps
-			next_steps.append('\n1. Navigate to project directory:\n', style='bold')
+			next_steps.append(
+				'\nThis generated Agent template uses ChatOpenAI and needs OPENAI_API_KEY.\n',
+				style='bold',
+			)
+			next_steps.append('MCP and openbrowser-ai -c need no LLM key.\n\n', style='dim')
+			next_steps.append('1. Navigate to project directory:\n', style='bold')
 			next_steps.append(f'   cd {template}\n\n', style='dim')
 			next_steps.append('2. Initialize uv project:\n', style='bold')
 			next_steps.append('   uv init\n\n', style='dim')
 			next_steps.append('3. Install openbrowser:\n', style='bold')
 			next_steps.append('   uv add openbrowser-ai\n\n', style='dim')
-			next_steps.append('4. Set up your API key in .env file or environment:\n', style='bold')
+			next_steps.append('4. Set OPENAI_API_KEY in the .env file or environment:\n', style='bold')
 			next_steps.append('   OPENAI_API_KEY=your-key\n', style='dim')
 			next_steps.append(
-				'   (Get your key at https://github.com/billy-enrizky/openbrowser-ai)\n\n',
+				'   (Get an OpenAI key at https://platform.openai.com/api-keys)\n\n',
 				style='dim italic',
 			)
 			next_steps.append('5. Run your script:\n', style='bold')

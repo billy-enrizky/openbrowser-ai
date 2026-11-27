@@ -1,6 +1,8 @@
-"""OpenBrowser custom-tools template.
+"""OpenBrowser custom-tools Agent template.
 
 Register additional actions on `tools` before constructing the agent.
+This template uses ChatOpenAI and needs OPENAI_API_KEY before it runs.
+MCP and openbrowser-ai -c need no LLM key.
 """
 
 import asyncio

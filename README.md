@@ -260,6 +260,8 @@ pip install openbrowser-ai[video]      # Video recording support
 
 ## 4. Quick Start
 
+CodeAgent examples need a provider key. BrowserSession examples and `openbrowser-ai -c` need no LLM key.
+
 ### 4.1. Basic Usage
 
 ```python
@@ -352,6 +354,8 @@ When a browser session exists, status includes `browser.cdp` with the root conne
 The same status surfaces add `browser.health` when a session exists. `health.phase` is `unknown`, `healthy`, `degraded`, `crashed`, `stopped`, or `failed`. The block records page-target crash history, the latest focus-recovery outcome, and a status-time local process check. `health.healthy=true` means setup or focus recovery was observed. A page read shows the current page state. Hydration and target readiness can differ. `process_present` is `null` when the published CDP root is not bound to the recorded local owner, or when process identity is inconclusive. That includes remote browsers, stopped sessions, and ambiguous PID reuse. `health` never performs a page probe or starts a browser. A status response without `health` means no browser session exists.
 
 ### 5.2. Environment Variables
+
+Provider keys are for Agent and CodeAgent runs. MCP, `openbrowser-ai -c`, `scrape`, `web-search`, and the browser skills use no LLM key.
 
 ```bash
 # Google (recommended)
@@ -776,7 +780,7 @@ Then run the calls in the same environment. The daemon keeps Python variables be
 
 Use `--render-mode full`, `--render-mode lightweight`, or `--render-mode no-render` to choose a rendering policy for a one-shot run, or `--no-render` as a shortcut for the last one. No-render mode disables screenshots and visual-only actions. For asset control without changing the mode, use `--text-only` to block external CSS, images, fonts, media, and text tracks while keeping scripts and screenshots, or one of `--no-css`, `--no-images`, `--no-fonts`, `--no-media`, `--no-scripts`. The `scrape` command accepts `--no-css`, `--no-images`, `--no-fonts`, `--no-media`, and `--render-mode`. `--no-scripts` is available on the one-shot prompt interface. The `scrape` browser fallback uses the Playwright headless shell by default. Set `OPENBROWSER_USE_HEADLESS_SHELL=0` to force full Chrome.
 
-The `-c` flag connects to a persistent browser daemon over a Unix socket (localhost TCP on Windows). Variables persist across calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity.
+The `-c` flag connects to a persistent browser daemon over a Unix socket (localhost TCP on Windows). Variables persist across calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity. The `-c` path needs no LLM key.
 
 After a browser failure, run `openbrowser-ai daemon status` before retrying because the first call may have partially run. Read `browser.health` for the last crash, focus-recovery, and local process observation. `health` is not a live page-readiness probe. Wait while recovery is pending. After a failed recovery, use `openbrowser-ai daemon reset` only when no usable target exists. Reset clears the Python executor and namespace, so persist values first.
 

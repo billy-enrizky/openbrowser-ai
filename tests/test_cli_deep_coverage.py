@@ -1276,9 +1276,10 @@ class TestRunTemplateGeneration:
         output = str(tmp_path / "out.py")
         with patch("openbrowser.cli.__file__", str(fake_templates / "cli.py")):
             _run_template_generation("default", output, True)
-        # click.echo goes to stdout
-        # Verify the file was created
+        captured = capsys.readouterr()
         assert Path(output).exists()
+        assert "This generated Agent template uses ChatOpenAI and needs OPENAI_API_KEY." in captured.out
+        assert "MCP and openbrowser-ai -c need no LLM key." in captured.out
 
 
 # ---------------------------------------------------------------------------
@@ -1444,6 +1445,13 @@ class TestTemplateMetadata:
     def test_tools_template(self):
         assert INIT_TEMPLATES["tools"]["file"] == "tools_template.py"
         assert "description" in INIT_TEMPLATES["tools"]
+
+    def test_templates_scope_provider_key_to_agent_runs(self):
+        templates_dir = Path(cli_mod.__file__).parent / "cli_templates"
+        for filename in ("default_template.py", "advanced_template.py", "tools_template.py"):
+            text = (templates_dir / filename).read_text(encoding="utf-8")
+            assert "This template uses ChatOpenAI and needs OPENAI_API_KEY" in text
+            assert "MCP and openbrowser-ai -c need no LLM key." in text
 
 
 # ---------------------------------------------------------------------------

@@ -120,7 +120,7 @@ OpenBrowser 0.1.61 compatible wheels include the native CLI frontend and the `op
 
 ## 2. Try it without an LLM
 
-OpenBrowser web search and scrape work immediately. Neither command needs an API key.
+OpenBrowser web search, scrape, form filling, page analysis, and downloads work immediately through the CLI or MCP. These workflows do not need an LLM API key.
 
 <Note>
 Use `openbrowser-ai web-search` for CLI source discovery, `openbrowser.web_search` in Python, and `web_search` in MCP or CodeAgent. These are the canonical names in OpenBrowser 0.1.61 and later.
@@ -142,7 +142,10 @@ Search snippets are discovery previews. Scrape and read the source page before y
 `--no-browser` starts no Chrome, Blink, or V8 process and stays on the HTTP path. JavaScript, screenshots, and browser cookies are unavailable on this path. The asset flags `--no-css`, `--no-images`, `--no-fonts`, `--no-media`, and `--render-mode` control the browser fallback and leave the no-browser HTTP path unchanged. Use the default `auto` engine when a page may need JavaScript.
 
 ## 3. Choose your favorite LLM
-Create a `.env` file and add your API key.
+
+Provider keys apply only to Agent and CodeAgent runs. The browser skills and MCP server do not use them.
+
+Create a `.env` file and add your provider key.
 
 ```bash .env
 touch .env
@@ -150,7 +153,7 @@ touch .env
 
 <Info>On Windows, use `echo. > .env`</Info>
 
-Then add your API key to the file.
+Then add your provider key to the file.
 
 <CodeGroup>
 ```bash Google

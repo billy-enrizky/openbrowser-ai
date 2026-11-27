@@ -34,6 +34,8 @@ Local CLI daemon sessions persist cookies and login state in Chrome's user-data 
 - **Python 3.12+** with [uv](https://docs.astral.sh/uv/) package manager
 - **Claude Code** CLI
 
+MCP and `openbrowser-ai -c` need no LLM key.
+
 ## 2. Installation
 
 ### 2.1. From GitHub marketplace

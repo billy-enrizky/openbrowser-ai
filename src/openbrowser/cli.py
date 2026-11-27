@@ -586,10 +586,12 @@ if _mode is CliMode.TEMPLATE:
 
 		click.echo(f'✅ Created {output_path}')
 		click.echo('\nNext steps:')
+		click.echo('  This generated Agent template uses ChatOpenAI and needs OPENAI_API_KEY.')
+		click.echo('  MCP and openbrowser-ai -c need no LLM key.')
 		click.echo('  1. Install openbrowser:')
 		click.echo('     uv pip install openbrowser-ai')
-		click.echo('  2. Set up your API key in .env file or environment:')
-		click.echo('     your llm API Key, e.g., OPENAI_API_KEY=your-key')
+		click.echo('  2. Set OPENAI_API_KEY in the .env file or environment:')
+		click.echo('     OPENAI_API_KEY=your-key')
 		click.echo('  3. Run your script:')
 		click.echo(f'     python {output_path.name}')
 	except Exception as e:
@@ -1745,10 +1747,12 @@ def _run_template_generation(template: str, output: str | None, force: bool):
 	if _write_init_file(output_path, content, force):
 		click.echo(f'✅ Created {output_path}')
 		click.echo('\nNext steps:')
+		click.echo('  This generated Agent template uses ChatOpenAI and needs OPENAI_API_KEY.')
+		click.echo('  MCP and openbrowser-ai -c need no LLM key.')
 		click.echo('  1. Install openbrowser:')
 		click.echo('     uv pip install openbrowser-ai')
-		click.echo('  2. Set up your API key in .env file or environment:')
-		click.echo('     your llm API Key, e.g., OPENAI_API_KEY=your-key')
+		click.echo('  2. Set OPENAI_API_KEY in the .env file or environment:')
+		click.echo('     OPENAI_API_KEY=your-key')
 		click.echo('  3. Run your script:')
 		click.echo(f'     python {output_path.name}')
 	else:
@@ -1873,10 +1877,12 @@ def init(
 	if _write_init_file(output_path, content, force):
 		click.echo(f'✅ Created {output_path}')
 		click.echo('\nNext steps:')
+		click.echo('  This generated Agent template uses ChatOpenAI and needs OPENAI_API_KEY.')
+		click.echo('  MCP and openbrowser-ai -c need no LLM key.')
 		click.echo('  1. Install openbrowser:')
 		click.echo('     uv pip install openbrowser-ai')
-		click.echo('  2. Set up your API key in .env file or environment:')
-		click.echo('     your llm API Key, e.g., OPENAI_API_KEY=your-key')
+		click.echo('  2. Set OPENAI_API_KEY in the .env file or environment:')
+		click.echo('     OPENAI_API_KEY=your-key')
 		click.echo('  3. Run your script:')
 		click.echo(f'     python {output_path.name}')
 	else:
