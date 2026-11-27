@@ -13,8 +13,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_INPUT = HERE / "results" / "results-mcp-scrape-web-resource-2026-11-25-n5.json"
-DEFAULT_OUTPUT = HERE.parents[1] / "docs" / "images" / "native-mcp-http-memory-2026-11-25.png"
+DEFAULT_INPUT = HERE / "results" / "results-mcp-scrape-web-resource-2026-11-26-n5.json"
+DEFAULT_OUTPUT = HERE.parents[1] / "docs" / "images" / "native-mcp-http-memory-2026-11-26.png"
 
 
 def main() -> int:
@@ -58,7 +58,7 @@ def main() -> int:
         ax.text(
             value + 1.5,
             bar.get_y() + bar.get_height() / 2,
-            f"{value:.1f} MiB",
+            f"{value:.3f} MiB",
             va="center",
             fontsize=12,
             fontweight="bold",
@@ -81,8 +81,9 @@ def main() -> int:
         0,
         1.02,
         (
-            "One local static page fixture. No Chrome, Blink, or V8 process was observed. RSS is not PSS."
-            + (f" Excluded {excluded} invalid row(s)." if excluded else "")
+            "One local static page fixture. No Chrome, Blink, or V8 process was observed. "
+            "RSS counts resident pages across the process tree."
+            + (f" Excluded {excluded} invalid observations." if excluded else "")
         ),
         transform=ax.transAxes,
         fontsize=9.5,

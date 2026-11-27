@@ -676,6 +676,15 @@ Memory depends on the surface. Values are process-tree RSS on a local fixture:
 
 The `scrape` browser fallback uses the Playwright headless shell by default. `OPENBROWSER_USE_HEADLESS_SHELL=0` restores full Chrome.
 
+No-browser MCP memory, 2026-11-26. Peak process-tree RSS (MiB) ↓ **Lower is better**. Each observation starts a fresh MCP server.
+
+| Mode | Peak process-tree RSS | Browser processes observed | Correct results |
+| --- | ---: | ---: | ---: |
+| One `scrape_web` call | 46.188 MiB median (45.859 to 51.641, N=5) | 0 | 5 of 5 |
+| 25 concurrent `scrape_web` calls | 63.188 MiB median (60.781 to 65.250, N=5) | 0 | 25 of 25 in 5 of 5 runs |
+
+[Raw memory data](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-mcp-scrape-web-resource-2026-11-26-n5.json) and [build provenance](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-mcp-scrape-web-resource-2026-11-26-n5.provenance.json). These values describe one local static fixture and the observed MCP process tree.
+
 Warm interactive v2, N=5, rotated arm order. Latency (ms) ↓ **Lower is better**.
 
 Warm-session readiness uses the native session workflow with OpenBrowser app `5a88fb97`. Each arm starts once and every task gets a fresh fixture server. All 100 observations passed the adapter, exact oracle, and keychain checks. Warm tables show milliseconds to three decimal places. The raw file keeps full precision.

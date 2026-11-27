@@ -1,14 +1,14 @@
 {
   "lane": "mcp-scrape-web-resource",
-  "generated_at": "2026-11-25T05:50:36Z",
+  "generated_at": "2026-11-26T17:52:03Z",
   "surface": "stateless scrape_web over MCP stdio",
   "browser_started": false,
   "valid": true,
   "sequential": [
     {
       "calls": 1,
-      "latency_ms": 83.889,
-      "peak_rss_mib": 48.688,
+      "latency_ms": 350.083,
+      "peak_rss_mib": 51.641,
       "max_children": 0,
       "browser_processes_observed": false,
       "children_at_end": 0,
@@ -16,8 +16,8 @@
     },
     {
       "calls": 1,
-      "latency_ms": 89.727,
-      "peak_rss_mib": 50.172,
+      "latency_ms": 75.486,
+      "peak_rss_mib": 45.859,
       "max_children": 0,
       "browser_processes_observed": false,
       "children_at_end": 0,
@@ -25,8 +25,8 @@
     },
     {
       "calls": 1,
-      "latency_ms": 79.344,
-      "peak_rss_mib": 47.547,
+      "latency_ms": 73.125,
+      "peak_rss_mib": 46.047,
       "max_children": 0,
       "browser_processes_observed": false,
       "children_at_end": 0,
@@ -34,8 +34,8 @@
     },
     {
       "calls": 1,
-      "latency_ms": 77.219,
-      "peak_rss_mib": 47.938,
+      "latency_ms": 75.06,
+      "peak_rss_mib": 46.188,
       "max_children": 0,
       "browser_processes_observed": false,
       "children_at_end": 0,
@@ -43,8 +43,8 @@
     },
     {
       "calls": 1,
-      "latency_ms": 87.043,
-      "peak_rss_mib": 48.109,
+      "latency_ms": 93.649,
+      "peak_rss_mib": 46.266,
       "max_children": 0,
       "browser_processes_observed": false,
       "children_at_end": 0,
@@ -54,8 +54,8 @@
   "concurrent": [
     {
       "calls": 25,
-      "latency_ms": 158.124,
-      "peak_rss_mib": 62.359,
+      "latency_ms": 185.835,
+      "peak_rss_mib": 65.25,
       "max_children": 0,
       "browser_processes_observed": false,
       "children_at_end": 0,
@@ -63,8 +63,8 @@
     },
     {
       "calls": 25,
-      "latency_ms": 155.096,
-      "peak_rss_mib": 62.312,
+      "latency_ms": 181.658,
+      "peak_rss_mib": 63.281,
       "max_children": 0,
       "browser_processes_observed": false,
       "children_at_end": 0,
@@ -72,8 +72,26 @@
     },
     {
       "calls": 25,
-      "latency_ms": 168.775,
-      "peak_rss_mib": 64.297,
+      "latency_ms": 193.136,
+      "peak_rss_mib": 60.781,
+      "max_children": 0,
+      "browser_processes_observed": false,
+      "children_at_end": 0,
+      "ok": 25
+    },
+    {
+      "calls": 25,
+      "latency_ms": 180.709,
+      "peak_rss_mib": 60.984,
+      "max_children": 0,
+      "browser_processes_observed": false,
+      "children_at_end": 0,
+      "ok": 25
+    },
+    {
+      "calls": 25,
+      "latency_ms": 167.942,
+      "peak_rss_mib": 63.188,
       "max_children": 0,
       "browser_processes_observed": false,
       "children_at_end": 0,
@@ -81,12 +99,14 @@
     }
   ],
   "concurrency": 25,
+  "samples": 5,
+  "concurrency_samples": 5,
   "limits": [
     "One local static fixture, not the live web.",
     "Peak RSS is process-tree resident set size in MiB and can count shared pages more than once.",
     "The Python MCP server process and any observed descendants are included.",
     "The no-browser mode cannot execute JavaScript, take screenshots, or use browser cookies.",
-    "Each concurrent row is one observation unless concurrency-samples is raised.",
+    "Each concurrent row is one independent observation with a fresh MCP server.",
     "Do not compare this RSS total to a PSS or per-process figure without stating the scope."
   ]
 }
