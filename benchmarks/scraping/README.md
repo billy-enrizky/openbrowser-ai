@@ -29,14 +29,14 @@ Measure OpenBrowser render modes on deterministic local pages. No external netwo
 - Latency is lower is better ↓. Memory is lower is better ↓.
 - Latency is in milliseconds. Memory is process-tree RSS in MiB, divided by 1048576.
 - The `scrape_web` memory lane uses N=5 for both one call and 25 concurrent calls. The Firecrawl Local and Lightpanda latency lanes use N=10 per arm and task.
-- The memory lane is from 2026-11-26. The Firecrawl Local and Lightpanda reference lanes are from 2026-11-24.
+- The memory lane is from 2026-11-26. The Firecrawl Local sequential and Lightpanda reference lanes are from 2026-11-25. The Firecrawl Local batch lane is from 2026-11-24.
 - No AWS or cloud browser was used.
 - The brief does not report host load for these scraping lanes. Historical sections state their own recorded load where available.
 - Published Lightpanda and Firecrawl figures provide context and come from other measurement scopes.
 
 ## 2. Current results, 2026-11-26, and reference lanes
 
-The 2026-11-26 MCP memory lane appears first. The Firecrawl Local and Lightpanda lanes are the latest reference runs from 2026-11-24.
+The 2026-11-26 MCP memory lane appears first. The Firecrawl Local sequential and Lightpanda lanes are the latest reference runs from 2026-11-25. The Firecrawl Local batch lane is from 2026-11-24.
 
 ### 2.1. OpenBrowser no-browser MCP scrape_web memory lane, 2026-11-26
 
