@@ -196,6 +196,25 @@ def test_wrong_scope_never_becomes_eligible(arm):
     assert not capture(target, host).eligible
 
 
+def test_chrome_devtools_owned_popen_survives_observed_node_title_rewrite():
+    target = request(readers.NativeArm.CHROME_DEVTOOLS)
+    host, process, _ = fake_readers(target)
+    process.argv = ["chrome-devtools-mcp", "", "", "", "", ""]
+    process.environment = {}
+    result = capture(target, host)
+    assert result.eligible
+    assert result.proof is not None and result.proof.proof is not None
+    assert result.proof.proof.identity == SERVICE
+
+
+def test_chrome_devtools_title_rewrite_keeps_native_identity_fences():
+    target = request(readers.NativeArm.CHROME_DEVTOOLS)
+    host, process, _ = fake_readers(target)
+    process.argv = ["chrome-devtools-mcp", "", ""]
+    process.created += 1
+    assert not capture(target, host).eligible
+
+
 @pytest.mark.parametrize(
     "arm", [readers.NativeArm.OPENBROWSER_CLI, readers.NativeArm.AGENT_BROWSER, readers.NativeArm.BROWSER_USE]
 )

@@ -425,6 +425,18 @@ def _scope_reader(target: NativeServiceRequest):
                 _path(environment.get(k)) != _path(v) for k, v in expected_env.items()
             ):
                 raise ServiceReaderError(ServiceFailure.SCOPE_MISMATCH)
+        if arm is NativeArm.CHROME_DEVTOOLS:
+            native_argv = _method(process, "cmdline")
+            if (
+                isinstance(native_argv, (tuple, list))
+                and native_argv
+                and native_argv[0] == "chrome-devtools-mcp"
+                and all(token == "" for token in native_argv[1:])
+            ):
+                # Node's process.title overwrites argv and environ on macOS.
+                # The worker-owned Popen identity attests this launch scope;
+                # the existing PID/create-time/executable fences still apply.
+                return str(expected_scope)
         argv = _argv(process)
         if arm is NativeArm.OPENBROWSER_CLI and argv[1:] != ("-m", "openbrowser.daemon.server"):
             raise ServiceReaderError(ServiceFailure.SCOPE_MISMATCH)
