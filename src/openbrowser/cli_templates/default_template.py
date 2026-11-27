@@ -1,6 +1,7 @@
-"""OpenBrowser default template.
+"""OpenBrowser default Agent template.
 
-Set OPENAI_API_KEY in your environment or .env file before running.
+This template uses ChatOpenAI and needs OPENAI_API_KEY before it runs.
+MCP and openbrowser-ai -c need no separate OpenAI, OpenBrowser, or MCP API key.
 """
 
 import asyncio

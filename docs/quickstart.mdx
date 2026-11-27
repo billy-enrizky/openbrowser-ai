@@ -16,7 +16,7 @@ icon: "rocket"
 
 {/* toc:end */}
 
-To get started with OpenBrowser you need to install the package and set up an API key.
+To get started with OpenBrowser you need to install the package. Add a provider key when you use Agent or CodeAgent with a hosted provider.
 
 ## 1. Installing OpenBrowser
 
@@ -118,7 +118,7 @@ To get started with OpenBrowser you need to install the package and set up an AP
 
 ## 2. Try it without an LLM
 
-OpenBrowser web search and scrape work immediately. Neither command needs an API key.
+OpenBrowser web search, scrape, form filling, page analysis, and downloads work immediately through the CLI or MCP. These workflows do not need a separate OpenAI, OpenBrowser, or MCP API key.
 
 <Note>
 The canonical `web-search` command, `openbrowser.web_search` module, and MCP `web_search` tool are on the current source branch. PyPI `0.1.60` exposes the same feature as `openbrowser-ai search`, `openbrowser.search`, and MCP `search_web`. To install the canonical CLI from source, run `uv tool install --force "openbrowser-ai @ git+https://github.com/billy-enrizky/openbrowser-ai.git@main"`. To run it once without changing the installed CLI, use `uvx --from git+https://github.com/billy-enrizky/openbrowser-ai.git@main openbrowser-ai web-search "OpenBrowser MCP docs"`.
@@ -140,7 +140,10 @@ Search snippets are discovery previews. Scrape and read the source page before y
 `--no-browser` starts no Chrome, Blink, or V8 process and stays on the HTTP path. JavaScript, screenshots, and browser cookies are unavailable on this path. The asset flags `--no-css`, `--no-images`, `--no-fonts`, `--no-media`, and `--render-mode` control the browser fallback and leave the no-browser HTTP path unchanged. Use the default `auto` engine when a page may need JavaScript.
 
 ## 3. Choose your favorite LLM
-Create a `.env` file and add your API key.
+
+Provider keys apply only to Agent and CodeAgent runs that use a hosted provider. Local models need no hosted provider key. The browser skills and MCP server need no separate OpenAI, OpenBrowser, or MCP API key.
+
+Create a `.env` file and add your provider key.
 
 ```bash .env
 touch .env
@@ -148,7 +151,7 @@ touch .env
 
 <Info>On Windows, use `echo. > .env`</Info>
 
-Then add your API key to the file.
+Then add your provider key to the file.
 
 <CodeGroup>
 ```bash Google

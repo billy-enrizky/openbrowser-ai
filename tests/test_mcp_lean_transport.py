@@ -257,6 +257,21 @@ async def test_lean_transport_modern_envelope_and_version_errors(tmp_path):
         await c.finish()
 
 
+def test_generated_catalog_states_local_keyless_execution():
+    from openbrowser.mcp.catalog import load_tool_definitions
+
+    keyless = "No separate OpenAI, OpenBrowser, or MCP API key is required."
+    expected = {
+        False: {"execute_code", "web_search"},
+        True: {"execute_code", "web_search", "scrape_web", "create_context"},
+    }
+    for compact in (False, True):
+        for modern in (False, True):
+            tools = {tool["name"]: tool for tool in load_tool_definitions(modern=modern, compact=compact)}
+            for name in expected[modern]:
+                assert keyless in tools[name]["description"]
+
+
 def test_generated_catalog_matches_the_live_server_catalog():
     from openbrowser.code_use.descriptions import (
         EXECUTE_CODE_DESCRIPTION,

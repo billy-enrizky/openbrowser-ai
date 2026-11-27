@@ -136,13 +136,15 @@ openbrowser-ai config status
 
 Read `path`, `state`, and `restart_required`. A missing file is created with defaults once. A legacy, invalid, or unreadable file is never rewritten. If the file is invalid, repair it in place or move it to a unique backup name and run `config status` again. Moving it aside does not migrate old settings.
 
-Set an LLM key only when the user wants Agent or CodeAgent runs:
+Set a hosting provider key only when the user wants Agent or CodeAgent runs that use that hosted provider:
 
 ```bash
 export GOOGLE_API_KEY=...   # or OPENAI_API_KEY / ANTHROPIC_API_KEY
 ```
 
-MCP and `openbrowser-ai -c` do not need an LLM key. Do not print the value.
+Local models need no hosted provider key.
+
+MCP and `openbrowser-ai -c` need no separate OpenAI, OpenBrowser, or MCP API key. Do not print the value.
 
 ## 5. Step 4 -- Configure MCP
 
