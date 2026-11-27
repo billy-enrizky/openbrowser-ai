@@ -117,3 +117,44 @@ def test_first_party_markdown_uses_other_framework_terminology() -> None:
 def test_competitive_terminology_pattern_matches() -> None:
     assert _COMPETITIVE_TERMS.search("against every competitor")
     assert _COMPETITIVE_TERMS.search("all three competitors")
+
+
+_SKILLS_DIR = ROOT / "plugin" / "skills"
+_BLANKET_KEY_CLAIMS = (
+    "requires an OpenAI / Anthropic / Google",
+    "requires an LLM API key",
+    "requires a real OpenAI key",
+    "requires an OpenAI key",
+    "needs an OpenAI key",
+)
+
+
+def test_skills_avoid_blanket_provider_key_claims() -> None:
+    violations: list[str] = []
+    for path in sorted(_SKILLS_DIR.glob("*/SKILL.md")):
+        text = path.read_text(encoding="utf-8")
+        for phrase in _BLANKET_KEY_CLAIMS:
+            if phrase in text:
+                violations.append(f"{path.relative_to(ROOT)}: {phrase}")
+
+    assert not violations, (
+        "Skills must scope provider keys to optional Agent routes and name the keyless local path.\n"
+        + "\n".join(violations)
+    )
+
+
+def test_every_skill_documents_a_keyless_local_route() -> None:
+    for path in sorted(_SKILLS_DIR.glob("*/SKILL.md")):
+        text = path.read_text(encoding="utf-8").lower()
+        assert "no separate" in text, f"{path.relative_to(ROOT)} must state the keyless local route"
+
+
+def test_deep_research_documents_keyless_c_path_and_configured_p_route() -> None:
+    text = (_SKILLS_DIR / "deep-research" / "SKILL.md").read_text(encoding="utf-8")
+    for token in (
+        "No separate API key is required.",
+        "host assistant does the reasoning",
+        "provider configured for the agent",
+        "NEVER use openbrowser-ai -p",
+    ):
+        assert token in text
