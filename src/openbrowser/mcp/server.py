@@ -951,13 +951,14 @@ class _BrowserOwner:
 					pass
 			self._browser_lifecycle.transition(LifecyclePhase.STARTING, reason='browser start requested')
 
+			# Initialize browser session. The namespace import runs on a
+			# worker thread at the same time, so a cold start pays the larger
+			# of the two costs instead of their sum.
+			namespace_import = start_namespace_import()
 			session = None
 			try:
 				profile = self._build_browser_profile()
 				_ensure_browser_stack()
-				# Shared browser imports finish first; namespace work then
-				# overlaps Chrome startup without competing for the import lock.
-				namespace_import = start_namespace_import()
 				session = BrowserSession(browser_profile=profile)
 				self.browser_session = session
 				await asyncio.wait_for(
