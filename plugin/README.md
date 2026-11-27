@@ -169,7 +169,26 @@ Prefer indexed actions whenever an element index exists. Coordinate actions use 
 
 ## 4. Benchmark: Native Local Lanes
 
-Current native evidence lives in [Benchmark Comparison](https://docs.openbrowser.me/comparison). The 2026-11-25 cold and warm lanes both put OpenBrowser MCP and CLI at the lowest p50 on every task against every other framework. The interactive resource lane has the lowest child footprint, tree RSS, and CPU on every eligible pair. The sequential scraping lane won 50 of 50 pairs against Firecrawl Local, and the full arm won 49 of 50 with one static sample 0.13 ms slower.
+The 2026-11-27 interactive lanes include OpenBrowser CLI and MCP, Playwright CLI and MCP, Chrome DevTools MCP, agent-browser, and browser-use.
+All 630 observations passed their task oracles and lane checks. Each task/interface cell has N=5.
+
+The table counts OpenBrowser comparisons against both Playwright interfaces. Lower time and memory values are better.
+
+| Metric | Cold wins / comparisons | Warm wins / comparisons |
+| --- | ---: | ---: |
+| Median task time | 13 / 20 | 16 / 16 |
+| p95 task time | 12 / 20 | 16 / 16 |
+| Median peak native process-tree RSS | 20 / 20 | 16 / 16 |
+
+Seven cold median-time comparisons remain slower than Playwright MCP.
+They cover OpenBrowser CLI on modal, download, tabs, and auth, plus OpenBrowser MCP on download, tabs, and auth.
+At N=5, the harness p95 equals the maximum sample. Resource observations supply separate memory and CPU evidence.
+
+OpenBrowser reuses its daemon and MCP context between warm tasks. Code execution batches browser actions and returns text or structured values.
+Other frameworks also reuse sessions and batch actions. The measurements describe the configured interfaces, with each remaining loss visible.
+
+Read the [per-task scoreboard](../benchmarks/interactive/results/results-seven-arm-2026-11-27-n5.scoreboard.md) for the measured values.
+[Benchmark Comparison](https://docs.openbrowser.me/comparison) includes the interactive results and the separate Firecrawl Local and Lightpanda scraping lanes.
 
 ## 5. Native web search
 
