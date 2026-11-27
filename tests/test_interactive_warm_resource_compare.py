@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import queue
@@ -15,8 +16,9 @@ from typing import ClassVar
 
 import pytest
 
-from benchmarks.interactive import resource_compare
+from benchmarks.interactive import resource_compare, resource_provenance
 from benchmarks.interactive import warm_resource_compare as warm
+from benchmarks.interactive.adapters.service_roots import ServiceIdentity
 from benchmarks.interactive.fixtures.server import BENCH_PASSWORD, REPORT_BYTES
 from benchmarks.interactive.resource_compare import ProcessTreeSampler, cleanup_owned
 
@@ -75,12 +77,100 @@ class FakeServer:
         self.state = FakeState(state)
 
 
+class FakeNativeRead:
+    def __init__(self, eligible: bool = True) -> None:
+        self.eligible = eligible
+        self.failure = None
+
+
+class FakeNativeRoot:
+    def __init__(
+        self,
+        arm: str,
+        ready: dict,
+        scope,
+        controller: ServiceIdentity,
+        worker: ServiceIdentity,
+        *,
+        ready_eligible: bool = True,
+        before_eligible: bool = True,
+        after_eligible: bool = True,
+    ) -> None:
+        self.arm = arm
+        self.ready = ready
+        self.scope = scope
+        self.controller = controller
+        self.worker = worker
+        self._ready_eligible = ready_eligible
+        self._before_eligible = before_eligible
+        self._after_eligible = after_eligible
+        self.ready_read = FakeNativeRead(ready_eligible)
+
+    @property
+    def ready_eligible(self) -> bool:
+        return self._ready_eligible
+
+    def verify_before(self) -> FakeNativeRead:
+        return FakeNativeRead(self._before_eligible)
+
+    def verify_after(self, before) -> FakeNativeRead:
+        return FakeNativeRead(self._after_eligible)
+
+    def _public(self, eligible: bool) -> dict:
+        return {
+            "eligible": eligible,
+            "failure": None if eligible else "fake_failure",
+            "proof": (
+                {
+                    "pid": 7000,
+                    "created_at": 1.0,
+                    "source": "fake",
+                    "executable_basename": "fake",
+                    "scope_digest": "0" * 64,
+                }
+                if eligible
+                else None
+            ),
+        }
+
+    def public_ready(self) -> dict:
+        return self._public(self._ready_eligible)
+
+    def public_before(self, read) -> dict:
+        return self._public(getattr(read, "eligible", False) is True)
+
+    def public_after(self, read) -> dict:
+        return self._public(getattr(read, "eligible", False) is True)
+
+    def evidence_ready(self) -> dict:
+        return {
+            "phase": "ready",
+            "arm": self.arm,
+            "sentinel": ["raw-ready"],
+            "eligible": self._ready_eligible,
+        }
+
+    def evidence_before(self, read) -> dict:
+        return {"phase": "before", "arm": self.arm, "sentinel": ["raw-before"], "eligible": read.eligible}
+
+    def evidence_after(self, read) -> dict:
+        return {"phase": "after", "arm": self.arm, "sentinel": ["raw-after"], "eligible": read.eligible}
+
+
 class FakeSampler:
     def __init__(self, script: list[dict], *, unverified: int = 0) -> None:
         self.script = script
         self.values: list[dict] = []
         self.events: list[str] = []
         self.unverified = unverified
+        self.native_controller: ServiceIdentity | None = None
+        self.native_enrolled = False
+
+    def set_native_controller(self, identity: ServiceIdentity) -> None:
+        self.native_controller = identity
+
+    def enroll_native_service(self, read, *, controller: ServiceIdentity) -> None:
+        self.native_enrolled = getattr(read, "eligible", False) is True
 
     def discover_orphans(self) -> None:
         self.events.append("discover")
@@ -96,14 +186,23 @@ class FakeSampler:
         footprints = [item["footprint"] for item in self.values]
         return {
             "peak_tree_rss_bytes": max(item["rss"] for item in self.values),
+            "peak_worker_rss_bytes": 100,
+            "peak_child_tree_rss_bytes": max(item["rss"] for item in self.values),
             "peak_child_footprint_bytes": max(footprints) if all(value is not None for value in footprints) else None,
-            "observed_tree_cpu_seconds": max(item["cpu"] for item in self.values),
+            "observed_tree_cpu_seconds": max(item["cpu"] for item in self.values) + 0.5,
+            "observed_child_cpu_seconds": max(item["cpu"] for item in self.values),
             "observed_child_processes": 1,
             "observed_browser_during_native_run": 1,
             "unverified_processes": self.unverified,
             "read_errors": 0,
             "fatal_read_errors": 0,
             "footprint_status": "observed" if all(value is not None for value in footprints) else "unavailable",
+            "native_service_method_version": resource_compare.NATIVE_SERVICE_METHOD_VERSION,
+            "native_service_roots": (
+                [{"pid": 7000, "created_at": 1.0, "source": "fake", "observed": True}] if self.native_enrolled else []
+            ),
+            "native_service_roots_observed": self.native_enrolled,
+            "native_controller_excluded": True if self.native_controller is not None else None,
         }
 
 
@@ -145,6 +244,7 @@ class FakeSession:
         no_verify: bool = False,
         bad_native_nonce: bool = False,
         bad_done_nonce: bool = False,
+        ready_extra: dict | None = None,
     ) -> None:
         self.arm = arm
         self.workdir = Path(workdir)
@@ -179,15 +279,15 @@ class FakeSession:
         if not bad_root:
             self.downloads.mkdir(parents=True, exist_ok=True)
         if not ready_timeout:
-            self.inbox.put(
-                {
-                    "type": "ready",
-                    "payload": {"browser_version": "Test"},
-                    "warmup_ms": 1.0,
-                    "root": str(self.root),
-                    "downloads": str(self.downloads),
-                }
-            )
+            ready = {
+                "type": "ready",
+                "payload": {"browser_version": "Test"},
+                "warmup_ms": 1.0,
+                "root": str(self.root),
+                "downloads": str(self.downloads),
+            }
+            ready.update(ready_extra or {})
+            self.inbox.put(ready)
         FakeSession.instances.append(self)
 
     def _log(self, value: str) -> None:
@@ -324,12 +424,19 @@ def run_lane(
     fixture_factory=None,
     fixture_stop=None,
     worker_timeout=5.0,
+    native_root_factory=None,
+    controller_identity=None,
+    worker_identity_factory=None,
+    ready_extra_factory=None,
 ):
     output = tmp_path / "warm-resource.jsonl"
     sessions: list[FakeSession] = []
 
     def factory(arm, workdir, diagnostics):
-        session = FakeSession(arm, Path(workdir), **(session_options or {}))
+        options = dict(session_options or {})
+        if ready_extra_factory is not None:
+            options["ready_extra"] = ready_extra_factory(arm)
+        session = FakeSession(arm, Path(workdir), **options)
         sessions.append(session)
         return session
 
@@ -354,6 +461,10 @@ def run_lane(
         fixture_stop=fixture_stop or (lambda server, thread: None),
         sampler_factory=sampler_factory or sampler,
         cleanup=cleanup or (lambda sampler, **kwargs: {"verified": True, "remaining": [], "errors": []}),
+        native_root_factory=native_root_factory or FakeNativeRoot,
+        controller_identity=controller_identity or ServiceIdentity(999, 999.0),
+        worker_identity_factory=worker_identity_factory
+        or (lambda session: ServiceIdentity(session.pid, float(session.pid))),
     )
     return output, records, sessions
 
@@ -378,8 +489,15 @@ def test_all_four_warm_tasks_record_eligible_metrics(tmp_path):
         for record in records
     )
     assert all(record["warm_peak_tree_rss_bytes"] == 120 for record in records)
+    assert all(record["warm_peak_worker_rss_bytes"] == 100 for record in records)
     assert all(record["warm_peak_child_footprint_bytes"] == 60 for record in records)
     assert all(record["warm_task_tree_cpu_delta_seconds"] == 1.0 for record in records)
+    assert all(record["warm_worker_task_cpu_delta_seconds"] == 0.0 for record in records)
+    assert all(record["native_service_method_version"] == 1 for record in records)
+    assert all(record["warm_native_roots_observed"] is True for record in records)
+    assert all(record["warm_native_controller_excluded"] is True for record in records)
+    assert all(record["native_service_before"]["eligible"] is True for record in records)
+    assert all(record["native_service_after"]["eligible"] is True for record in records)
     assert all(record["latency_claim_allowed"] is False for record in records)
     lines = [json.loads(line) for line in output.read_text().splitlines()]
     terminal = lines[-1]
@@ -388,8 +506,11 @@ def test_all_four_warm_tasks_record_eligible_metrics(tmp_path):
     assert terminal["provenance_verified"] is True
     assert terminal["observations"] == 8
     assert terminal["sampler_method_version"] == warm.SAMPLER_METHOD_VERSION == 7
+    assert terminal["native_service_method_version"] == warm.NATIVE_SERVICE_METHOD_VERSION == 1
     assert lines[0]["sampler_method_version"] == 7
+    assert lines[0]["native_service_method_version"] == 1
     assert all(record["sampler_method_version"] == 7 for record in records)
+    assert all(record["native_service_method_version"] == 1 for record in records)
     assert all(session.closed for session in sessions)
 
 
@@ -398,6 +519,233 @@ def test_ready_arrives_before_any_task(tmp_path):
     for session in sessions:
         assert session.received[0]["type"] == "ready"
         assert session.sent[0]["type"] == "task"
+
+
+def canonical_ready(arm: str) -> dict:
+    index = list(warm.DEFAULT_ARMS).index(arm)
+    if arm in warm._MCP_ARMS or arm == "playwright-cli":
+        native = {"kind": "popen", "pid": 7000 + index, "created_at": 10.0 + index}
+    else:
+        native = {"kind": "pid_file"}
+    return {"session": f"s{index}", "native": native, "binary": f"/fake/{arm}"}
+
+
+def test_all_seven_native_roots_follow_ready_protocol(tmp_path):
+    roots = []
+
+    def native_factory(*args):
+        root = FakeNativeRoot(*args)
+        roots.append(root)
+        return root
+
+    output, records, sessions = run_lane(
+        tmp_path,
+        arms=warm.DEFAULT_ARMS,
+        tasks=("wizard",),
+        samples=1,
+        native_root_factory=native_factory,
+        ready_extra_factory=canonical_ready,
+    )
+    lines = [json.loads(line) for line in output.read_text().splitlines()]
+    terminal = lines[-1]
+
+    assert len(records) == 7
+    assert {root.arm for root in roots} == set(warm.DEFAULT_ARMS)
+    assert all(root.controller == ServiceIdentity(999, 999.0) for root in roots)
+    assert all(root.worker.pid > 0 and root.worker.created_at == float(root.worker.pid) for root in roots)
+    assert all(record["resource_ok"] is True for record in records)
+    assert all(record["native_service_method_version"] == 1 for record in records)
+    assert all(record["warm_native_roots_observed"] is True for record in records)
+    assert all(record["warm_native_controller_excluded"] is True for record in records)
+    assert all(record["native_service_before"]["eligible"] is True for record in records)
+    assert all(record["native_service_after"]["eligible"] is True for record in records)
+    assert all(terminal["warmups"][arm]["native_service"]["eligible"] is True for arm in warm.DEFAULT_ARMS)
+    assert terminal["native_service_method_version"] == 1
+    assert terminal["valid"] is True
+    assert warm.lane_valid(
+        records,
+        terminal,
+        arms=warm.DEFAULT_ARMS,
+        tasks=("wizard",),
+        samples=1,
+    )
+    assert all(session.closed for session in sessions)
+
+
+def test_private_native_evidence_retains_distinct_before_and_after(tmp_path):
+    output, records, _sessions = run_lane(tmp_path, arms=("a",))
+    row = records[0]
+    diagnostics = output.parent / f"{output.stem}.diagnostics"
+    before_path = diagnostics / row["native_service_before_evidence_artifact"]
+    after_path = diagnostics / row["native_service_after_evidence_artifact"]
+    before = json.loads(before_path.read_text())
+    after = json.loads(after_path.read_text())
+
+    assert before["sentinel"] == ["raw-before"]
+    assert after["sentinel"] == ["raw-after"]
+    assert before["eligible"] is True and after["eligible"] is True
+    assert row["native_service_before_evidence_sha256"] == hashlib.sha256(before_path.read_bytes()).hexdigest()
+    assert row["native_service_after_evidence_sha256"] == hashlib.sha256(after_path.read_bytes()).hexdigest()
+    assert row["native_service_before_evidence_sha256"] != row["native_service_after_evidence_sha256"]
+    assert str(diagnostics) not in json.dumps(row)
+
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    ready = terminal["warmups"]["a"]["native_service"]
+    ready_path = diagnostics / ready["evidence_artifact"]
+    assert ready["evidence_sha256"] == hashlib.sha256(ready_path.read_bytes()).hexdigest()
+    assert json.loads(ready_path.read_text())["phase"] == "ready"
+
+
+def test_ineligible_native_ready_blocks_lane(tmp_path):
+    def native_factory(*args):
+        return FakeNativeRoot(*args, ready_eligible=False)
+
+    output, records, sessions = run_lane(
+        tmp_path,
+        arms=("a",),
+        native_root_factory=native_factory,
+    )
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    assert records == []
+    assert terminal["setup_error"] == "ValueError"
+    assert terminal["cleanup_verified"] is False
+    assert terminal["aborted"] is True
+    assert terminal["cleanup"]["a"]["verified"] is False
+    assert terminal["cleanup"]["a"]["scope_preserved"] is True
+    assert terminal["native_root_pending"]["a"]["scope_preserved"] is True
+    assert terminal["valid"] is False
+    assert all(session.closed for session in sessions)
+
+
+def test_failed_ready_proof_retains_private_evidence(tmp_path):
+    def native_factory(*args):
+        return FakeNativeRoot(*args, ready_eligible=False)
+
+    output, records, _sessions = run_lane(
+        tmp_path,
+        arms=("a",),
+        native_root_factory=native_factory,
+    )
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    diagnostics = output.parent / f"{output.stem}.diagnostics"
+    failure = terminal["native_ready_failures"]["a"]
+    ready_path = diagnostics / failure["evidence_artifact"]
+    ready = json.loads(ready_path.read_text())
+
+    assert records == []
+    assert ready["phase"] == "ready"
+    assert ready["eligible"] is False
+    assert failure["evidence_sha256"] == hashlib.sha256(ready_path.read_bytes()).hexdigest()
+    assert terminal["cleanup"]["a"]["evidence"] == failure
+    assert terminal["cleanup"]["a"]["scope_preserved"] is True
+    assert terminal["cleanup_verified"] is False
+    assert terminal["aborted"] is True
+    assert terminal["valid"] is False
+    assert "/" not in failure["evidence_artifact"]
+
+
+@pytest.mark.parametrize(
+    "option,message,row_key,expected_eligible",
+    [
+        ({"before_eligible": False}, "native_service_before", "native_service_before", False),
+        ({"after_eligible": False}, "native_service_after", "native_service_after", False),
+    ],
+)
+def test_failed_before_or_after_proof_retains_private_evidence(tmp_path, option, message, row_key, expected_eligible):
+    def native_factory(*args):
+        return FakeNativeRoot(*args, **option)
+
+    output, records, _sessions = run_lane(
+        tmp_path,
+        arms=("a",),
+        native_root_factory=native_factory,
+    )
+    row = records[0]
+    diagnostics = output.parent / f"{output.stem}.diagnostics"
+    artifact_key = f"{row_key}_evidence_artifact"
+    digest_key = f"{row_key}_evidence_sha256"
+    evidence_path = diagnostics / row[artifact_key]
+    evidence = json.loads(evidence_path.read_text())
+
+    assert message in row["error"]
+    assert row["resource_ok"] is False
+    assert row[row_key]["eligible"] is expected_eligible
+    assert evidence["phase"] == row_key.removeprefix("native_service_")
+    assert evidence["eligible"] is expected_eligible
+    assert row[digest_key] == hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+    assert str(diagnostics) not in json.dumps(row)
+    if row_key == "native_service_after":
+        assert row["native_service_before"]["eligible"] is True
+        assert row["native_service_before_evidence_sha256"] is not None
+    else:
+        assert row["native_service_after"] is None
+        assert row["native_service_after_evidence_sha256"] is None
+
+
+def test_cleanup_verified_requires_no_pending_native_root(tmp_path):
+    def factory(arm, workdir, diagnostics):
+        if arm == "b":
+            raise RuntimeError("session factory unavailable")
+        return FakeSession(arm, Path(workdir))
+
+    output, records, _sessions = run_lane(
+        tmp_path,
+        arms=("a", "b"),
+        session_factory=factory,
+    )
+    terminal = json.loads(output.read_text().splitlines()[-1])
+
+    assert records == []
+    assert terminal["setup_error"] == "RuntimeError"
+    assert terminal["cleanup"]["a"]["verified"] is True
+    assert terminal["native_root_pending"]["b"]["scope_preserved"] is True
+    assert terminal["cleanup_verified"] is False
+    assert terminal["aborted"] is True
+    assert terminal["valid"] is False
+
+
+@pytest.mark.parametrize(
+    "option,message",
+    [({"before_eligible": False}, "native_service_before"), ({"after_eligible": False}, "native_service_after")],
+)
+def test_native_proof_failure_poisons_the_row(tmp_path, option, message):
+    def native_factory(*args):
+        return FakeNativeRoot(*args, **option)
+
+    output, records, sessions = run_lane(
+        tmp_path,
+        arms=("a",),
+        native_root_factory=native_factory,
+    )
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    assert len(records) == 1
+    assert records[0]["ok"] is False
+    assert message in records[0]["error"]
+    assert records[0]["resource_ok"] is False
+    assert terminal["valid"] is False
+    assert all(session.closed for session in sessions)
+
+
+class NullNativeSampler(FakeSampler):
+    def result(self) -> dict:
+        result = super().result()
+        if result:
+            result["native_service_roots_observed"] = False
+            result["native_controller_excluded"] = None
+        return result
+
+
+def test_null_native_roots_cannot_pass_the_resource_gate(tmp_path):
+    def sampler_factory(pid, marker):
+        return NullNativeSampler([{"cpu": 1.0, "rss": 100, "footprint": 50}, {"cpu": 2.0, "rss": 120, "footprint": 60}])
+
+    _output, records, _sessions = run_lane(
+        tmp_path,
+        arms=("a",),
+        sampler_factory=sampler_factory,
+    )
+    assert records[0]["resource_ok"] is False
+    assert records[0]["warm_native_roots_observed"] is False
 
 
 def test_fake_io_guard_cannot_be_swallowed_as_capture_uncertainty():
@@ -467,6 +815,9 @@ def test_ready_timeout_closes_spawned_session_and_writes_terminal(tmp_path):
     assert all(session.closed for session in sessions)
     terminal = json.loads(output.read_text().splitlines()[-1])
     assert terminal["valid"] is False
+    assert terminal["cleanup_verified"] is False
+    assert terminal["aborted"] is True
+    assert "a" in terminal["native_root_pending"]
     assert "setup_error" in terminal
 
 
@@ -539,6 +890,8 @@ def test_main_returns_nonzero_for_invalid_lane(tmp_path, monkeypatch):
         "oracle_ok": True,
         "keychain_verified": True,
         "resource_ok": True,
+        "native_service_method_version": 1,
+        "warm_native_roots_observed": True,
     }
     terminal = {
         "record_type": "end",
@@ -548,6 +901,7 @@ def test_main_returns_nonzero_for_invalid_lane(tmp_path, monkeypatch):
         "expected_observations": 1,
         "provenance_verified": True,
         "cleanup_verified": True,
+        "native_service_method_version": 1,
         "terminal": True,
     }
 
@@ -619,8 +973,9 @@ def test_warm_header_keeps_warm_method_when_source_manifest_returns_cold_method(
     output, _records, _ = run_lane(tmp_path)
     header = json.loads(output.read_text().splitlines()[0])
 
-    assert header["method"] == warm.METHOD == "warm-session-resources-v2"
+    assert header["method"] == warm.METHOD == "warm-session-resources-v3"
     assert header["sampler_method_version"] == warm.SAMPLER_METHOD_VERSION == 7
+    assert header["native_service_method_version"] == warm.NATIVE_SERVICE_METHOD_VERSION == 1
 
 
 def test_preflight_failure_writes_terminal_footer(tmp_path, monkeypatch):
@@ -642,14 +997,17 @@ def test_preflight_failure_writes_terminal_footer(tmp_path, monkeypatch):
         fixture_stop=lambda server, thread: None,
         sampler_factory=lambda pid, marker: FakeSampler([{"cpu": 1.0, "rss": 1, "footprint": 1}]),
         cleanup=lambda sampler, **kwargs: {"verified": True},
+        controller_identity=ServiceIdentity(999, 999.0),
     )
     assert records == []
     lines = [json.loads(line) for line in output.read_text().splitlines()]
     assert lines[0]["preflight_error"] == "RuntimeError"
-    assert lines[0]["method"] == warm.METHOD == "warm-session-resources-v2"
+    assert lines[0]["method"] == warm.METHOD == "warm-session-resources-v3"
     assert lines[0]["sampler_method_version"] == warm.SAMPLER_METHOD_VERSION == 7
+    assert lines[0]["native_service_method_version"] == warm.NATIVE_SERVICE_METHOD_VERSION == 1
     assert lines[-1]["valid"] is False
     assert lines[-1]["sampler_method_version"] == 7
+    assert lines[-1]["native_service_method_version"] == 1
 
 
 def test_unverified_identity_and_invalid_metrics_reject_resource(tmp_path):
@@ -675,19 +1033,25 @@ def test_unverified_identity_and_invalid_metrics_reject_resource(tmp_path):
     def reset_cpu(pid, marker):
         base = {
             "peak_tree_rss_bytes": 100,
+            "peak_worker_rss_bytes": 10,
+            "peak_child_tree_rss_bytes": 100,
             "peak_child_footprint_bytes": 50,
+            "observed_child_cpu_seconds": 2.0,
             "observed_child_processes": 1,
             "observed_browser_during_native_run": 1,
             "unverified_processes": 0,
             "read_errors": 0,
             "fatal_read_errors": 0,
             "footprint_status": "observed",
+            "native_service_method_version": 1,
+            "native_service_roots_observed": True,
+            "native_controller_excluded": True,
         }
         return ScriptedResultSampler(
             [
-                {**base, "observed_tree_cpu_seconds": 2.0},
-                {**base, "observed_tree_cpu_seconds": 1.5},
-                {**base, "observed_tree_cpu_seconds": 1.0},
+                {**base, "observed_tree_cpu_seconds": 2.0, "observed_child_cpu_seconds": 2.0},
+                {**base, "observed_tree_cpu_seconds": 1.5, "observed_child_cpu_seconds": 1.5},
+                {**base, "observed_tree_cpu_seconds": 1.0, "observed_child_cpu_seconds": 1.0},
             ]
         )
 
@@ -715,6 +1079,8 @@ def test_lane_valid_requires_every_gate():
             "oracle_ok": True,
             "keychain_verified": True,
             "resource_ok": True,
+            "native_service_method_version": 1,
+            "warm_native_roots_observed": True,
         }
     ]
     terminal = {
@@ -725,6 +1091,7 @@ def test_lane_valid_requires_every_gate():
         "expected_observations": 1,
         "provenance_verified": True,
         "cleanup_verified": True,
+        "native_service_method_version": 1,
     }
     assert warm.lane_valid(records, terminal) is True
     assert warm.lane_valid(records, {**terminal, "valid": False}) is False
@@ -733,6 +1100,9 @@ def test_lane_valid_requires_every_gate():
     assert warm.lane_valid(records, {**terminal, "observations": 0}) is False
     assert warm.lane_valid(records, {**terminal, "provenance_verified": False}) is False
     assert warm.lane_valid(records, {**terminal, "cleanup_verified": False}) is False
+    assert warm.lane_valid(records, {**terminal, "native_root_pending": {"a": {}}}) is False
+    assert warm.lane_valid(records, {**terminal, "native_root_pending": {}}) is True
+    assert warm.lane_valid(records, {**terminal, "native_ready_failures": {"a": {}}}) is False
     assert warm.lane_valid(records, {**terminal, "setup_error": "boom"}) is False
     assert warm.lane_valid(records, {**terminal, "fixture_errors": [{"phase": "stop"}]}) is False
     assert warm.lane_valid([], terminal) is False
@@ -781,7 +1151,7 @@ def test_process_session_fails_fast_when_worker_exited(tmp_path, monkeypatch):
     assert time.monotonic() - started < 0.5
 
 
-def test_ready_failure_cleans_preallocated_owned_sampler(tmp_path):
+def test_ready_failure_preserves_preallocated_owned_scope(tmp_path):
     sessions = []
     samplers = []
     cleanups = []
@@ -811,12 +1181,15 @@ def test_ready_failure_cleans_preallocated_owned_sampler(tmp_path):
     terminal = json.loads(output.read_text().splitlines()[-1])
     assert records == []
     assert len(samplers) == 1
-    marker, sampler = samplers[0]
+    marker, _sampler = samplers[0]
     assert marker == str(sessions[0].workdir.resolve())
     assert sessions[0].workdir.name.startswith("warm-")
     assert len(sessions[0].workdir.name) == len("warm-") + 10
-    assert cleanups == [sampler]
-    assert terminal["cleanup_verified"] is True
+    assert cleanups == []
+    assert terminal["cleanup_verified"] is False
+    assert terminal["cleanup"]["a"]["scope_preserved"] is True
+    assert terminal["cleanup"]["a"]["scope"] == str(sessions[0].workdir.resolve())
+    assert terminal["native_root_pending"]["a"]["scope"] == str(sessions[0].workdir.resolve())
     assert terminal["setup_error"] is not None
     assert terminal["valid"] is False
 
@@ -918,6 +1291,151 @@ def test_owned_context_has_no_nested_timestamp(tmp_path):
         "profile",
         "tmp",
     ]
+
+
+def _executable(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("")
+    path.chmod(0o755)
+    return path
+
+
+def test_expected_executable_for_openbrowser_python_launcher(tmp_path):
+    interpreter = _executable(tmp_path / "real" / "python3.12")
+    invocation = tmp_path / "bin" / "python3.12"
+    invocation.parent.mkdir(parents=True)
+    invocation.symlink_to(interpreter)
+    launcher = tmp_path / "openbrowser-ai"
+    launcher.write_text(f"#!{invocation}\n{resource_provenance._SIMPLE_ENTRY}")
+    launcher.chmod(0o755)
+
+    assert warm._expected_service_executable("openbrowser-fast", str(launcher)) == str(interpreter.resolve())
+
+
+def test_expected_executable_for_native_openbrowser_uses_fixed_python_backend(tmp_path):
+    interpreter = _executable(tmp_path / "real" / "python3.12")
+    invocation = tmp_path / "bin" / "python3.12"
+    invocation.parent.mkdir(parents=True)
+    invocation.symlink_to(interpreter)
+    binary = tmp_path / "openbrowser-ai"
+    binary.write_bytes(b"\xcf\xfa\xed\xfe" + b"\x00" * 12)
+    binary.chmod(0o755)
+    backend = tmp_path / "openbrowser-ai-py"
+    backend.write_text(f"#!{invocation}\n{resource_provenance._SIMPLE_ENTRY}")
+    backend.chmod(0o755)
+
+    assert warm._expected_service_executable("openbrowser-mcp-fast", str(binary)) == str(interpreter.resolve())
+
+
+def test_expected_executable_for_browser_use_shebang(tmp_path):
+    interpreter = _executable(tmp_path / "real" / "python")
+    invocation = tmp_path / "venv" / "bin" / "python"
+    invocation.parent.mkdir(parents=True)
+    invocation.symlink_to(interpreter)
+    launcher = tmp_path / "browser-use"
+    launcher.write_text(f"#!{invocation}\nprint('native')\n")
+    launcher.chmod(0o755)
+
+    assert warm._expected_service_executable("browser-use", str(launcher)) == str(interpreter.resolve())
+
+
+def test_expected_executable_for_node_arms_uses_which_and_resolve(tmp_path, monkeypatch):
+    node = _executable(tmp_path / "cellar" / "node" / "bin" / "node")
+    link = tmp_path / "bin" / "node"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(node)
+    monkeypatch.setattr(warm.shutil, "which", lambda name, path=None: str(link))
+
+    for arm in ("playwright-mcp", "playwright-cli", "chrome-devtools-mcp"):
+        assert warm._expected_service_executable(arm, "/fake/launcher") == str(node.resolve())
+
+
+def test_expected_executable_for_agent_binary_resolves_symlink(tmp_path):
+    native = _executable(tmp_path / "native" / "agent-browser-darwin-arm64")
+    link = tmp_path / "bin" / "agent-browser"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(native)
+
+    assert warm._expected_service_executable("agent-browser", str(link)) == str(native.resolve())
+
+
+def test_playwright_cli_daemon_entry_comes_from_declared_package(tmp_path):
+    node_modules = tmp_path / "node_modules"
+    cli = node_modules / "@playwright" / "cli" / "playwright-cli.js"
+    cli.parent.mkdir(parents=True)
+    cli.write_text("#!/usr/bin/env node\n")
+    daemon = node_modules / "playwright-core" / "lib" / "entry" / "cliDaemon.js"
+    daemon.parent.mkdir(parents=True)
+    daemon.write_text("// daemon\n")
+    link = node_modules / ".bin" / "playwright-cli"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(cli)
+
+    assert warm._playwright_cli_daemon_entry(str(link)) == str(daemon.resolve())
+
+
+def test_expected_executable_rejects_unknown_arm(tmp_path):
+    with pytest.raises(ValueError, match="native_service_arm"):
+        warm._expected_service_executable("unknown", str(tmp_path / "binary"))
+
+
+def test_native_request_maps_all_seven_native_sources(monkeypatch):
+    monkeypatch.setattr(warm, "_expected_service_executable", lambda arm, binary: "/expected/native")
+    monkeypatch.setattr(warm, "_playwright_cli_daemon_entry", lambda binary: "/expected/cliDaemon.js")
+    scope = warm._native_run_scope("/tmp/owned", "session-1")
+    for arm in warm.DEFAULT_ARMS:
+        ready = {"binary": "/declared/launcher", "native": {"pid": 123, "created_at": 10.5}}
+        request = warm._native_request(arm, ready, scope)
+        if arm in warm._FILE_SERVICE_ARMS:
+            assert request.native_identity is None
+        else:
+            assert request.native_identity == ServiceIdentity(123, 10.5)
+        assert request.executable == "/expected/native"
+        assert request.daemon_entry == ("/expected/cliDaemon.js" if arm == "playwright-cli" else None)
+
+
+@pytest.mark.parametrize("arm", sorted(set(warm.DEFAULT_ARMS) - warm._FILE_SERVICE_ARMS))
+def test_native_request_requires_direct_pid_and_create_time(arm, monkeypatch):
+    monkeypatch.setattr(warm, "_expected_service_executable", lambda arm, binary: "/expected/native")
+    monkeypatch.setattr(warm, "_playwright_cli_daemon_entry", lambda binary: "/expected/cliDaemon.js")
+    scope = warm._native_run_scope("/tmp/owned", "session-1")
+    with pytest.raises(ValueError, match="native_service_source"):
+        warm._native_request(arm, {"binary": "/declared/launcher", "native": {}}, scope)
+
+
+def test_worker_native_source_serializes_mcp_popen(monkeypatch):
+    arm = SimpleNamespace(binary="/fake/server", _client=SimpleNamespace(process=SimpleNamespace(pid=123)))
+    monkeypatch.setattr(
+        warm.psutil,
+        "Process",
+        lambda pid: SimpleNamespace(pid=pid, create_time=lambda: 10.5),
+    )
+
+    source = warm._worker_native_source("openbrowser-mcp-fast", arm)
+
+    assert source == {"kind": "popen", "binary": "/fake/server", "pid": 123, "created_at": 10.5}
+
+
+def test_worker_native_source_serializes_playwright_cli(monkeypatch):
+    arm = SimpleNamespace(binary="/fake/playwright-cli", session_pid=456)
+    monkeypatch.setattr(
+        warm.psutil,
+        "Process",
+        lambda pid: SimpleNamespace(pid=pid, create_time=lambda: 11.25),
+    )
+
+    source = warm._worker_native_source("playwright-cli", arm)
+
+    assert source == {"kind": "native_status", "binary": "/fake/playwright-cli", "pid": 456, "created_at": 11.25}
+
+
+def test_worker_native_source_leaves_file_sources_for_parent_reader():
+    arm = SimpleNamespace(binary="/fake/agent-browser")
+
+    assert warm._worker_native_source("agent-browser", arm) == {
+        "kind": "pid_file",
+        "binary": "/fake/agent-browser",
+    }
 
 
 def test_worker_warmup_failure_emits_fatal_and_cleans(tmp_path, monkeypatch):
@@ -1104,7 +1622,8 @@ def test_barriers_place_baseline_after_started_and_final_before_verify(tmp_path)
 def test_method_marks_the_corrected_boundary(tmp_path):
     output, _records, _sessions = run_lane(tmp_path, arms=("a",))
     header = json.loads(output.read_text().splitlines()[0])
-    assert header["method"] == "warm-session-resources-v2"
+    assert header["method"] == "warm-session-resources-v3"
+    assert header["native_service_method_version"] == 1
 
 
 def test_native_done_timeout_is_retained_as_failure(tmp_path):

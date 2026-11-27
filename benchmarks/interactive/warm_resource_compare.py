@@ -10,12 +10,15 @@ sampled task CPU delta. Unknown values stay null. No latency claim is made.
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
+import hashlib
 import json
 import logging
 import math
 import os
 import queue
+import shutil
 import subprocess
 import sys
 import threading
@@ -26,10 +29,23 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+import psutil
+
 from .adapters.base import ArmResult, RunContext
+from .adapters.native_service_readers import (
+    HostReaders,
+    NativeArm,
+    NativeRunScope,
+    NativeServiceRequest,
+    capture_native_service,
+    verify_native_service,
+)
+from .adapters.native_service_sources import PidRecord, ProcessCommand
+from .adapters.service_roots import ServiceIdentity
 from .engine_preflight import configured_engine_pin
 from .engine_session import EngineSession
 from .resource_compare import (
+    NATIVE_SERVICE_METHOD_VERSION,
     SAMPLER_METHOD_VERSION,
     ProcessTreeSampler,
     arm_versions,
@@ -37,6 +53,7 @@ from .resource_compare import (
     cleanup_owned,
     source_manifest,
 )
+from .resource_provenance import _launcher_interpreter
 from .run_benchmark import make_arm
 from .tasks import ORACLES
 from .warm_benchmark import (
@@ -48,11 +65,369 @@ from .warm_benchmark import (
 )
 
 LOGGER = logging.getLogger(__name__)
-METHOD = "warm-session-resources-v2"
+METHOD = "warm-session-resources-v3"
 FINISH_GRACE_SECONDS = 5.0
 FINISH_WAIT_SECONDS = 5.0
 WORKER_GATE_TIMEOUT_SECONDS = 120.0
 HERE = Path(__file__).resolve().parent
+_MCP_ARMS = frozenset({"openbrowser-mcp-fast", "playwright-mcp", "chrome-devtools-mcp"})
+_FILE_SERVICE_ARMS = frozenset({"openbrowser-fast", "agent-browser", "browser-use"})
+_OPENBROWSER_ARMS = frozenset({"openbrowser-fast", "openbrowser-mcp-fast"})
+_NODE_ARMS = frozenset({"playwright-mcp", "playwright-cli", "chrome-devtools-mcp"})
+
+
+def _valid_service_time(value: object) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(float(value)) and value > 0
+    except (OverflowError, ValueError):
+        return False
+
+
+def _absolute_binary(value: object) -> Path:
+    if not isinstance(value, str) or not value or "\x00" in value:
+        raise ValueError("native_service_binary")
+    path = Path(value)
+    if not path.is_absolute():
+        raise ValueError("native_service_binary")
+    return path
+
+
+def _expected_service_executable(arm: str, binary: object) -> str:
+    """Derive the native executable from the declared launcher, not the PID."""
+    path = _absolute_binary(binary)
+    if arm in _OPENBROWSER_ARMS:
+        try:
+            content = path.read_bytes()
+        except OSError as error:
+            raise ValueError("native_service_binary") from error
+        interpreter = _launcher_interpreter(content)
+        if interpreter is not None:
+            return str(Path(interpreter).resolve())
+        backend_name = "openbrowser-ai-py.exe" if os.name == "nt" else "openbrowser-ai-py"
+        backend = path.resolve().parent / backend_name
+        try:
+            backend_content = backend.read_bytes()
+        except OSError as error:
+            raise ValueError("native_service_backend") from error
+        interpreter = _launcher_interpreter(backend_content)
+        if interpreter is None:
+            raise ValueError("native_service_backend")
+        return str(Path(interpreter).resolve())
+    if arm == "browser-use":
+        try:
+            first_line = path.read_bytes().splitlines()[0]
+        except (IndexError, OSError) as error:
+            raise ValueError("native_service_binary") from error
+        if not first_line.startswith(b"#!"):
+            raise ValueError("native_service_binary")
+        try:
+            interpreter = first_line[2:].decode("utf-8").strip()
+        except UnicodeDecodeError as error:
+            raise ValueError("native_service_binary") from error
+        if not interpreter:
+            raise ValueError("native_service_binary")
+        interpreter_path = Path(interpreter)
+        if not interpreter_path.is_absolute() or not interpreter_path.is_file():
+            raise ValueError("native_service_binary")
+        if not os.access(interpreter_path, os.X_OK):
+            raise ValueError("native_service_binary")
+        return str(interpreter_path.resolve())
+    if arm in _NODE_ARMS:
+        node = shutil.which("node", path=os.environ.get("PATH", os.defpath))
+        if not node:
+            raise ValueError("native_service_node")
+        return str(Path(node).resolve())
+    if arm == "agent-browser":
+        resolved = path.resolve()
+        if not resolved.is_file():
+            raise ValueError("native_service_binary")
+        return str(resolved)
+    raise ValueError("native_service_arm")
+
+
+def _playwright_cli_daemon_entry(binary: object) -> str:
+    entry = _absolute_binary(binary).resolve()
+    daemon = entry.parent.parent.parent / "playwright-core" / "lib" / "entry" / "cliDaemon.js"
+    if not daemon.is_file():
+        raise ValueError("native_service_daemon_entry")
+    return str(daemon.resolve())
+
+
+def _native_run_scope(root: str, session: object) -> NativeRunScope:
+    base = Path(root)
+    session_value = session if isinstance(session, str) else ""
+    return NativeRunScope(
+        root=base,
+        home=base / "home",
+        config=base / "config",
+        profile=base / "profile",
+        session=session_value,
+    )
+
+
+def _native_request(arm: str, ready: dict, scope: NativeRunScope) -> NativeServiceRequest:
+    try:
+        arm_value = NativeArm(arm)
+    except ValueError as error:
+        raise ValueError("native_service_arm") from error
+    executable = _expected_service_executable(arm, ready.get("binary"))
+    native_identity = None
+    if arm not in _FILE_SERVICE_ARMS:
+        native = ready.get("native")
+        if not isinstance(native, dict):
+            raise ValueError("native_service_source")
+        pid = native.get("pid")
+        created_at = native.get("created_at")
+        if type(pid) is not int or pid <= 0 or not _valid_service_time(created_at):
+            raise ValueError("native_service_source")
+        assert type(created_at) is int or type(created_at) is float
+        native_identity = ServiceIdentity(pid, created_at)
+    daemon_entry = _playwright_cli_daemon_entry(ready.get("binary")) if arm == "playwright-cli" else None
+    return NativeServiceRequest(
+        arm=arm_value,
+        scope=scope,
+        executable=executable,
+        native_identity=native_identity,
+        daemon_entry=daemon_entry,
+    )
+
+
+def _public_service_read(read: Any) -> dict:
+    try:
+        eligible = read.eligible is True
+        failure = read.failure.value if read.failure is not None else None
+        proof = read.proof.proof if eligible else None
+    except Exception:
+        return {"eligible": False, "failure": "malformed_proof", "proof": None}
+    if proof is None:
+        return {"eligible": False, "failure": failure or "invalid_proof", "proof": None}
+    return {
+        "eligible": True,
+        "failure": None,
+        "proof": {
+            "pid": proof.identity.pid,
+            "created_at": proof.identity.created_at,
+            "source": proof.source.value,
+            "executable_basename": Path(proof.executable).name,
+            "scope_digest": hashlib.sha256(os.fsencode(proof.scope)).hexdigest(),
+        },
+    }
+
+
+def _request_evidence(request: NativeServiceRequest) -> dict:
+    return {
+        "arm": request.arm.value,
+        "scope": {
+            "root": str(request.scope.root),
+            "home": str(request.scope.home),
+            "config": str(request.scope.config),
+            "profile": str(request.scope.profile),
+            "session": request.scope.session,
+        },
+        "executable": request.executable,
+        "native_identity": (
+            None
+            if request.native_identity is None
+            else {
+                "pid": request.native_identity.pid,
+                "created_at": request.native_identity.created_at,
+            }
+        ),
+        "daemon_entry": request.daemon_entry,
+    }
+
+
+def _candidate_evidence(candidate: object) -> dict | None:
+    if candidate is None:
+        return None
+    if isinstance(candidate, PidRecord):
+        return {
+            "type": "pid_record",
+            "pid": candidate.pid,
+            "record_format": candidate.record_format,
+            "started": candidate.started,
+        }
+    if isinstance(candidate, ProcessCommand):
+        return {
+            "type": "process_command",
+            "pid": candidate.pid,
+            "executable": candidate.executable,
+            "argv": list(candidate.argv),
+        }
+    return {"type": type(candidate).__name__}
+
+
+def _source_read_evidence(read: Any) -> dict | None:
+    if read is None:
+        return None
+    return {
+        "source": read.source.value if read.source is not None else None,
+        "candidate": _candidate_evidence(read.candidate),
+        "record_bytes_base64": (
+            base64.b64encode(read.record_bytes).decode("ascii") if read.record_bytes is not None else None
+        ),
+        "failure": read.failure.value if read.failure is not None else None,
+    }
+
+
+def _proof_result_evidence(result: Any) -> dict | None:
+    if result is None:
+        return None
+    proof = result.proof
+    return {
+        "failure": result.failure.value if result.failure is not None else None,
+        "proof": (
+            None
+            if proof is None
+            else {
+                "identity": {"pid": proof.identity.pid, "created_at": proof.identity.created_at},
+                "executable": proof.executable,
+                "scope": proof.scope,
+                "source": proof.source.value,
+            }
+        ),
+    }
+
+
+def _service_read_evidence(read: Any) -> dict:
+    return {
+        "eligible": read.eligible is True,
+        "failure": read.failure.value if read.failure is not None else None,
+        "request": _request_evidence(read.before.request),
+        "before": _source_read_evidence(read.before),
+        "after": _source_read_evidence(read.after),
+        "initial_proof": _proof_result_evidence(read.initial_proof),
+        "closing_proof": _proof_result_evidence(read.closing_proof),
+        "effective_proof": _proof_result_evidence(read.proof),
+    }
+
+
+def _write_private_evidence(directory: Path, name: str, payload: dict) -> str:
+    data = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / name
+    with path.open("xb") as handle:
+        handle.write(data)
+        handle.flush()
+        os.fsync(handle.fileno())
+    return hashlib.sha256(data).hexdigest()
+
+
+def _worker_native_source(arm_name: str, arm: Any) -> dict:
+    """Serialize the worker-owned native source without crossing a Popen object."""
+    binary = getattr(arm, "binary", None)
+    if not isinstance(binary, str) or not binary:
+        return {"kind": "unsupported", "binary": None}
+    if arm_name in _MCP_ARMS:
+        client = getattr(arm, "_client", None)
+        process = getattr(client, "process", None)
+        pid = getattr(process, "pid", None)
+        if type(pid) is not int or pid <= 0:
+            raise ValueError("native_service_pid")
+        created_at = psutil.Process(pid).create_time()
+        if not _valid_service_time(created_at):
+            raise ValueError("native_service_create_time")
+        return {"kind": "popen", "binary": binary, "pid": pid, "created_at": created_at}
+    if arm_name == "playwright-cli":
+        pid = getattr(arm, "session_pid", None)
+        if type(pid) is not int or pid <= 0:
+            raise ValueError("native_service_pid")
+        created_at = psutil.Process(pid).create_time()
+        if not _valid_service_time(created_at):
+            raise ValueError("native_service_create_time")
+        return {"kind": "native_status", "binary": binary, "pid": pid, "created_at": created_at}
+    return {"kind": "pid_file", "binary": binary}
+
+
+def _fresh_identity(pid: int) -> ServiceIdentity:
+    if type(pid) is not int or pid <= 0:
+        raise ValueError("native_service_identity")
+    process = psutil.Process(pid)
+    if type(process.pid) is not int or process.pid != pid:
+        raise ValueError("native_service_identity")
+    created_at = process.create_time()
+    if not _valid_service_time(created_at):
+        raise ValueError("native_service_identity")
+    return ServiceIdentity(pid, created_at)
+
+
+def _session_identity(session: Any) -> ServiceIdentity:
+    return _fresh_identity(session.pid)
+
+
+class _WarmNativeRoot:
+    def __init__(
+        self,
+        arm: str,
+        ready: dict,
+        scope: NativeRunScope,
+        controller: ServiceIdentity,
+        worker: ServiceIdentity,
+        *,
+        host: HostReaders | None = None,
+    ) -> None:
+        self.request = _native_request(arm, ready, scope)
+        self.host = host or HostReaders()
+        self.controller = controller
+        self.worker = worker
+        self.ready_read = capture_native_service(
+            self.request,
+            self.host,
+            controller=controller,
+            worker=worker,
+        )
+
+    @property
+    def ready_eligible(self) -> bool:
+        return self.ready_read.eligible
+
+    def verify_before(self):
+        return verify_native_service(
+            self.ready_read,
+            self.request,
+            self.host,
+            controller=self.controller,
+            worker=self.worker,
+        )
+
+    def verify_after(self, before):
+        return verify_native_service(
+            before,
+            self.request,
+            self.host,
+            controller=self.controller,
+            worker=self.worker,
+        )
+
+    def public_ready(self) -> dict:
+        return _public_service_read(self.ready_read)
+
+    def public_before(self, read) -> dict:
+        return _public_service_read(read)
+
+    def public_after(self, read) -> dict:
+        return _public_service_read(read)
+
+    def evidence_ready(self) -> dict:
+        return _service_read_evidence(self.ready_read)
+
+    def evidence_before(self, read) -> dict:
+        return _service_read_evidence(read)
+
+    def evidence_after(self, read) -> dict:
+        return _service_read_evidence(read)
+
+
+def _default_native_root(
+    arm: str,
+    ready: dict,
+    scope: NativeRunScope,
+    controller: ServiceIdentity,
+    worker: ServiceIdentity,
+) -> _WarmNativeRoot:
+    return _WarmNativeRoot(arm, ready, scope, controller, worker)
 
 
 @dataclass(frozen=True)
@@ -319,6 +694,7 @@ def run_worker(arm_name: str, workdir: Path) -> int:
             engine_warmup = engine_session.capture_warm(arm, root_ctx)
             if engine_warmup is not None:
                 payload = {**payload, "engine": engine_warmup.public_proof()}
+            native_source = _worker_native_source(arm_name, arm)
         except Exception as error:
             _emit({"type": "fatal", "error": f"warmup failed: {type(error).__name__}"})
             return 2
@@ -329,6 +705,8 @@ def run_worker(arm_name: str, workdir: Path) -> int:
                 "warmup_ms": warmup_ms,
                 "root": str(root_ctx.root),
                 "downloads": str(root_ctx.downloads),
+                "session": root_ctx.session,
+                "native": native_source,
             }
         )
         channel = _WorkerInbox()
@@ -445,18 +823,40 @@ def run_worker(arm_name: str, workdir: Path) -> int:
             arm.cleanup(root_ctx)
 
 
-def _default_sampler(pid: int, marker: str) -> ProcessTreeSampler:
-    return ProcessTreeSampler(pid, ownership_marker=marker)
+def _default_sampler(
+    pid: int,
+    marker: str,
+    *,
+    controller_identity: ServiceIdentity | None = None,
+) -> ProcessTreeSampler:
+    if controller_identity is None:
+        return ProcessTreeSampler(pid, ownership_marker=marker)
+    return ProcessTreeSampler(pid, ownership_marker=marker, controller_identity=controller_identity)
 
 
-def _make_owned_sampler(pid: int, marker: str, factory: Callable[[int, str], Any]):
+def _make_owned_sampler(
+    pid: int,
+    marker: str,
+    factory: Callable[[int, str], Any],
+    controller_identity: ServiceIdentity | None = None,
+):
+    def build():
+        if controller_identity is not None and factory is _default_sampler:
+            return _default_sampler(pid, marker, controller_identity=controller_identity)
+        sampler = factory(pid, marker)
+        if controller_identity is not None:
+            setter = getattr(sampler, "set_native_controller", None)
+            if callable(setter):
+                setter(controller_identity)
+        return sampler
+
     try:
-        return factory(pid, marker)
+        return build()
     except Exception:
         if factory is not _default_sampler:
             raise
         LOGGER.warning("sampler construction failed; retrying the default sampler once")
-        return factory(pid, marker)
+        return build()
 
 
 def _sample_tree(sampler) -> None:
@@ -567,6 +967,9 @@ def run_warm_lane(
     fixture_stop: Callable[[Any, Any], None] = stop_fixture,
     sampler_factory: Callable[[int, str], Any] = _default_sampler,
     cleanup: Callable[..., dict] = cleanup_owned,
+    native_root_factory: Callable[..., Any] = _default_native_root,
+    controller_identity: ServiceIdentity | None = None,
+    worker_identity_factory: Callable[[Any], ServiceIdentity] | None = None,
 ) -> list[dict]:
     output.parent.mkdir(parents=True, exist_ok=True)
     diagnostics = output.parent / f"{output.stem}.diagnostics"
@@ -578,6 +981,7 @@ def run_warm_lane(
             "record_type": "run",
             "method": METHOD,
             "sampler_method_version": SAMPLER_METHOD_VERSION,
+            "native_service_method_version": NATIVE_SERVICE_METHOD_VERSION,
             "arms": arms,
             "tasks": tasks,
             "samples": samples,
@@ -587,7 +991,10 @@ def run_warm_lane(
             "conclusion_policy": "Warm resource observations only. No latency claim.",
             "latency_claim_allowed": False,
         }
+        controller: ServiceIdentity | None = None
+        worker_identity_for = worker_identity_factory or _session_identity
         try:
+            controller = controller_identity or _fresh_identity(os.getpid())
             before_source = source_manifest()
             before_binding = binding_snapshot(arms)
             header.update(
@@ -599,6 +1006,7 @@ def run_warm_lane(
             )
             header["method"] = METHOD
             header["sampler_method_version"] = SAMPLER_METHOD_VERSION
+            header["native_service_method_version"] = NATIVE_SERVICE_METHOD_VERSION
         except Exception as error:
             header["preflight_error"] = type(error).__name__
             handle.write(json.dumps(header) + "\n")
@@ -608,6 +1016,7 @@ def run_warm_lane(
                         "record_type": "end",
                         "method": METHOD,
                         "sampler_method_version": SAMPLER_METHOD_VERSION,
+                        "native_service_method_version": NATIVE_SERVICE_METHOD_VERSION,
                         "observations": 0,
                         "expected_observations": expected_observations,
                         "failures": 0,
@@ -624,11 +1033,16 @@ def run_warm_lane(
             )
             handle.flush()
             return []
+        assert controller is not None
         handle.write(json.dumps(header) + "\n")
         handle.flush()
         sessions: dict[str, Any] = {}
         warmups: dict[str, dict] = {}
         lane_samplers: dict[str, Any] = {}
+        native_roots: dict[str, Any] = {}
+        owned_scopes: dict[str, str] = {}
+        native_root_pending: set[str] = set(arms)
+        native_ready_failures: dict[str, dict] = {}
         retired_arms: set[str] = set()
         retired_workers: dict[str, dict] = {}
         setup_error: str | None = None
@@ -638,9 +1052,15 @@ def run_warm_lane(
                 for arm in arms:
                     owned = (Path(workdir).resolve() / f"warm-{uuid.uuid4().hex[:10]}").resolve()
                     owned.mkdir(parents=True, exist_ok=True)
+                    owned_scopes[arm] = str(owned)
                     session = session_factory(arm, owned, diagnostics)
                     sessions[arm] = session
-                    lane_samplers[arm] = _make_owned_sampler(session.pid, str(owned), sampler_factory)
+                    lane_samplers[arm] = _make_owned_sampler(
+                        session.pid,
+                        str(owned),
+                        sampler_factory,
+                        controller,
+                    )
                     _sample_tree(lane_samplers[arm])
                     ready = session.receive(worker_timeout)
                     if ready.get("type") == "fatal":
@@ -651,12 +1071,44 @@ def run_warm_lane(
                     downloads = _validated_downloads(ready.get("downloads"), root)
                     if Path(downloads).resolve() != (owned / "downloads").resolve():
                         raise ValueError("ready downloads does not match the preallocated arm scope")
+                    worker_identity = worker_identity_for(session)
+                    scope = _native_run_scope(root, ready.get("session"))
+                    native_root = native_root_factory(
+                        arm,
+                        ready,
+                        scope,
+                        controller,
+                        worker_identity,
+                    )
+                    ready_evidence_name = f"native-ready-{arm}.json"
+                    ready_evidence_sha256 = _write_private_evidence(
+                        diagnostics,
+                        ready_evidence_name,
+                        native_root.evidence_ready(),
+                    )
+                    if not native_root.ready_eligible:
+                        native_ready_failures[arm] = {
+                            "evidence_sha256": ready_evidence_sha256,
+                            "evidence_artifact": ready_evidence_name,
+                        }
+                        raise ValueError("native_service_ready")
+                    lane_samplers[arm].enroll_native_service(native_root.ready_read, controller=controller)
+                    native_root_pending.discard(arm)
+                    native_roots[arm] = native_root
+                    native_service_public = native_root.public_ready()
+                    native_service_public.update(
+                        {
+                            "evidence_sha256": ready_evidence_sha256,
+                            "evidence_artifact": ready_evidence_name,
+                        }
+                    )
                     warmups[arm] = {
                         "payload": ready.get("payload", {}),
                         "warmup_ms": ready.get("warmup_ms"),
                         "root": root,
                         "downloads": downloads,
                         "marker": str(owned),
+                        "native_service": native_service_public,
                     }
             except Exception as error:
                 setup_error = type(error).__name__
@@ -682,10 +1134,17 @@ def run_warm_lane(
                             ctx_downloads = Path(warmups[entry.arm]["downloads"])
                             ctx_downloads.mkdir(parents=True, exist_ok=True)
                             clean_downloads(ctx_downloads)
+                            if entry.arm not in native_roots:
+                                raise ValueError("native_service_root")
                             sampler = (
                                 None
                                 if entry.arm in retired_arms
-                                else sampler_factory(session.pid, warmups[entry.arm]["marker"])
+                                else _make_owned_sampler(
+                                    session.pid,
+                                    warmups[entry.arm]["marker"],
+                                    sampler_factory,
+                                    controller,
+                                )
                             )
                             capture = _ResourceCapture(sampler)
                             nonce = uuid.uuid4().hex
@@ -693,6 +1152,12 @@ def run_warm_lane(
                             started = time.monotonic()
                             baseline: dict = {}
                             resources: dict = {}
+                            native_before = None
+                            native_after = None
+                            native_before_evidence_sha256 = None
+                            native_before_evidence_artifact = None
+                            native_after_evidence_sha256 = None
+                            native_after_evidence_artifact = None
                         except Exception as error:
                             fixture_errors.append(
                                 {
@@ -729,6 +1194,20 @@ def run_warm_lane(
                                 or ack.get("nonce") != nonce
                             ):
                                 raise RuntimeError("worker acknowledgement does not match the task")
+                            native_root = native_roots[entry.arm]
+                            native_before = native_root.verify_before()
+                            native_before_evidence_artifact = (
+                                f"native-before-{entry.task}-{entry.arm}-s{entry.sample}-{nonce}.json"
+                            )
+                            native_before_evidence_sha256 = _write_private_evidence(
+                                diagnostics,
+                                native_before_evidence_artifact,
+                                native_root.evidence_before(native_before),
+                            )
+                            if getattr(native_before, "eligible", False) is not True:
+                                raise RuntimeError("native_service_before")
+                            assert sampler is not None
+                            sampler.enroll_native_service(native_before, controller=controller)
                             capture.sample()
                             baseline = capture.result()
                             session.send(
@@ -757,6 +1236,17 @@ def run_warm_lane(
                                 raise RuntimeError("worker native completion does not match the task")
                             capture.phase = "final"
                             capture.sample()
+                            native_after = native_root.verify_after(native_before)
+                            native_after_evidence_artifact = (
+                                f"native-after-{entry.task}-{entry.arm}-s{entry.sample}-{nonce}.json"
+                            )
+                            native_after_evidence_sha256 = _write_private_evidence(
+                                diagnostics,
+                                native_after_evidence_artifact,
+                                native_root.evidence_after(native_after),
+                            )
+                            if getattr(native_after, "eligible", False) is not True:
+                                raise RuntimeError("native_service_after")
                             capture.finish()
                             resources = capture.result()
                             session.send(
@@ -816,8 +1306,8 @@ def run_warm_lane(
                                 "error": failure,
                             }
                         resources = capture.result() if failure is None else {}
-                        final_cpu = resources.get("observed_tree_cpu_seconds")
-                        baseline_cpu = baseline.get("observed_tree_cpu_seconds")
+                        final_cpu = resources.get("observed_child_cpu_seconds")
+                        baseline_cpu = baseline.get("observed_child_cpu_seconds")
                         if (
                             isinstance(final_cpu, (int, float))
                             and not isinstance(final_cpu, bool)
@@ -832,7 +1322,32 @@ def run_warm_lane(
                         else:
                             cpu_delta = None
                             cpu_error = "invalid_counter"
-                        rss = resources.get("peak_tree_rss_bytes")
+                        final_tree_cpu = resources.get("observed_tree_cpu_seconds")
+                        baseline_tree_cpu = baseline.get("observed_tree_cpu_seconds")
+                        if (
+                            cpu_delta is not None
+                            and isinstance(final_cpu, (int, float))
+                            and not isinstance(final_cpu, bool)
+                            and isinstance(baseline_cpu, (int, float))
+                            and not isinstance(baseline_cpu, bool)
+                            and isinstance(final_tree_cpu, (int, float))
+                            and not isinstance(final_tree_cpu, bool)
+                            and isinstance(baseline_tree_cpu, (int, float))
+                            and not isinstance(baseline_tree_cpu, bool)
+                            and math.isfinite(float(final_tree_cpu))
+                            and math.isfinite(float(baseline_tree_cpu))
+                            and final_tree_cpu >= final_cpu
+                            and baseline_tree_cpu >= baseline_cpu
+                        ):
+                            worker_cpu_delta = (float(final_tree_cpu) - float(final_cpu)) - (
+                                float(baseline_tree_cpu) - float(baseline_cpu)
+                            )
+                            worker_cpu_error = None
+                        else:
+                            worker_cpu_delta = None
+                            worker_cpu_error = "invalid_counter"
+                        rss = resources.get("peak_child_tree_rss_bytes")
+                        worker_rss = resources.get("peak_worker_rss_bytes")
                         unverified = resources.get("unverified_processes")
                         rss_valid = (
                             isinstance(rss, (int, float))
@@ -840,8 +1355,23 @@ def run_warm_lane(
                             and math.isfinite(float(rss))
                             and float(rss) > 0
                         )
+                        worker_rss_valid = (
+                            isinstance(worker_rss, (int, float))
+                            and not isinstance(worker_rss, bool)
+                            and math.isfinite(float(worker_rss))
+                            and float(worker_rss) > 0
+                        )
+                        native_ok = bool(
+                            resources.get("native_service_method_version") == NATIVE_SERVICE_METHOD_VERSION
+                            and resources.get("native_service_roots_observed") is True
+                            and resources.get("native_controller_excluded") is True
+                            and getattr(native_before, "eligible", False) is True
+                            and getattr(native_after, "eligible", False) is True
+                        )
                         resource_ok = bool(
                             rss_valid
+                            and worker_rss_valid
+                            and native_ok
                             and resources.get("fatal_read_errors") == 0
                             and unverified == 0
                             and resources.get("observed_browser_during_native_run", 0) > 0
@@ -856,6 +1386,7 @@ def run_warm_lane(
                             **record,
                             "record_type": "sample",
                             "sampler_method_version": SAMPLER_METHOD_VERSION,
+                            "native_service_method_version": NATIVE_SERVICE_METHOD_VERSION,
                             "order": entry.position,
                             "arm_order": list(entry.order),
                             "oracle_ok": oracle.ok,
@@ -863,9 +1394,25 @@ def run_warm_lane(
                             "warm_baseline_resources": baseline or None,
                             "warm_final_resources": resources or None,
                             "warm_peak_tree_rss_bytes": rss,
+                            "warm_peak_worker_rss_bytes": worker_rss,
                             "warm_peak_child_footprint_bytes": resources.get("peak_child_footprint_bytes"),
                             "warm_task_tree_cpu_delta_seconds": cpu_delta,
+                            "warm_worker_task_cpu_delta_seconds": worker_cpu_delta,
                             "warm_cpu_delta_error": cpu_error,
+                            "warm_worker_cpu_delta_error": worker_cpu_error,
+                            "warm_native_service_roots": resources.get("native_service_roots"),
+                            "warm_native_roots_observed": resources.get("native_service_roots_observed") is True,
+                            "warm_native_controller_excluded": resources.get("native_controller_excluded") is True,
+                            "native_service_before": (
+                                native_root.public_before(native_before) if native_before is not None else None
+                            ),
+                            "native_service_after": (
+                                native_root.public_after(native_after) if native_after is not None else None
+                            ),
+                            "native_service_before_evidence_sha256": native_before_evidence_sha256,
+                            "native_service_before_evidence_artifact": native_before_evidence_artifact,
+                            "native_service_after_evidence_sha256": native_after_evidence_sha256,
+                            "native_service_after_evidence_artifact": native_after_evidence_artifact,
                             "warm_unverified_processes": unverified,
                             "warm_observed_child_processes": resources.get("observed_child_processes"),
                             "warm_observed_browser_during_native_run": resources.get(
@@ -917,7 +1464,17 @@ def run_warm_lane(
                 with contextlib.suppress(Exception):
                     session.close()
                 sampler = lane_samplers.get(arm)
-                if sampler is None:
+                if arm in native_root_pending:
+                    pending_report = {
+                        "verified": False,
+                        "errors": ["native_service_root_unknown"],
+                        "scope": owned_scopes.get(arm),
+                        "scope_preserved": True,
+                    }
+                    if arm in native_ready_failures:
+                        pending_report["evidence"] = dict(native_ready_failures[arm])
+                    cleanup_reports[arm] = pending_report
+                elif sampler is None:
                     cleanup_reports[arm] = {"verified": False, "errors": ["sampler_unavailable"]}
                 else:
                     try:
@@ -926,6 +1483,8 @@ def run_warm_lane(
                         cleanup_reports[arm] = {"verified": False, "errors": [type(error).__name__]}
                 if not cleanup_reports[arm].get("verified", False):
                     aborted = True
+            if native_root_pending:
+                aborted = True
             try:
                 after_source = source_manifest()
                 after_binding = binding_snapshot(arms)
@@ -954,6 +1513,7 @@ def run_warm_lane(
                 "record_type": "end",
                 "method": METHOD,
                 "sampler_method_version": SAMPLER_METHOD_VERSION,
+                "native_service_method_version": NATIVE_SERVICE_METHOD_VERSION,
                 "observations": len(records),
                 "expected_observations": expected_observations,
                 "failures": failures,
@@ -962,6 +1522,7 @@ def run_warm_lane(
                 "retired_workers": retired_workers,
                 "fixture_errors": fixture_errors,
                 "cleanup_verified": bool(cleanup_reports)
+                and not native_root_pending
                 and all(item.get("verified", False) for item in cleanup_reports.values()),
                 "provenance_verified": verified,
                 "source_unchanged": source_unchanged,
@@ -970,6 +1531,13 @@ def run_warm_lane(
                 "latency_claim_allowed": False,
                 "terminal": True,
             }
+            if native_root_pending:
+                terminal["native_root_pending"] = {
+                    arm: {"scope": owned_scopes.get(arm), "scope_preserved": True}
+                    for arm in sorted(native_root_pending)
+                }
+            if native_ready_failures:
+                terminal["native_ready_failures"] = native_ready_failures
             if setup_error is not None:
                 terminal["setup_error"] = setup_error
             if aborted:
@@ -1016,9 +1584,15 @@ def lane_valid(
         return False
     if terminal.get("cleanup_verified") is not True:
         return False
+    if terminal.get("native_root_pending"):
+        return False
+    if terminal.get("native_ready_failures"):
+        return False
     if terminal.get("aborted", False) or terminal.get("setup_error") is not None:
         return False
     if terminal.get("fixture_errors"):
+        return False
+    if terminal.get("native_service_method_version") != NATIVE_SERVICE_METHOD_VERSION:
         return False
     seen: set[tuple[str, str, int]] = set()
     for row in records:
@@ -1032,6 +1606,10 @@ def lane_valid(
         if not isinstance(arm, str) or not arm:
             return False
         if isinstance(sample, bool) or not isinstance(sample, int) or sample < 0:
+            return False
+        if row.get("native_service_method_version") != NATIVE_SERVICE_METHOD_VERSION:
+            return False
+        if row.get("warm_native_roots_observed") is not True:
             return False
         key = (task, arm, sample)
         if key in seen:
