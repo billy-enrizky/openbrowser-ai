@@ -465,6 +465,41 @@ def _sample_tree(sampler) -> None:
     sampler.sample()
 
 
+class _ResourceCapture:
+    """Latch capture uncertainty while the native worker finishes its protocol."""
+
+    def __init__(self, sampler):
+        self.sampler = sampler
+        self.phase = "baseline"
+        self.error: dict | None = None
+
+    def _failed(self, operation: str, error: Exception) -> None:
+        known = (OSError, PermissionError, ProcessLookupError, TimeoutError, RuntimeError, ValueError, TypeError)
+        self.error = {
+            "phase": self.phase,
+            "operation": operation,
+            "error_type": type(error).__name__ if type(error) in known else "Exception",
+            "errno": error.errno if isinstance(error, OSError) and type(error.errno) is int else None,
+        }
+
+    def sample(self) -> None:
+        if self.error is not None:
+            return
+        try:
+            _sample_tree(self.sampler)
+        except Exception as error:
+            self._failed("sample", error)
+
+    def result(self) -> dict:
+        if self.error is not None:
+            return {}
+        try:
+            return self.sampler.result()
+        except Exception as error:
+            self._failed("result", error)
+            return {}
+
+
 def _receive_until(session, sampler, expected_type: str, *, interval: float, deadline: float) -> dict:
     while time.monotonic() < deadline:
         remaining = max(0.01, min(interval, deadline - time.monotonic()))
@@ -576,6 +611,8 @@ def run_warm_lane(
         sessions: dict[str, Any] = {}
         warmups: dict[str, dict] = {}
         lane_samplers: dict[str, Any] = {}
+        retired_arms: set[str] = set()
+        retired_workers: dict[str, dict] = {}
         setup_error: str | None = None
         aborted = False
         try:
@@ -627,7 +664,12 @@ def run_warm_lane(
                             ctx_downloads = Path(warmups[entry.arm]["downloads"])
                             ctx_downloads.mkdir(parents=True, exist_ok=True)
                             clean_downloads(ctx_downloads)
-                            sampler = sampler_factory(session.pid, warmups[entry.arm]["marker"])
+                            sampler = (
+                                None
+                                if entry.arm in retired_arms
+                                else sampler_factory(session.pid, warmups[entry.arm]["marker"])
+                            )
+                            capture = _ResourceCapture(sampler)
                             nonce = uuid.uuid4().hex
                             record_path = diagnostics / f"record-{entry.task}-{entry.arm}-s{entry.sample}-{nonce}.json"
                             started = time.monotonic()
@@ -646,6 +688,8 @@ def run_warm_lane(
                             continue
                         failure = None
                         try:
+                            if entry.arm in retired_arms:
+                                raise RuntimeError("warm worker retired after protocol failure")
                             session.send(
                                 {
                                     "type": "task",
@@ -667,8 +711,8 @@ def run_warm_lane(
                                 or ack.get("nonce") != nonce
                             ):
                                 raise RuntimeError("worker acknowledgement does not match the task")
-                            _sample_tree(sampler)
-                            baseline = sampler.result()
+                            capture.sample()
+                            baseline = capture.result()
                             session.send(
                                 {
                                     "type": "capture",
@@ -678,9 +722,10 @@ def run_warm_lane(
                                     "nonce": nonce,
                                 }
                             )
+                            capture.phase = "native_run"
                             native_done = _receive_until(
                                 session,
-                                sampler,
+                                capture,
                                 "native_done",
                                 interval=interval,
                                 deadline=time.monotonic() + worker_timeout,
@@ -692,8 +737,9 @@ def run_warm_lane(
                                 or native_done.get("nonce") != nonce
                             ):
                                 raise RuntimeError("worker native completion does not match the task")
-                            _sample_tree(sampler)
-                            resources = sampler.result()
+                            capture.phase = "final"
+                            capture.sample()
+                            resources = capture.result()
                             session.send(
                                 {
                                     "type": "verify",
@@ -724,6 +770,20 @@ def run_warm_lane(
                             ):
                                 raise ValueError("worker record is stale or foreign")
                         except Exception as error:
+                            if entry.arm not in retired_arms:
+                                retired_arms.add(entry.arm)
+                                with contextlib.suppress(Exception):
+                                    session.close()
+                                try:
+                                    retired_cleanup = cleanup(lane_samplers[entry.arm], interval=interval)
+                                except Exception:
+                                    retired_cleanup = {"verified": False}
+                                retired_workers[entry.arm] = {
+                                    "reason": "protocol_failure",
+                                    "cleanup": retired_cleanup,
+                                }
+                                if retired_cleanup.get("verified") is not True:
+                                    aborted = True
                             failure = f"{type(error).__name__}: {error}"
                             record = {
                                 "task": entry.task,
@@ -736,7 +796,7 @@ def run_warm_lane(
                                 "keychain_verified": None,
                                 "error": failure,
                             }
-                        resources = sampler.result() if failure is None else {}
+                        resources = capture.result() if failure is None else {}
                         final_cpu = resources.get("observed_tree_cpu_seconds")
                         baseline_cpu = baseline.get("observed_tree_cpu_seconds")
                         if (
@@ -754,7 +814,7 @@ def run_warm_lane(
                             cpu_delta = None
                             cpu_error = "invalid_counter"
                         rss = resources.get("peak_tree_rss_bytes")
-                        unverified = resources.get("unverified_processes", 0)
+                        unverified = resources.get("unverified_processes")
                         rss_valid = (
                             isinstance(rss, (int, float))
                             and not isinstance(rss, bool)
@@ -792,6 +852,7 @@ def run_warm_lane(
                             "warm_read_errors": resources.get("read_errors"),
                             "warm_fatal_read_errors": resources.get("fatal_read_errors"),
                             "warm_footprint_status": resources.get("footprint_status"),
+                            "warm_sampling_error": capture.error,
                             "resource_ok": resource_ok,
                             "elapsed_seconds": round(time.monotonic() - started, 6),
                             "latency_claim_allowed": False,
@@ -808,6 +869,8 @@ def run_warm_lane(
                             row.get("ok"),
                             oracle.ok,
                         )
+                        if aborted:
+                            break
                     finally:
                         try:
                             fixture_stop(server, thread)
@@ -873,6 +936,7 @@ def run_warm_lane(
                 "failures": failures,
                 "warmups": warmups,
                 "cleanup": cleanup_reports,
+                "retired_workers": retired_workers,
                 "fixture_errors": fixture_errors,
                 "cleanup_verified": bool(cleanup_reports)
                 and all(item.get("verified", False) for item in cleanup_reports.values()),

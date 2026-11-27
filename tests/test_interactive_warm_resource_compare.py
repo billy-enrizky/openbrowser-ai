@@ -1340,3 +1340,192 @@ def test_worker_rejects_stale_capture_binding(tmp_path, monkeypatch):
     assert warm.run_worker("a", tmp_path) == 2
     assert "native" not in events
     assert emitted[-1]["type"] == "fatal"
+
+
+@pytest.mark.parametrize("fault", ["baseline_sample", "baseline_result", "native_poll", "final_sample", "final_result"])
+def test_sampling_failure_preserves_handshake_and_next_task(tmp_path, fault):
+    samplers = []
+    sessions = []
+
+    class FaultSampler(FakeSampler):
+        def __init__(self, broken):
+            super().__init__([{"cpu": 1.0, "rss": 100, "footprint": 50}, {"cpu": 2.0, "rss": 120, "footprint": 60}])
+            self.broken = broken
+            self.sample_calls = 0
+            self.result_calls = 0
+
+        def sample(self):
+            self.sample_calls += 1
+            target = 1 if fault == "baseline_sample" else 2
+            if self.broken and fault.endswith(("sample", "poll")) and self.sample_calls == target:
+                raise OSError(0, f"inspection {BENCH_PASSWORD}")
+            super().sample()
+
+        def result(self):
+            self.result_calls += 1
+            target = 1 if fault == "baseline_result" else 2
+            if self.broken and fault.endswith("result") and self.result_calls == target:
+                raise ValueError(f"result {BENCH_PASSWORD}")
+            return super().result()
+
+    class PollSession(FakeSession):
+        delayed = False
+
+        def receive(self, timeout):
+            if (
+                fault == "native_poll"
+                and not self.delayed
+                and self.inbox.queue
+                and self.inbox.queue[0].get("type") == "native_done"
+            ):
+                self.delayed = True
+                raise TimeoutError("poll again")
+            return super().receive(timeout)
+
+    def sampler_factory(pid, marker):
+        sampler = FaultSampler(broken=len(samplers) == 1)
+        samplers.append(sampler)
+        return sampler
+
+    def session_factory(arm, workdir, diagnostics):
+        session = PollSession(arm, workdir)
+        sessions.append(session)
+        return session
+
+    output, rows, _ = run_lane(
+        tmp_path,
+        arms=("a",),
+        tasks=("wizard", "modal"),
+        sampler_factory=sampler_factory,
+        session_factory=session_factory,
+    )
+    first, second = rows
+    assert first["ok"] is first["adapter_ok"] is first["oracle_ok"] is True
+    assert first["resource_ok"] is False
+    for key in (
+        "warm_peak_tree_rss_bytes",
+        "warm_peak_child_footprint_bytes",
+        "warm_task_tree_cpu_delta_seconds",
+        "warm_unverified_processes",
+        "warm_read_errors",
+        "warm_fatal_read_errors",
+    ):
+        assert first[key] is None
+    expected_phase = "native_run" if fault == "native_poll" else fault.split("_")[0]
+    assert first["warm_sampling_error"] == {
+        "phase": expected_phase,
+        "operation": "result" if fault.endswith("result") else "sample",
+        "error_type": "ValueError" if fault.endswith("result") else "OSError",
+        "errno": None if fault.endswith("result") else 0,
+    }
+    assert BENCH_PASSWORD not in json.dumps(first)
+    assert second["ok"] is second["oracle_ok"] is second["resource_ok"] is True
+    assert second["warm_sampling_error"] is None
+    assert [message["type"] for message in sessions[0].sent] == [
+        "task",
+        "capture",
+        "verify",
+        "task",
+        "capture",
+        "verify",
+        "finish",
+    ]
+    assert samplers[1].sample_calls == (1 if fault.startswith("baseline") else 2)
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    assert terminal["observations"] == 2
+    assert terminal["failures"] == 1
+    assert terminal["valid"] is False
+    assert terminal["cleanup_verified"] is True
+
+
+def test_protocol_failure_retires_only_its_worker_without_rewarm(tmp_path):
+    sessions = {}
+    cleanups = []
+
+    class CheckedSession(FakeSession):
+        def send(self, message):
+            if self.closed and message.get("type") == "task":
+                raise AssertionError("task sent to retired worker")
+            super().send(message)
+
+    def session_factory(arm, workdir, diagnostics):
+        assert arm not in sessions
+        session = CheckedSession(arm, workdir, bad_native_nonce=arm == "a")
+        sessions[arm] = session
+        return session
+
+    def cleanup(sampler, **kwargs):
+        cleanups.append(sampler)
+        return {"verified": True, "remaining": [], "errors": []}
+
+    def sampler_factory(pid, marker):
+        assert not any(session.pid == pid and session.closed for session in sessions.values())
+        return FakeSampler([{"cpu": 1.0, "rss": 100, "footprint": 50}, {"cpu": 2.0, "rss": 120, "footprint": 60}])
+
+    output, rows, _ = run_lane(
+        tmp_path,
+        tasks=("wizard", "modal"),
+        session_factory=session_factory,
+        sampler_factory=sampler_factory,
+        cleanup=cleanup,
+    )
+    assert len(sessions) == 2
+    assert len(rows) == 4
+    assert len([m for m in sessions["a"].sent if m["type"] == "task"]) == 1
+    assert len([m for m in sessions["b"].sent if m["type"] == "task"]) == 2
+    assert all(not row["ok"] and not row["resource_ok"] for row in rows if row["arm"] == "a")
+    assert all(row["ok"] and row["resource_ok"] for row in rows if row["arm"] == "b")
+    assert len(cleanups) == 3
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    assert terminal["failures"] == 2
+    assert terminal["valid"] is False
+    assert set(terminal["retired_workers"]) == {"a"}
+    assert terminal["retired_workers"]["a"]["cleanup"]["verified"] is True
+
+
+def test_orphan_discovery_exception_keeps_capture_and_verify_in_sync(tmp_path):
+    created = []
+
+    class BrokenDiscovery(FakeSampler):
+        def discover_orphans(self):
+            raise OSError(0, "sysctl(KERN_PROCARGS2)")
+
+    def sampler_factory(pid, marker):
+        kind = BrokenDiscovery if len(created) == 1 else FakeSampler
+        sampler = kind([{"cpu": 1.0, "rss": 100, "footprint": 50}, {"cpu": 2.0, "rss": 120, "footprint": 60}])
+        created.append(sampler)
+        return sampler
+
+    _output, rows, sessions = run_lane(
+        tmp_path, arms=("a",), tasks=("wizard", "modal"), sampler_factory=sampler_factory
+    )
+    assert rows[0]["ok"] is rows[0]["oracle_ok"] is True
+    assert rows[0]["resource_ok"] is False
+    assert rows[0]["warm_peak_tree_rss_bytes"] is None
+    assert rows[0]["warm_sampling_error"]["phase"] == "baseline"
+    assert rows[0]["warm_sampling_error"]["error_type"] == "OSError"
+    assert rows[1]["ok"] is rows[1]["resource_ok"] is True
+    assert [message["type"] for message in sessions[0].sent].count("capture") == 2
+    assert [message["type"] for message in sessions[0].sent].count("verify") == 2
+
+
+def test_unverified_retirement_cleanup_aborts_before_other_native_tasks(tmp_path):
+    sessions = {}
+    cleanups = []
+
+    def session_factory(arm, workdir, diagnostics):
+        session = FakeSession(arm, workdir, bad_native_nonce=arm == "a")
+        sessions[arm] = session
+        return session
+
+    def cleanup(sampler, **kwargs):
+        cleanups.append(sampler)
+        return {"verified": len(cleanups) != 1, "remaining": [], "errors": []}
+
+    output, rows, _ = run_lane(tmp_path, tasks=("wizard", "modal"), session_factory=session_factory, cleanup=cleanup)
+    assert len(rows) == 1
+    assert not any(message["type"] == "task" for message in sessions["b"].sent)
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    assert terminal["aborted"] is True
+    assert terminal["valid"] is False
+    assert terminal["retired_workers"]["a"]["cleanup"]["verified"] is False
