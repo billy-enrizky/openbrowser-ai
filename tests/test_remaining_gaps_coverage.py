@@ -1118,51 +1118,35 @@ class TestLbwFindInstalledBrowserPathLine281_315:
 
 
 class TestLbwWaitForCdpUrlLine326_329:
-    """Lines 326-329: non-200 responses cause retry, and timeout raises."""
+    """Local readiness retries transient discovery failures within its deadline."""
 
     @pytest.mark.asyncio
     async def test_wait_for_cdp_non_200_retries(self):
-        """Lines 398-400: non-200 response causes retry loop."""
-        import httpx as httpx_mod
+        from openbrowser.browser import local_discovery
 
-        call_count = 0
-
-        mock_resp_502 = MagicMock()
-        mock_resp_502.status_code = 502
-
-        mock_resp_200 = MagicMock()
-        mock_resp_200.status_code = 200
-        mock_resp_200.json.return_value = {"webSocketDebuggerUrl": "ws://localhost:9222/devtools/browser/test"}
-
-        async def mock_get(url):
-            nonlocal call_count
-            call_count += 1
-            if call_count < 3:
-                return mock_resp_502
-            return mock_resp_200
-
-        mock_client = AsyncMock()
-        mock_client.get = mock_get
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-
-        with patch.object(httpx_mod, "AsyncClient", return_value=mock_client):
+        endpoint = "ws://localhost:9222/devtools/browser/test"
+        fetch = AsyncMock(
+            side_effect=[
+                local_discovery.LocalDiscoveryError("HTTP/1.1 502"),
+                local_discovery.LocalDiscoveryError("HTTP/1.1 502"),
+                {"webSocketDebuggerUrl": endpoint},
+            ]
+        )
+        with patch.object(local_discovery, "fetch_loopback_version", fetch):
             result = await LocalBrowserWatchdog._wait_for_cdp_url(9222, timeout=5)
-            assert "localhost:9222" in result
+        assert result == endpoint
+        assert fetch.await_count == 3
+        assert all(call.args == (9222,) and 0 < call.kwargs["timeout"] <= 2 for call in fetch.await_args_list)
 
     @pytest.mark.asyncio
     async def test_wait_for_cdp_timeout_raises(self):
-        """Line 405: timeout raises TimeoutError."""
-        import httpx as httpx_mod
+        from openbrowser.browser import local_discovery
 
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(side_effect=Exception("connection refused"))
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-
-        with patch.object(httpx_mod, "AsyncClient", return_value=mock_client):
+        fetch = AsyncMock(side_effect=ConnectionRefusedError("connection refused"))
+        with patch.object(local_discovery, "fetch_loopback_version", fetch):
             with pytest.raises(TimeoutError, match="did not start within"):
                 await LocalBrowserWatchdog._wait_for_cdp_url(9222, timeout=0.2)
+        assert fetch.await_count >= 1
 
 
 class TestLbwCleanupTempDirLine344:
