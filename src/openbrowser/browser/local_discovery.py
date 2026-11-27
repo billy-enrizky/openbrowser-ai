@@ -107,11 +107,16 @@ def _decode_version(body: bytes) -> dict[str, Any]:
     return value
 
 
-async def _close_writer(writer: asyncio.StreamWriter) -> None:
+async def _close_writer(writer: asyncio.StreamWriter, *, remaining: float) -> None:
     with contextlib.suppress(OSError, RuntimeError):
         writer.close()
-    with contextlib.suppress(OSError, RuntimeError):
-        await writer.wait_closed()
+    if remaining <= 0:
+        return
+    try:
+        async with asyncio.timeout(remaining):
+            await writer.wait_closed()
+    except (OSError, RuntimeError, TimeoutError):
+        pass
 
 
 async def fetch_loopback_version(
@@ -132,6 +137,8 @@ async def fetch_loopback_version(
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
         raise TimeoutError("loopback discovery timeout must be finite and positive")
 
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
     connector = open_connection or asyncio.open_connection
     writer: asyncio.StreamWriter | None = None
     try:
@@ -153,7 +160,8 @@ async def fetch_loopback_version(
         raise LocalDiscoveryError("loopback discovery request failed") from error
     finally:
         if writer is not None:
-            await _close_writer(writer)
+            remaining = max(0.0, deadline - loop.time())
+            await _close_writer(writer, remaining=remaining)
 
 
 __all__ = [

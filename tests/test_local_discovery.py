@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import socket
 import subprocess
@@ -55,11 +56,13 @@ class FakeReader:
 
 
 class FakeWriter:
-    def __init__(self, *, drain_error=None, close_error=None, wait_error=None):
+    def __init__(self, *, drain_error=None, close_error=None, wait_error=None, wait_block=False):
         self.buffer = bytearray()
         self.drain_error = drain_error
         self.close_error = close_error
         self.wait_error = wait_error
+        self.wait_block = wait_block
+        self.wait_started: asyncio.Event | None = None
         self.closed = False
         self.close_calls = 0
         self.wait_calls = 0
@@ -79,6 +82,10 @@ class FakeWriter:
 
     async def wait_closed(self):
         self.wait_calls += 1
+        if self.wait_started is not None:
+            self.wait_started.set()
+        if self.wait_block:
+            await asyncio.Event().wait()
         if self.wait_error is not None:
             raise self.wait_error
 
@@ -90,7 +97,7 @@ def response(body=BODY, *, status="HTTP/1.1 200 OK", extra_headers=(), content_l
     return ("\r\n".join(headers) + "\r\n\r\n").encode("latin-1") + body
 
 
-def run_fetch(*, chunks, timeout=1.0, writer=None, connector=None):
+def fetch_coro(*, chunks, timeout=1.0, writer=None, connector=None):
     state = {"calls": []}
     fake_writer = writer or FakeWriter()
     fake_reader = FakeReader(chunks)
@@ -107,7 +114,25 @@ def run_fetch(*, chunks, timeout=1.0, writer=None, connector=None):
         )
         return result
 
-    return asyncio.run(runner()), fake_reader, fake_writer, state
+    return runner(), fake_reader, fake_writer, state
+
+
+def run_fetch(*, chunks, timeout=1.0, writer=None, connector=None):
+    coro, fake_reader, fake_writer, state = fetch_coro(
+        chunks=chunks, timeout=timeout, writer=writer, connector=connector
+    )
+    return asyncio.run(coro), fake_reader, fake_writer, state
+
+
+async def bounded(coro, *, bound=0.5):
+    task = asyncio.create_task(coro)
+    _done, pending = await asyncio.wait({task}, timeout=bound)
+    if pending:
+        task.cancel()
+        with contextlib.suppress(BaseException):
+            await task
+        raise AssertionError("helper exceeded the cleanup bound")
+    return task.result()
 
 
 def test_exact_request_and_valid_response():
@@ -218,6 +243,70 @@ def test_timeout_before_connect_and_drain_timeout():
     with pytest.raises(TimeoutError):
         run_fetch(chunks=[response()], timeout=0.01, writer=writer)
     assert writer.close_calls == 1
+
+
+def test_blocked_close_after_success_is_bounded():
+    writer = FakeWriter(wait_block=True)
+    coro, _reader, _writer, _state = fetch_coro(chunks=[response()], timeout=0.05, writer=writer)
+    result = asyncio.run(bounded(coro))
+    assert result["webSocketDebuggerUrl"] == URL
+    assert writer.close_calls == 1
+    assert writer.wait_calls == 1
+
+
+def test_blocked_close_does_not_mask_timeout():
+    writer = FakeWriter(wait_block=True)
+
+    class SlowReader:
+        async def read(self, size=-1):
+            if not hasattr(self, "sent"):
+                self.sent = True
+                return b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n"
+            await asyncio.sleep(10)
+            return b""
+
+    async def connector(host, port):
+        return SlowReader(), writer
+
+    async def scenario():
+        coro, _reader, _writer, _state = fetch_coro(chunks=[], timeout=0.02, writer=writer, connector=connector)
+        with pytest.raises(TimeoutError):
+            await coro
+        return True
+
+    assert asyncio.run(bounded(scenario())) is True
+    assert writer.close_calls == 1
+
+
+def test_blocked_close_does_not_mask_cancellation():
+    writer = FakeWriter(wait_block=True)
+    chunks = [b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n", asyncio.CancelledError()]
+
+    async def scenario():
+        coro, _reader, _writer, _state = fetch_coro(chunks=chunks, timeout=0.05, writer=writer)
+        with pytest.raises(asyncio.CancelledError):
+            await coro
+        return True
+
+    assert asyncio.run(bounded(scenario())) is True
+    assert writer.close_calls == 1
+
+
+def test_second_cancellation_during_blocked_close_propagates():
+    async def scenario():
+        writer = FakeWriter(wait_block=True)
+        writer.wait_started = asyncio.Event()
+        coro, _reader, _writer, _state = fetch_coro(chunks=[response()], timeout=5, writer=writer)
+        task = asyncio.create_task(coro)
+        assert writer.wait_started is not None
+        await writer.wait_started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert writer.close_calls == 1
+        return True
+
+    assert asyncio.run(bounded(scenario())) is True
 
 
 def test_body_timeout_closes_writer():
