@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import socket
 import time
 from pathlib import Path
@@ -93,9 +92,10 @@ def daemon_processes() -> list[dict[str, Any]]:
         return []
 
     rows: list[dict[str, Any]] = []
-    for process in psutil.process_iter(['pid', 'create_time', 'cmdline']):
+    for process in psutil.process_iter(['pid']):
         try:
-            cmdline = process.info.get('cmdline') or []
+            # Optional process reads belong inside this candidate's error boundary.
+            cmdline = process.cmdline() or []
             if not is_daemon_cmdline(cmdline):
                 continue
             if process.username() != current_user:
@@ -139,7 +139,7 @@ def daemon_processes() -> list[dict[str, Any]]:
                 socket_path = None
                 socket_exists = False
                 socket_live = True
-            created = float(process.info.get('create_time') or time.time())
+            created = float(process.create_time() or time.time())
             rows.append(
                 {
                     'pid': process.pid,
@@ -152,7 +152,7 @@ def daemon_processes() -> list[dict[str, Any]]:
                     'cmdline': ' '.join(str(part) for part in cmdline),
                 }
             )
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
             continue
     return sorted(rows, key=lambda row: row['pid'])
 
