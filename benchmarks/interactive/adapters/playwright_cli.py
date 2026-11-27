@@ -11,10 +11,11 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import time
 from pathlib import Path
 
-from ..measurement import browser_launch_checkpoint
+from ..measurement import browser_launch_checkpoint, validation_only
 from .base import ArmResult, RunContext, run_process, terminate_matching
 from .playwright_common import (
     CLI_VERSION,
@@ -30,6 +31,19 @@ from .playwright_common import (
     write_secrets,
 )
 from .playwright_tasks import SECRET_PASSWORD, account_program, login_program, task_program
+
+
+@validation_only
+def published_session_pid(stdout: str, session: str) -> int | None:
+    """Return the one exact native session pid printed by `open`, if present."""
+    if not isinstance(stdout, str) or not isinstance(session, str) or not session:
+        return None
+    pattern = re.compile(r"### Browser `" + re.escape(session) + r"` opened with pid ([1-9][0-9]*)\.")
+    matches = [match.group(1) for line in stdout.splitlines() if (match := pattern.fullmatch(line.strip()))]
+    if len(matches) != 1:
+        return None
+    return int(matches[0])
+
 
 READINESS_PROGRAM = """async (page) => {
   const browser_version = await page.evaluate(() => navigator.userAgent);
@@ -63,6 +77,11 @@ class PlaywrightCliArm:
         self._attempted_open = False
         self._config_path: Path | None = None
         self._program_index = 0
+        self._session_pid: int | None = None
+
+    @property
+    def session_pid(self) -> int | None:
+        return self._session_pid
 
     # -- native lifecycle --------------------------------------------------
     def _config(self, ctx: RunContext) -> Path:
@@ -92,7 +111,7 @@ class PlaywrightCliArm:
             return
         self._attempted_open = True
         self._keychain_verified = None
-        self._run(
+        stdout = self._run(
             ctx,
             "open",
             "--profile",
@@ -101,6 +120,7 @@ class PlaywrightCliArm:
             str(self._config(ctx)),
             timeout=120,
         )
+        self._session_pid = published_session_pid(stdout, ctx.session)
         self._opened = True
 
     def _program_file(self, ctx: RunContext, code: str) -> Path:
@@ -121,6 +141,7 @@ class PlaywrightCliArm:
 
     def _restart(self, ctx: RunContext) -> None:
         self._keychain_verified = None
+        self._session_pid = None
         if self._opened or self._attempted_open:
             with contextlib.suppress(Exception):
                 self._run(ctx, "close", timeout=60)

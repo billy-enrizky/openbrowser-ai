@@ -324,6 +324,45 @@ def test_cli_cleanup_closes_session(tmp_path, monkeypatch):
     assert any(command[3] == "close" for command in FakeProcess.commands if len(command) > 3)
 
 
+def test_cli_open_retains_stdout_and_parses_session_pid(tmp_path, monkeypatch):
+    ctx = make_context(tmp_path)
+    output = "### Browser `pw-test` opened with pid 4321.\n"
+
+    def fake_run(*args, **kwargs):
+        return 0, output, "", 0.1
+
+    monkeypatch.setattr(playwright_cli, "run_process", fake_run)
+    arm = playwright_cli.PlaywrightCliArm(binary="/bin/playwright-cli")
+    arm._open(ctx)
+
+    assert arm.session_pid == 4321
+    assert arm._result.stdout == output
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "",
+        "### Browser `pw-test` opened with pid 0.",
+        "### Browser `pw-test` opened with pid abc.",
+        "### Browser `other` opened with pid 4321.",
+        "opened with pid 1.\nopened with pid 2.",
+    ],
+)
+def test_cli_open_requires_one_exact_session_pid(tmp_path, monkeypatch, output):
+    ctx = make_context(tmp_path)
+
+    def fake_run(*args, **kwargs):
+        return 0, output, "", 0.1
+
+    monkeypatch.setattr(playwright_cli, "run_process", fake_run)
+    arm = playwright_cli.PlaywrightCliArm(binary="/bin/playwright-cli")
+    arm._open(ctx)
+
+    assert arm.session_pid is None
+    assert arm._result.stdout == output
+
+
 def test_secret_leak_guard_rejects_literal():
     from benchmarks.interactive.adapters.playwright_common import assert_no_secret
 
