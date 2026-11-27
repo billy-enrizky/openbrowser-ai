@@ -76,7 +76,7 @@ OpenBrowser is a framework for intelligent browser automation. It combines direc
   - [12.2. Tools](#122-tools)
   - [12.3. Configuration](#123-configuration)
 - [13. Benchmark: Native Local Lanes](#13-benchmark-native-local-lanes)
-  - [13.1. Native Local Benchmarks (2026-11-25)](#131-native-local-benchmarks-2026-11-25)
+  - [13.1. Native Local Benchmarks (2026-11-27)](#131-native-local-benchmarks-2026-11-27)
   - [13.2. Why OpenBrowser is faster and more efficient](#132-why-openbrowser-is-faster-and-more-efficient)
 - [14. CLI Usage](#14-cli-usage)
 - [15. Project Structure](#15-project-structure)

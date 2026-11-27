@@ -9,6 +9,7 @@
   - [2.2. Warm interactive](#22-warm-interactive)
   - [2.3. Timer and cleanup boundary](#23-timer-and-cleanup-boundary)
 - [3. Interactive resource lane, 2026-11-27](#3-interactive-resource-lane-2026-11-27)
+  - [3.1. WebMCP capability lane](#31-webmcp-capability-lane)
 - [4. Arms](#4-arms)
 - [5. Tasks](#5-tasks)
 - [6. Fair-run procedure](#6-fair-run-procedure)

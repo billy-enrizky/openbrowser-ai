@@ -1,5 +1,6 @@
 # Seven-interface N=5 scoreboard, 2026-11-27
 
+<!-- toc:start -->
 ## Contents
 
 - [1. Scope](#1-scope)
@@ -8,6 +9,8 @@
   - [2.2. Warm](#22-warm)
 - [3. Memory](#3-memory)
 - [4. Retained loss queue](#4-retained-loss-queue)
+
+<!-- toc:end -->
 
 ## 1. Scope
 
