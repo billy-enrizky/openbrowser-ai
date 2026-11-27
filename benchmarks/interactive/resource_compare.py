@@ -42,6 +42,24 @@ SAMPLER_METHOD_VERSION = 6
 MAX_READ_ERROR_DETAILS = 32
 MAX_DISCOVERY_END_FENCES = 32
 _CAPTURE_PHASES = frozenset({"baseline", "native_run", "final"})
+_PROCESS_STATUSES = frozenset(
+    {
+        "running",
+        "sleeping",
+        "disk-sleep",
+        "stopped",
+        "tracing-stop",
+        "zombie",
+        "dead",
+        "wake-kill",
+        "waking",
+        "idle",
+        "locked",
+        "waiting",
+        "suspended",
+        "parked",
+    }
+)
 _RESOLUTION_SOURCES = frozenset({"read_exception", "identity_fence", "memory_task_fence", "discovery_scan"})
 _MEMORY_TASK_VERIFICATIONS = frozenset(
     {
@@ -598,7 +616,7 @@ class ProcessTreeSampler:
                 return _IdentityProbe(None, None, False, error_type, errno)
         try:
             value = process.status()
-            if not isinstance(value, str):
+            if not isinstance(value, str) or value not in _PROCESS_STATUSES:
                 raise ValueError("invalid process status")
             status = value
         except Exception as error:

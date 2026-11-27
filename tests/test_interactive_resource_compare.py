@@ -1375,6 +1375,30 @@ def test_discovery_status_denied_uses_only_complete_identity_proof(
     assert result["fatal_read_errors"] == 1
 
 
+@pytest.mark.parametrize("invalid_status", ["", "garbage"])
+def test_discovery_unsupported_status_string_is_unknown(monkeypatch, invalid_status):
+    module = resource_module()
+    after = FakeProcess(90, 2.0)
+    after.status = lambda: invalid_status
+    after.is_running = lambda: True
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, 2.0), after],
+    )
+
+    sampler.discover_orphans()
+
+    result = sampler.result()
+    immediate = result["read_error_details"][0]["discovery_probe"]["immediate"]
+    assert immediate["status"] is None
+    assert immediate["running"] is True
+    assert immediate["error_type"] == "ValueError"
+    assert immediate["same_identity"] is True
+    assert immediate["state"] == "unknown"
+    assert result["fatal_read_errors"] == 1
+
+
 def test_discovery_before_identity_denied_keeps_primary_fatal(monkeypatch):
     module = resource_module()
     sampler, _calls = discovery_probe_sampler(
