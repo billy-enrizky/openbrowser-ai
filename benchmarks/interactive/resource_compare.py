@@ -38,7 +38,7 @@ MODULE = "benchmarks.interactive.resource_compare"
 LOGGER = logging.getLogger(__name__)
 DEFAULT_WORKDIR = Path("/tmp") if os.name != "nt" else Path(tempfile.gettempdir())
 SAMPLE_PREFIX = "r-"
-SAMPLER_METHOD_VERSION = 6
+SAMPLER_METHOD_VERSION = 7
 MAX_READ_ERROR_DETAILS = 32
 MAX_DISCOVERY_END_FENCES = 32
 _CAPTURE_PHASES = frozenset({"baseline", "native_run", "final"})
@@ -130,6 +130,12 @@ class _IdentityProbe:
     running: bool | None
     error_type: str | None
     errno: int | None
+    pid: int | None = None
+    error_pid: int | None = None
+    error_pid_present: bool = False
+    error_pid_valid: bool = False
+    factory_pid: int | None = None
+    error_pid_match: bool | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -138,6 +144,12 @@ class _IdentityProbe:
             "running": self.running,
             "error_type": self.error_type,
             "errno": self.errno,
+            "pid": self.pid,
+            "error_pid": self.error_pid,
+            "error_pid_present": self.error_pid_present,
+            "error_pid_valid": self.error_pid_valid,
+            "factory_pid": self.factory_pid,
+            "error_pid_match": self.error_pid_match,
         }
 
 
@@ -149,6 +161,17 @@ class _PendingDiscoveryFailure:
     sample_index: int
     failed_at: float
     before: _IdentityProbe
+    operation: str
+    error_type: str
+    error_pid: int | None
+    error_pid_present: bool
+    error_pid_valid: bool
+    error_pid_match: bool | None
+    effective_uid: int | None
+    current_effective_uid: int | None
+    detail_index: int | None
+    before_valid: bool
+    same_user: bool
 
 
 @dataclass(frozen=True)
@@ -161,6 +184,18 @@ class _DiscoveryEndFence:
     same_identity: bool | None
     state: str
     fence: _IdentityProbe
+    barrier_phase: str
+    barrier_sample_index: int
+    barrier_epoch: int
+    validated_exit: bool
+    exit_signal: str
+    error_type: str
+    error_pid: int | None
+    error_pid_present: bool
+    error_pid_valid: bool
+    error_pid_match: bool | None
+    effective_uid: int | None
+    current_effective_uid: int | None
 
     def as_dict(self) -> dict:
         return {
@@ -172,6 +207,18 @@ class _DiscoveryEndFence:
             "same_identity": self.same_identity,
             "state": self.state,
             "fence": self.fence.as_dict(),
+            "barrier_phase": self.barrier_phase,
+            "barrier_sample_index": self.barrier_sample_index,
+            "barrier_epoch": self.barrier_epoch,
+            "validated_exit": self.validated_exit,
+            "exit_signal": self.exit_signal,
+            "error_type": self.error_type,
+            "error_pid": self.error_pid,
+            "error_pid_present": self.error_pid_present,
+            "error_pid_valid": self.error_pid_valid,
+            "error_pid_match": self.error_pid_match,
+            "effective_uid": self.effective_uid,
+            "current_effective_uid": self.current_effective_uid,
         }
 
 
@@ -192,12 +239,17 @@ class ResourceLedger:
         self.samples = 0
         self.read_errors = 0
         self.fatal_read_errors = 0
+        self.raw_fatal_read_errors = 0
         self.expected_exit_races = 0
         self.read_error_types: dict[str, int] = {}
         self.read_resolutions: dict[str, int] = {}
         self.read_error_details: list[dict] = []
         self.read_error_details_truncated = 0
         self.fatal_read_identities: set[ReadIdentity] = set()
+        self.raw_fatal_read_identities: set[ReadIdentity] = set()
+        self.discovery_lifecycle_resolutions: list[dict] = []
+        self._resolved_discovery_probes: set[int] = set()
+        self._fatal_identity_refcounts: dict[ReadIdentity, int] = {}
 
     def note_read_error(
         self,
@@ -214,6 +266,11 @@ class ResourceLedger:
         resolution_error: BaseException | None = None,
         resolution_source: str = "identity_fence",
         memory_task_verification: str = "not_run",
+        error_pid: int | None = None,
+        error_pid_present: bool = False,
+        error_pid_valid: bool = False,
+        error_pid_match: bool | None = None,
+        current_effective_uid: int | None = None,
     ) -> bool:
         self.read_errors += 1
         identity = (None, None) if identity is None else identity
@@ -242,7 +299,16 @@ class ResourceLedger:
                     "sample_index": sample_index,
                     "error_type": name,
                     "errno": errno_value,
+                    "error_pid": error_pid if _valid_pid(error_pid) else None,
+                    "error_pid_present": bool(error_pid_present),
+                    "error_pid_valid": bool(error_pid_valid),
+                    "error_pid_match": error_pid_match,
                     "effective_uid": effective_uid_value,
+                    "current_effective_uid": (
+                        current_effective_uid
+                        if type(current_effective_uid) is int and current_effective_uid >= 0
+                        else None
+                    ),
                     "discovery_probe_id": discovery_probe_id,
                     "discovery_probe": copy.deepcopy(discovery_probe) if discovery_probe is not None else None,
                     "resolution": resolution,
@@ -258,7 +324,60 @@ class ResourceLedger:
             self.expected_exit_races += 1
             return False
         self.fatal_read_errors += 1
+        self.raw_fatal_read_errors += 1
         self.fatal_read_identities.add(identity)
+        self.raw_fatal_read_identities.add(identity)
+        self._fatal_identity_refcounts[identity] = self._fatal_identity_refcounts.get(identity, 0) + 1
+        return True
+
+    def resolve_discovery_event(self, probe_id: int, *, detail_index: int | None, proof: dict) -> bool:
+        """Append one linked resolution without rewriting the original read."""
+        if probe_id in self._resolved_discovery_probes:
+            return False
+        if detail_index is None or detail_index < 0 or detail_index >= len(self.read_error_details):
+            return False
+        detail = self.read_error_details[detail_index]
+        if detail.get("discovery_probe_id") != probe_id:
+            return False
+        if detail.get("resolution") != "unknown":
+            return False
+        identity: ReadIdentity = (detail.get("pid"), detail.get("created_at"))
+        refcount = self._fatal_identity_refcounts.get(identity, 0)
+        if refcount <= 0 or self.fatal_read_errors <= 0:
+            return False
+        self._resolved_discovery_probes.add(probe_id)
+        self.fatal_read_errors -= 1
+        remaining = refcount - 1
+        if remaining:
+            self._fatal_identity_refcounts[identity] = remaining
+        else:
+            self._fatal_identity_refcounts.pop(identity, None)
+            self.fatal_read_identities.discard(identity)
+        before = ((detail.get("discovery_probe") or {}).get("before") or {})
+        self.discovery_lifecycle_resolutions.append(
+            {
+                "probe_id": probe_id,
+                "read_error_index": detail_index,
+                "pid": identity[0],
+                "before_ctime": before.get("ctime"),
+                "resolution": "original_ended_before_capture_close",
+                "barrier_phase": proof.get("barrier_phase"),
+                "barrier_sample_index": proof.get("barrier_sample_index"),
+                "barrier_epoch": proof.get("barrier_epoch"),
+                "failure_phase": proof.get("capture_phase"),
+                "validated_exit": proof.get("validated_exit"),
+                "resolved_state": proof.get("state"),
+                "exit_signal": proof.get("exit_signal"),
+                "error_type": proof.get("error_type"),
+                "error_pid": proof.get("error_pid"),
+                "error_pid_present": proof.get("error_pid_present"),
+                "error_pid_valid": proof.get("error_pid_valid"),
+                "error_pid_match": proof.get("error_pid_match"),
+                "effective_uid": proof.get("effective_uid"),
+                "current_effective_uid": proof.get("current_effective_uid"),
+                "proof": copy.deepcopy(proof),
+            }
+        )
         return True
 
     def observe(self, readings: list[ProcessReading], *, phase: str = "native_run") -> None:
@@ -322,6 +441,7 @@ class ResourceLedger:
             "cpu_accounting": "sampled_lower_bound",
             "read_errors": self.read_errors,
             "fatal_read_errors": self.fatal_read_errors,
+            "raw_fatal_read_errors": self.raw_fatal_read_errors,
             "expected_exit_races": self.expected_exit_races,
             "read_error_types": dict(sorted(self.read_error_types.items())),
             "read_resolutions": dict(sorted(self.read_resolutions.items())),
@@ -332,6 +452,11 @@ class ResourceLedger:
                 {"pid": pid, "created_at": created_at}
                 for pid, created_at in sorted(self.fatal_read_identities, key=_read_identity_sort_key)
             ],
+            "raw_fatal_read_identities": [
+                {"pid": pid, "created_at": created_at}
+                for pid, created_at in sorted(self.raw_fatal_read_identities, key=_read_identity_sort_key)
+            ],
+            "discovery_lifecycle_resolutions": copy.deepcopy(self.discovery_lifecycle_resolutions),
             "rss_accounting": "sampled_sum_includes_worker_shared_pages_may_repeat",
         }
 
@@ -419,9 +544,43 @@ def _identity_state(before: _IdentityProbe, after: _IdentityProbe) -> tuple[bool
     return same_identity, "unknown"
 
 
+def _validated_discovery_close(before: _IdentityProbe, after: _IdentityProbe) -> tuple[bool, str]:
+    if after.error_pid_present and (not after.error_pid_valid or after.error_pid_match is not True):
+        return False, "mismatched_or_malformed_closing_pid"
+    if after.error_type in {"NoSuchProcess", "ZombieProcess"} and after.error_pid_match is True:
+        return True, "exit_exception"
+    if after.status in {"zombie", "dead"} and (
+        after.ctime is None or (before.ctime is not None and after.ctime == before.ctime)
+    ):
+        return True, "observed_zombie"
+    if after.running is False and after.error_type is None:
+        return True, "not_running"
+    if before.ctime is not None and after.ctime is not None and after.ctime != before.ctime:
+        return True, "replaced"
+    return False, "unproven"
+
+
+@dataclass(frozen=True)
+class _ExceptionPidFact:
+    present: bool
+    valid: bool
+    value: int | None
+    match: bool | None
+
+
 def _exception_pid(error: BaseException) -> int | None:
     value = getattr(error, "pid", None)
     return value if _valid_pid(value) else None
+
+
+def _exception_pid_fact(error: BaseException, pid: int) -> _ExceptionPidFact:
+    present = hasattr(error, "pid")
+    raw = getattr(error, "pid", None)
+    valid = _valid_pid(raw)
+    value = raw if valid else None
+    if not present:
+        return _ExceptionPidFact(False, False, None, None)
+    return _ExceptionPidFact(True, valid, value, valid and value == pid)
 
 
 def _valid_create_time(value: object) -> bool:
@@ -457,6 +616,10 @@ class ProcessTreeSampler:
         self._pending_discovery_failures: list[_PendingDiscoveryFailure] = []
         self._discovery_end_fences: list[_DiscoveryEndFence] = []
         self._discovery_end_fences_dropped = 0
+        self._discovery_pid_unresolved_counts: dict[int, int] = {}
+        self._discovery_barrier_epoch = 0
+        self._discovery_finalized = False
+        self._discovery_late_probes = 0
         self._process = process_factory or psutil.Process
         self._footprint = footprint_reader if footprint_reader is not None else make_footprint_reader()
         try:
@@ -588,57 +751,76 @@ class ProcessTreeSampler:
         self._capture_phase = phase
 
     def _probe_identity(self, pid: int) -> _IdentityProbe:
+        factory_pid: int | None = None
+
+        def result(
+            ctime: float | None,
+            status: str | None,
+            running: bool | None,
+            error_type: str | None = None,
+            errno: int | None = None,
+            fact: _ExceptionPidFact | None = None,
+        ) -> _IdentityProbe:
+            fact = fact or _ExceptionPidFact(False, False, None, None)
+            return _IdentityProbe(
+                ctime,
+                status,
+                running,
+                error_type,
+                errno,
+                pid=pid,
+                error_pid=fact.value,
+                error_pid_present=fact.present,
+                error_pid_valid=fact.valid,
+                factory_pid=factory_pid,
+                error_pid_match=fact.match,
+            )
+
         try:
             process = self._process(pid)
         except Exception as error:
+            fact = _exception_pid_fact(error, pid)
             running = False if _exit_error_for_pid(error, pid) else None
-            return _IdentityProbe(None, None, running, type(error).__name__, _safe_errno(error))
+            return result(None, None, running, type(error).__name__, _safe_errno(error), fact)
         try:
             actual_pid = process.pid
         except Exception as error:
-            return _IdentityProbe(None, None, None, type(error).__name__, _safe_errno(error))
+            fact = _exception_pid_fact(error, pid)
+            return result(None, None, None, type(error).__name__, _safe_errno(error), fact)
+        if _valid_pid(actual_pid):
+            factory_pid = actual_pid
         if not _valid_pid(actual_pid) or actual_pid != pid:
-            return _IdentityProbe(None, None, None, "ValueError", None)
-        ctime = None
-        status = None
-        running = None
-        error_type = None
-        errno = None
+            return result(None, None, None, "ValueError", None)
         try:
             value = process.create_time()
             if not _valid_create_time(value):
                 raise ValueError("invalid create time")
             ctime = float(value)
         except Exception as error:
-            error_type = type(error).__name__
-            errno = _safe_errno(error)
-            if _exit_error_for_pid(error, pid):
-                return _IdentityProbe(None, None, False, error_type, errno)
+            fact = _exception_pid_fact(error, pid)
+            running = False if _exit_error_for_pid(error, pid) else None
+            return result(None, None, running, type(error).__name__, _safe_errno(error), fact)
         try:
             value = process.status()
             if not isinstance(value, str) or value not in _PROCESS_STATUSES:
                 raise ValueError("invalid process status")
             status = value
         except Exception as error:
-            if error_type is None:
-                error_type = type(error).__name__
-                errno = _safe_errno(error)
-            if _exit_error_for_pid(error, pid):
-                return _IdentityProbe(ctime, None, False, error_type, errno)
+            fact = _exception_pid_fact(error, pid)
+            running = False if _exit_error_for_pid(error, pid) else None
+            return result(ctime, None, running, type(error).__name__, _safe_errno(error), fact)
         try:
             value = process.is_running()
             if type(value) is not bool:
                 raise ValueError("invalid running state")
             running = value
         except Exception as error:
-            if error_type is None:
-                error_type = type(error).__name__
-                errno = _safe_errno(error)
-            if _exit_error_for_pid(error, pid):
-                return _IdentityProbe(ctime, status, False, error_type, errno)
+            fact = _exception_pid_fact(error, pid)
+            running = False if _exit_error_for_pid(error, pid) else None
+            return result(ctime, status, running, type(error).__name__, _safe_errno(error), fact)
         if status in {"zombie", "dead"}:
             running = False
-        return _IdentityProbe(ctime, status, running, error_type, errno)
+        return result(ctime, status, running)
 
     def _queue_discovery_end_fence(
         self,
@@ -647,10 +829,26 @@ class ProcessTreeSampler:
         pid: int,
         before: _IdentityProbe,
         failed_at: float,
+        operation: str,
+        error: BaseException,
+        effective_uid: int | None,
+        current_effective_uid: int | None,
+        detail_index: int | None,
     ) -> None:
+        if self._discovery_finalized:
+            self._discovery_late_probes += 1
+            return
         if len(self._pending_discovery_failures) >= MAX_DISCOVERY_END_FENCES:
             self._discovery_end_fences_dropped += 1
             return
+        pid_fact = _exception_pid_fact(error, pid)
+        before_valid = (
+            _valid_pid(pid)
+            and _valid_create_time(before.ctime)
+            and before.status in _PROCESS_STATUSES
+            and before.running is True
+            and before.error_type is None
+        )
         self._pending_discovery_failures.append(
             _PendingDiscoveryFailure(
                 probe_id=probe_id,
@@ -659,15 +857,76 @@ class ProcessTreeSampler:
                 sample_index=self._ledger.samples,
                 failed_at=failed_at,
                 before=before,
+                operation=operation,
+                error_type=type(error).__name__,
+                error_pid=pid_fact.value,
+                error_pid_present=pid_fact.present,
+                error_pid_valid=pid_fact.valid,
+                error_pid_match=pid_fact.match,
+                effective_uid=effective_uid,
+                current_effective_uid=current_effective_uid,
+                detail_index=detail_index,
+                before_valid=before_valid,
+                same_user=current_effective_uid is not None and effective_uid == current_effective_uid,
             )
         )
 
+    def _discovery_event_eligible(self, item: _PendingDiscoveryFailure, fence: _DiscoveryEndFence) -> bool:
+        if item.operation != "cmdline":
+            return False
+        if item.error_type not in {"AccessDenied", "OSError"}:
+            return False
+        if not item.before_valid or not item.same_user:
+            return False
+        if item.effective_uid is None or item.current_effective_uid is None:
+            return False
+        if item.effective_uid != item.current_effective_uid:
+            return False
+        if item.error_pid_match is False:
+            return False
+        if item.error_type == "AccessDenied":
+            if not (item.error_pid_present and item.error_pid_valid and item.error_pid_match is True):
+                return False
+        if item.error_type == "OSError" and item.error_pid_present:
+            if not item.error_pid_valid or item.error_pid_match is not True:
+                return False
+        if not fence.validated_exit:
+            return False
+        if fence.barrier_phase != "final":
+            return False
+        if fence.probe_id != item.probe_id or fence.pid != item.pid:
+            return False
+        if fence.capture_phase != item.capture_phase:
+            return False
+        if item.detail_index is None:
+            return False
+        return True
+
+    def _resolve_discovery_pid(self, pid: int) -> None:
+        count = self._discovery_pid_unresolved_counts.get(pid, 0)
+        if count <= 1:
+            self._discovery_pid_unresolved_counts.pop(pid, None)
+            self._marker_unverified.discard(pid)
+        else:
+            self._discovery_pid_unresolved_counts[pid] = count - 1
+
     def record_discovery_end_fences(self) -> None:
+        if self._capture_phase != "final":
+            raise ValueError("Discovery end fences require the final capture phase")
+        if self._discovery_finalized:
+            return
+        self._discovery_finalized = True
+        self._discovery_barrier_epoch += 1
+        barrier_phase = self._capture_phase
+        barrier_sample_index = self._ledger.samples
+        barrier_epoch = self._discovery_barrier_epoch
         pending = tuple(self._pending_discovery_failures)
         self._pending_discovery_failures.clear()
+        fences: dict[int, _DiscoveryEndFence] = {}
         for item in pending:
             fence = self._probe_identity(item.pid)
             same_identity, state = _identity_state(item.before, fence)
+            validated_exit, exit_signal = _validated_discovery_close(item.before, fence)
             record = _DiscoveryEndFence(
                 probe_id=item.probe_id,
                 pid=item.pid,
@@ -677,11 +936,34 @@ class ProcessTreeSampler:
                 same_identity=same_identity,
                 state=state,
                 fence=fence,
+                barrier_phase=barrier_phase,
+                barrier_sample_index=barrier_sample_index,
+                barrier_epoch=barrier_epoch,
+                validated_exit=validated_exit,
+                exit_signal=exit_signal,
+                error_type=item.error_type,
+                error_pid=item.error_pid,
+                error_pid_present=item.error_pid_present,
+                error_pid_valid=item.error_pid_valid,
+                error_pid_match=item.error_pid_match,
+                effective_uid=item.effective_uid,
+                current_effective_uid=item.current_effective_uid,
             )
             if len(self._discovery_end_fences) >= MAX_DISCOVERY_END_FENCES:
                 self._discovery_end_fences_dropped += 1
                 continue
             self._discovery_end_fences.append(record)
+            fences[item.probe_id] = record
+        for item in pending:
+            fence = fences.get(item.probe_id)
+            if fence is None or not self._discovery_event_eligible(item, fence):
+                continue
+            if self._ledger.resolve_discovery_event(
+                item.probe_id,
+                detail_index=item.detail_index,
+                proof=fence.as_dict(),
+            ):
+                self._resolve_discovery_pid(item.pid)
 
     def _note_discovery_error(
         self,
@@ -690,16 +972,20 @@ class ProcessTreeSampler:
         operation: str,
         identity: ReadIdentity | None,
         effective_uid: int | None = None,
+        current_effective_uid: int | None = None,
         discovery_probe_id: int | None = None,
         discovery_probe: dict | None = None,
-    ) -> None:
+    ) -> int | None:
         normalized_identity = (None, None) if identity is None else identity
         pid = normalized_identity[0]
+        pid_fact = _exception_pid_fact(error, pid if _valid_pid(pid) else -1)
         if _valid_pid(pid):
             assert isinstance(pid, int)
             self._marker_unverified.add(pid)
+            self._discovery_pid_unresolved_counts[pid] = self._discovery_pid_unresolved_counts.get(pid, 0) + 1
         else:
             self._discovery_unverified = True
+        before_count = len(self._ledger.read_error_details)
         self._ledger.note_read_error(
             error,
             identity=normalized_identity,
@@ -711,7 +997,15 @@ class ProcessTreeSampler:
             discovery_probe=discovery_probe,
             resolution="unknown",
             resolution_source="discovery_scan",
+            error_pid=pid_fact.value,
+            error_pid_present=pid_fact.present,
+            error_pid_valid=pid_fact.valid,
+            error_pid_match=pid_fact.match,
+            current_effective_uid=current_effective_uid,
         )
+        if len(self._ledger.read_error_details) > before_count:
+            return before_count
+        return None
 
     def discover_orphans(self) -> None:
         """Recover marked children without crossing the POSIX effective-UID boundary.
@@ -741,19 +1035,21 @@ class ProcessTreeSampler:
                     self._note_discovery_error(ValueError("invalid process id"), operation="pid", identity=None)
                     continue
                 effective_uid: int | None = None
+                current_uid: int | None = None
                 if os.name == "posix":
                     try:
                         candidate_uid = getattr(process.uids(), "effective", None)
                         if not _valid_uid(candidate_uid):
                             raise ValueError("invalid effective uid")
                         assert type(candidate_uid) is int
-                        current_uid = os.geteuid()
-                        if not _valid_uid(current_uid):
+                        scan_uid = os.geteuid()
+                        if not _valid_uid(scan_uid):
                             raise ValueError("invalid current effective uid")
-                        if candidate_uid != current_uid:
+                        if candidate_uid != scan_uid:
                             self._discovery_uid_stats["foreign_uid"] += 1
                             continue
                         effective_uid = candidate_uid
+                        current_uid = scan_uid
                         self._discovery_uid_stats["same_uid"] += 1
                     except (psutil.NoSuchProcess, psutil.ZombieProcess):
                         continue
@@ -789,6 +1085,7 @@ class ProcessTreeSampler:
                             "probe_id": probe_id,
                             "capture_phase": self._capture_phase,
                             "cause_tag": _discovery_cause_tag(error),
+                            "current_effective_uid": current_uid,
                             "before": before_identity.as_dict(),
                             "immediate": {
                                 **immediate_identity.as_dict(),
@@ -796,23 +1093,32 @@ class ProcessTreeSampler:
                                 "state": state,
                             },
                         }
+                    else:
+                        failed_at = None
+                        probe_id = None
+                        discovery_probe = None
+                    detail_index = self._note_discovery_error(
+                        error,
+                        operation=operation,
+                        identity=(pid, None),
+                        effective_uid=effective_uid,
+                        current_effective_uid=current_uid,
+                        discovery_probe_id=probe_id,
+                        discovery_probe=discovery_probe,
+                    )
+                    if operation == "cmdline":
+                        assert probe_id is not None and failed_at is not None
                         self._queue_discovery_end_fence(
                             probe_id=probe_id,
                             pid=pid,
                             before=before_identity,
                             failed_at=failed_at,
+                            operation=operation,
+                            error=error,
+                            effective_uid=effective_uid,
+                            current_effective_uid=current_uid,
+                            detail_index=detail_index,
                         )
-                    else:
-                        probe_id = None
-                        discovery_probe = None
-                    self._note_discovery_error(
-                        error,
-                        operation=operation,
-                        identity=(pid, None),
-                        effective_uid=effective_uid,
-                        discovery_probe_id=probe_id,
-                        discovery_probe=discovery_probe,
-                    )
         except Exception as error:
             self._note_discovery_error(error, operation="process_iter", identity=None)
 
@@ -939,6 +1245,10 @@ class ProcessTreeSampler:
             "discovery_uid_stats": dict(self._discovery_uid_stats),
             "discovery_end_fences": [item.as_dict() for item in self._discovery_end_fences],
             "discovery_end_fences_dropped": self._discovery_end_fences_dropped,
+            "discovery_pid_unresolved_counts": dict(sorted(self._discovery_pid_unresolved_counts.items())),
+            "discovery_barrier_epoch": self._discovery_barrier_epoch,
+            "discovery_finalized": self._discovery_finalized,
+            "discovery_late_probes": self._discovery_late_probes,
         }
 
 
@@ -1074,6 +1384,19 @@ def run_worker(task: str, arm: str, sample: int, workdir: Path, output: Path) ->
 
     record = run_one(task, arm, sample, workdir, False, record_binary_version=False)
     output.write_text(json.dumps(record) + "\n")
+
+
+def finalize_resource_capture(sampler: ProcessTreeSampler | None) -> None:
+    """Run the explicit final sample and end-fenced discovery barrier."""
+    if sampler is None:
+        return
+    set_phase = getattr(sampler, "set_capture_phase", None)
+    if callable(set_phase):
+        set_phase("final")
+    sampler.sample(phase="final")
+    probe = getattr(sampler, "record_discovery_end_fences", None)
+    if callable(probe):
+        probe()
 
 
 def observation_ok(resources: dict, cleanup: dict) -> bool:
@@ -1217,6 +1540,11 @@ def run_sample(task: str, arm: str, sample: int, *, workdir: Path, interval: flo
                         worker.kill()
                         worker.wait(timeout=5)
                     if sampler is not None:
+                        try:
+                            finalize_resource_capture(sampler)
+                        except Exception as error:
+                            if failure is None:
+                                failure = type(error).__name__
                         cleanup = cleanup_owned(sampler, interval=interval)
                     elif worker is not None:
                         cleanup = {"verified": False, "remaining": [], "errors": ["sampler_unavailable"]}

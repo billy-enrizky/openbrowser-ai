@@ -790,7 +790,7 @@ def test_source_manifest_separates_harness_and_application_content(monkeypatch, 
     assert first["harness_digest"] == second["harness_digest"]
     assert first["expected_app_digest"] != second["expected_app_digest"]
     assert first["source_digest"] != second["source_digest"]
-    assert first["sampler_method_version"] == module.SAMPLER_METHOD_VERSION == 6
+    assert first["sampler_method_version"] == module.SAMPLER_METHOD_VERSION == 7
     assert first["configuration_digest"] == second["configuration_digest"]
     assert any("effective UID" in item and "Known ancestry" in item for item in first["limitations"])
 
@@ -1312,7 +1312,7 @@ def test_discovery_mismatched_exit_pid_is_not_authoritative(monkeypatch):
     immediate = result["read_error_details"][0]["discovery_probe"]["immediate"]
     assert immediate["ctime"] is None
     assert immediate["error_type"] == "NoSuchProcess"
-    assert immediate["running"] is True
+    assert immediate["running"] is None
     assert immediate["same_identity"] is None
     assert immediate["state"] == "unknown"
     assert result["fatal_read_errors"] == 1
@@ -1367,7 +1367,7 @@ def test_discovery_status_denied_uses_only_complete_identity_proof(
 
     result = sampler.result()
     immediate = result["read_error_details"][0]["discovery_probe"]["immediate"]
-    assert immediate["running"] is True
+    assert immediate["running"] is None
     assert immediate["status"] is None
     assert immediate["error_type"] == "AccessDenied"
     assert immediate["same_identity"] is expected_same_identity
@@ -1392,7 +1392,7 @@ def test_discovery_unsupported_status_string_is_unknown(monkeypatch, invalid_sta
     result = sampler.result()
     immediate = result["read_error_details"][0]["discovery_probe"]["immediate"]
     assert immediate["status"] is None
-    assert immediate["running"] is True
+    assert immediate["running"] is None
     assert immediate["error_type"] == "ValueError"
     assert immediate["same_identity"] is True
     assert immediate["state"] == "unknown"
@@ -1489,7 +1489,6 @@ def test_discovery_end_fence_is_linked_and_can_show_gone(monkeypatch):
     sampler.discover_orphans()
     probe = sampler.result()["read_error_details"][0]["discovery_probe"]
     baseline_probe = json.loads(json.dumps(probe))
-    sampler.set_capture_phase("native_run")
 
     sampler.record_discovery_end_fences()
 
@@ -1500,6 +1499,12 @@ def test_discovery_end_fence_is_linked_and_can_show_gone(monkeypatch):
     assert fence["probe_id"] == probe["probe_id"]
     assert fence["pid"] == 90
     assert fence["capture_phase"] == "final"
+    assert fence["barrier_phase"] == "final"
+    assert isinstance(fence["barrier_sample_index"], int)
+    assert fence["barrier_epoch"] >= 1
+    assert fence["validated_exit"] is True
+    assert fence["error_pid"] == 90
+    assert fence["error_pid_match"] is True
     assert fence["state"] == "gone"
     assert fence["same_identity"] is None
     assert fence["fence"]["ctime"] is None
@@ -1509,12 +1514,33 @@ def test_discovery_end_fence_is_linked_and_can_show_gone(monkeypatch):
     expected_elapsed = 100.987654321 - 100.123456789
     assert fence["elapsed_s"] == pytest.approx(expected_elapsed, abs=1e-12)
     assert fence["elapsed_s"] != round(expected_elapsed, 6)
-    assert result["fatal_read_errors"] == 1
+    assert result["raw_fatal_read_errors"] == 1
+    assert result["fatal_read_errors"] == 0
+    assert len(result["discovery_lifecycle_resolutions"]) == 1
+    assert result["raw_fatal_read_errors"] == result["fatal_read_errors"] + len(
+        result["discovery_lifecycle_resolutions"]
+    )
     assert result["discovery_end_fences_dropped"] == 0
     assert result["read_error_details"][0]["discovery_probe"] == baseline_probe
+    assert result["read_error_details"][0]["resolution"] == "unknown"
+    detail = result["read_error_details"][0]
+    assert detail["error_pid"] == 90
+    assert detail["error_pid_match"] is True
+    assert detail["effective_uid"] == os.geteuid()
+    disposition = result["discovery_lifecycle_resolutions"][0]
+    assert disposition["effective_uid"] == os.geteuid()
+    assert detail["current_effective_uid"] == os.geteuid()
+    assert disposition["effective_uid"] == os.geteuid()
+    assert disposition["current_effective_uid"] == os.geteuid()
+    assert fence["effective_uid"] == os.geteuid()
+    assert fence["current_effective_uid"] == os.geteuid()
+    before = detail["discovery_probe"]["before"]
+    assert before["factory_pid"] == 90
+    assert before["error_pid"] is None
 
     sampler.record_discovery_end_fences()
     assert len(sampler.result()["discovery_end_fences"]) == 1
+    assert len(sampler.result()["discovery_lifecycle_resolutions"]) == 1
 
 
 def test_discovery_end_fences_are_bounded_and_results_are_immutable(monkeypatch):
@@ -1522,12 +1548,16 @@ def test_discovery_end_fences_are_bounded_and_results_are_immutable(monkeypatch)
     monkeypatch.setattr(module, "MAX_DISCOVERY_END_FENCES", 2)
     sampler, _calls = discovery_probe_sampler(module, monkeypatch, [], pids=(90, 91, 92))
 
+    sampler.set_capture_phase("final")
     sampler.discover_orphans()
     sampler.record_discovery_end_fences()
     first = sampler.result()
 
     assert len(first["discovery_end_fences"]) == 2
     assert first["discovery_end_fences_dropped"] == 1
+    assert first["raw_fatal_read_errors"] == 3
+    assert first["fatal_read_errors"] == 3
+    assert first["discovery_lifecycle_resolutions"] == []
     detail_probe = first["read_error_details"][0]["discovery_probe"]
     end_state = first["discovery_end_fences"][0]["state"]
     assert detail_probe["immediate"]["same_identity"] is True
@@ -2052,7 +2082,7 @@ def test_sampler_skips_cmdline_for_non_browser_processes():
     result = sampler.result()
     assert calls == []
     assert result["fatal_read_errors"] == 0
-    assert result["sampler_method_version"] == module.SAMPLER_METHOD_VERSION == 6
+    assert result["sampler_method_version"] == module.SAMPLER_METHOD_VERSION == 7
 
 
 def test_sampler_skips_cmdline_for_helper_and_crashpad():
@@ -2637,3 +2667,722 @@ def test_lane_rejects_any_native_binding_change(monkeypatch, tmp_path, changed_k
     assert end["binding_unchanged"] is False
     assert end["provenance_verified"] is False
     assert rows[0]["provenance_verified"] is False
+
+
+# ---------------------------------------------------------------------------
+# Sampler 7: end-fenced discovery dispositions
+# ---------------------------------------------------------------------------
+
+
+def test_sampler7_end_gone_records_effective_disposition(monkeypatch):
+    module = resource_module()
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, 2.0), FakeProcess(90, 2.0), module.psutil.NoSuchProcess(90)],
+    )
+    sampler.set_capture_phase("final")
+    sampler.discover_orphans()
+    sampler.record_discovery_end_fences()
+
+    result = sampler.result()
+    assert module.SAMPLER_METHOD_VERSION == 7
+    assert result["sampler_method_version"] == 7
+    assert result["raw_fatal_read_errors"] == 1
+    assert result["fatal_read_errors"] == 0
+    assert result["fatal_read_identities"] == []
+    assert result["raw_fatal_read_identities"] == [{"pid": 90, "created_at": None}]
+    assert len(result["discovery_lifecycle_resolutions"]) == 1
+    disposition = result["discovery_lifecycle_resolutions"][0]
+    assert disposition["probe_id"] == 1
+    assert disposition["barrier_phase"] == "final"
+    assert disposition["failure_phase"] == "final"
+    assert disposition["validated_exit"] is True
+    assert disposition["error_pid"] == 90
+    assert disposition["error_pid_match"] is True
+    fence = result["discovery_end_fences"][0]
+    assert fence["barrier_phase"] == "final"
+    assert isinstance(fence["barrier_sample_index"], int)
+    assert fence["barrier_epoch"] >= 1
+    assert fence["validated_exit"] is True
+    assert fence["error_pid"] == 90
+    assert fence["error_pid_match"] is True
+    assert disposition["effective_uid"] == os.geteuid()
+    assert disposition["current_effective_uid"] == os.geteuid()
+    assert fence["effective_uid"] == os.geteuid()
+    assert fence["current_effective_uid"] == os.geteuid()
+    detail = result["read_error_details"][0]
+    assert detail["effective_uid"] == os.geteuid()
+    assert detail["current_effective_uid"] == os.geteuid()
+    assert result["unverified_processes"] == 0
+    assert detail["resolution"] == "unknown"
+
+
+def test_sampler7_resolves_oserror_without_error_pid(monkeypatch):
+    module = resource_module()
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, 2.0), FakeProcess(90, 2.0), module.psutil.NoSuchProcess(90)],
+        cmdline_error=OSError(0, "sysctl(KERN_PROCARGS2)"),
+    )
+    sampler.set_capture_phase("final")
+    sampler.discover_orphans()
+    sampler.record_discovery_end_fences()
+
+    result = sampler.result()
+    assert result["raw_fatal_read_errors"] == 1
+    assert result["fatal_read_errors"] == 0
+    disposition = result["discovery_lifecycle_resolutions"][0]
+    assert disposition["error_type"] == "OSError"
+    assert disposition["error_pid"] is None
+    assert disposition["error_pid_match"] is None
+    assert result["read_error_details"][0]["error_pid"] is None
+    assert result["read_error_details"][0]["error_pid_match"] is None
+
+
+def test_sampler7_keeps_access_denied_without_pid_fatal(monkeypatch):
+    module = resource_module()
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, 2.0), FakeProcess(90, 2.0), module.psutil.NoSuchProcess(90)],
+        cmdline_error=module.psutil.AccessDenied(),
+    )
+    sampler.set_capture_phase("final")
+    sampler.discover_orphans()
+    sampler.record_discovery_end_fences()
+
+    result = sampler.result()
+    assert result["raw_fatal_read_errors"] == 1
+    assert result["fatal_read_errors"] == 1
+    assert result["discovery_lifecycle_resolutions"] == []
+
+
+def test_sampler7_keeps_unsupported_exception_fatal(monkeypatch):
+    module = resource_module()
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, 2.0), FakeProcess(90, 2.0), module.psutil.NoSuchProcess(90)],
+        cmdline_error=TypeError("malformed command"),
+    )
+    sampler.set_capture_phase("final")
+    sampler.discover_orphans()
+    sampler.record_discovery_end_fences()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    assert result["discovery_lifecycle_resolutions"] == []
+
+
+def test_sampler7_keeps_mismatched_exception_pid_fatal(monkeypatch):
+    module = resource_module()
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, 2.0), FakeProcess(90, 2.0), module.psutil.NoSuchProcess(90)],
+        cmdline_error=module.psutil.AccessDenied(91),
+    )
+    sampler.set_capture_phase("final")
+    sampler.discover_orphans()
+    sampler.record_discovery_end_fences()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    assert result["discovery_lifecycle_resolutions"] == []
+    assert result["read_error_details"][0]["error_pid"] == 91
+    assert result["read_error_details"][0]["error_pid_match"] is False
+    assert result["read_error_details"][0]["discovery_probe"]["cause_tag"].startswith("access_denied")
+
+
+def test_sampler7_resolves_reused_identity(monkeypatch):
+    module = resource_module()
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, 2.0), FakeProcess(90, 2.0), FakeProcess(90, 99.0)],
+    )
+    sampler.set_capture_phase("final")
+    sampler.discover_orphans()
+    sampler.record_discovery_end_fences()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 0
+    disposition = result["discovery_lifecycle_resolutions"][0]
+    assert disposition["resolved_state"] == "reused"
+    assert disposition["validated_exit"] is True
+
+
+def test_sampler7_keeps_end_alive_fatal(monkeypatch):
+    module = resource_module()
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, 2.0), FakeProcess(90, 2.0), FakeProcess(90, 2.0)],
+    )
+    sampler.set_capture_phase("final")
+    sampler.discover_orphans()
+    sampler.record_discovery_end_fences()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    assert result["discovery_lifecycle_resolutions"] == []
+    assert result["discovery_end_fences"][0]["state"] == "same_alive"
+
+
+def test_sampler7_keeps_end_denied_or_unknown_fatal(monkeypatch):
+    module = resource_module()
+    for end in (module.psutil.AccessDenied(90), FakeProcess(90, 2.0)):
+        if isinstance(end, FakeProcess):
+            end.status = lambda: "bogus"
+        sampler, _calls = discovery_probe_sampler(
+            module,
+            monkeypatch,
+            [FakeProcess(90, 2.0), FakeProcess(90, 2.0), end],
+        )
+        sampler.set_capture_phase("final")
+        sampler.discover_orphans()
+        sampler.record_discovery_end_fences()
+        result = sampler.result()
+        assert result["fatal_read_errors"] == 1
+        assert result["discovery_lifecycle_resolutions"] == []
+
+
+def test_sampler7_keeps_malformed_before_identity_fatal(monkeypatch):
+    module = resource_module()
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, None), FakeProcess(90, None), module.psutil.NoSuchProcess(90)],
+    )
+    sampler.set_capture_phase("final")
+    sampler.discover_orphans()
+    sampler.record_discovery_end_fences()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    assert result["discovery_lifecycle_resolutions"] == []
+
+
+@pytest.mark.parametrize("mutate", ["not_running", "bad_status"])
+def test_sampler7_requires_live_known_before_status(monkeypatch, mutate):
+    module = resource_module()
+    before = FakeProcess(90, 2.0)
+    immediate = FakeProcess(90, 2.0)
+    if mutate == "not_running":
+        before.is_running = lambda: False
+        immediate.is_running = lambda: False
+    else:
+        before.status = lambda: "bogus"
+        immediate.status = lambda: "bogus"
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [before, immediate, module.psutil.NoSuchProcess(90)],
+    )
+    sampler.set_capture_phase("final")
+    sampler.discover_orphans()
+    sampler.record_discovery_end_fences()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    assert result["discovery_lifecycle_resolutions"] == []
+
+
+def test_sampler7_requires_final_barrier(monkeypatch):
+    module = resource_module()
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, 2.0), FakeProcess(90, 2.0)],
+    )
+    sampler.discover_orphans()
+    with pytest.raises(ValueError, match="final capture phase"):
+        sampler.record_discovery_end_fences()
+    assert sampler.result()["fatal_read_errors"] == 1
+
+
+def test_sampler7_repeated_same_pid_events_resolve_independently(monkeypatch):
+    module = resource_module()
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [
+            FakeProcess(90, 2.0),
+            FakeProcess(90, 2.0),
+            FakeProcess(90, 2.0),
+            FakeProcess(90, 2.0),
+            module.psutil.NoSuchProcess(90),
+            module.psutil.NoSuchProcess(90),
+        ],
+    )
+    sampler.set_capture_phase("final")
+    sampler.discover_orphans()
+    sampler.discover_orphans()
+    sampler.record_discovery_end_fences()
+
+    result = sampler.result()
+    assert result["raw_fatal_read_errors"] == 2
+    assert result["fatal_read_errors"] == 0
+    assert len(result["discovery_lifecycle_resolutions"]) == 2
+    assert result["fatal_read_identities"] == []
+    assert result["unverified_processes"] == 0
+
+
+def test_sampler7_truncated_detail_stays_unresolved(monkeypatch):
+    module = resource_module()
+    monkeypatch.setattr(module, "MAX_READ_ERROR_DETAILS", 1)
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [
+            FakeProcess(90, 2.0),
+            FakeProcess(90, 2.0),
+            FakeProcess(91, 2.0),
+            FakeProcess(91, 2.0),
+            module.psutil.NoSuchProcess(90),
+            module.psutil.NoSuchProcess(91),
+        ],
+        pids=(90, 91),
+    )
+    sampler.set_capture_phase("final")
+    sampler.discover_orphans()
+    sampler.record_discovery_end_fences()
+
+    result = sampler.result()
+    assert result["raw_fatal_read_errors"] == 2
+    assert result["fatal_read_errors"] == 1
+    assert result["read_error_details_truncated"] == 1
+    assert len(result["discovery_lifecycle_resolutions"]) == 1
+
+
+def test_sampler7_bounded_fences_stay_unresolved(monkeypatch):
+    module = resource_module()
+    monkeypatch.setattr(module, "MAX_DISCOVERY_END_FENCES", 1)
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [
+            FakeProcess(90, 2.0),
+            FakeProcess(90, 2.0),
+            FakeProcess(91, 2.0),
+            FakeProcess(91, 2.0),
+            module.psutil.NoSuchProcess(90),
+        ],
+        pids=(90, 91),
+    )
+    sampler.set_capture_phase("final")
+    sampler.discover_orphans()
+    sampler.record_discovery_end_fences()
+
+    result = sampler.result()
+    assert result["raw_fatal_read_errors"] == 2
+    assert result["fatal_read_errors"] == 1
+    assert result["discovery_end_fences_dropped"] >= 1
+    assert len(result["discovery_lifecycle_resolutions"]) == 1
+
+
+def test_sampler7_resolution_is_idempotent(monkeypatch):
+    module = resource_module()
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, 2.0), FakeProcess(90, 2.0), module.psutil.NoSuchProcess(90)],
+    )
+    sampler.set_capture_phase("final")
+    sampler.discover_orphans()
+    sampler.record_discovery_end_fences()
+    first = sampler.result()
+    sampler.record_discovery_end_fences()
+    second = sampler.result()
+    assert len(first["discovery_lifecycle_resolutions"]) == 1
+    assert second["discovery_lifecycle_resolutions"] == first["discovery_lifecycle_resolutions"]
+
+
+def test_sampler7_metric_failure_same_pid_stays_fatal():
+    module = resource_module()
+    ledger = module.ResourceLedger((10, 1.0), footprint_supported=True)
+    ledger.note_read_error(
+        module.psutil.AccessDenied(20),
+        identity=(20, 2.0),
+        operation="memory_info",
+        phase="native_run",
+        sample_index=1,
+    )
+    before = module._IdentityProbe(2.0, "running", True, None, None, pid=20, factory_pid=20)
+    probe = {
+        "probe_id": 1,
+        "capture_phase": "final",
+        "cause_tag": "access_denied_underlying_cause_unavailable",
+        "before": before.as_dict(),
+        "immediate": {**before.as_dict(), "same_identity": True, "state": "same_alive"},
+    }
+    ledger.note_read_error(
+        module.psutil.AccessDenied(20),
+        identity=(20, None),
+        operation="cmdline",
+        phase="orphan_discovery",
+        sample_index=2,
+        effective_uid=os.geteuid(),
+        discovery_probe_id=1,
+        discovery_probe=probe,
+        resolution="unknown",
+        resolution_source="discovery_scan",
+    )
+    proof = {"validated_exit": True}
+    assert ledger.resolve_discovery_event(1, detail_index=1, proof=proof) is True
+    result = ledger.result()
+    assert result["raw_fatal_read_errors"] == 2
+    assert result["fatal_read_errors"] == 1
+    assert result["fatal_read_identities"] == [{"pid": 20, "created_at": 2.0}]
+
+
+def test_sampler7_cold_finalizer_orders_phase_sample_end():
+    module = resource_module()
+
+    class Recorder:
+        def __init__(self):
+            self.calls = []
+
+        def set_capture_phase(self, phase):
+            self.calls.append(("phase", phase))
+
+        def sample(self, *, phase="native_run"):
+            self.calls.append(("sample", phase))
+
+        def record_discovery_end_fences(self):
+            self.calls.append(("end", None))
+
+    sampler = Recorder()
+    module.finalize_resource_capture(sampler)
+    assert sampler.calls == [("phase", "final"), ("sample", "final"), ("end", None)]
+
+
+def test_sampler7_observation_ok_uses_effective_count():
+    module = resource_module()
+    resources = {
+        "peak_tree_rss_bytes": 1,
+        "fatal_read_errors": 0,
+        "raw_fatal_read_errors": 1,
+        "observed_child_processes": 1,
+        "observed_browser_during_native_run": 1,
+    }
+    assert module.observation_ok(resources, {"verified": True})
+    resources["fatal_read_errors"] = 1
+    assert not module.observation_ok(resources, {"verified": True})
+
+
+def test_sampler7_discovery_resolution_does_not_clear_same_identity_noncmdline_fatal():
+    module = resource_module()
+    ledger = module.ResourceLedger((10, 1.0), footprint_supported=True)
+    ledger.note_read_error(
+        ValueError("bad uid"),
+        identity=(20, None),
+        operation="uids",
+        phase="orphan_discovery",
+        sample_index=0,
+        resolution="unknown",
+        resolution_source="discovery_scan",
+    )
+    probe = {
+        "probe_id": 1,
+        "capture_phase": "final",
+        "before": {"ctime": 2.0},
+        "immediate": {"ctime": 2.0},
+    }
+    ledger.note_read_error(
+        module.psutil.AccessDenied(20),
+        identity=(20, None),
+        operation="cmdline",
+        phase="orphan_discovery",
+        sample_index=1,
+        effective_uid=os.geteuid(),
+        discovery_probe_id=1,
+        discovery_probe=probe,
+        resolution="unknown",
+        resolution_source="discovery_scan",
+    )
+    assert ledger.resolve_discovery_event(1, detail_index=1, proof={}) is True
+    result = ledger.result()
+    assert result["raw_fatal_read_errors"] == 2
+    assert result["fatal_read_errors"] == 1
+    assert result["fatal_read_identities"] == [{"pid": 20, "created_at": None}]
+
+
+def test_sampler7_run_sample_calls_final_barrier_before_cleanup(monkeypatch, tmp_path):
+    module = resource_module()
+    events: list[tuple[str, str | None]] = []
+
+    class Worker:
+        pid = 123
+        returncode = 0
+
+        def __init__(self, command, **kwargs):
+            destination = Path(command[command.index("--worker-output") + 1])
+            destination.write_text(json.dumps({"task": "tabs", "arm": "a", "ok": True, "oracle_ok": True, "error": ""}))
+
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+    class Sampler:
+        def __init__(self, pid, *, ownership_marker=None):
+            assert pid == 123
+
+        def set_capture_phase(self, phase):
+            events.append(("phase", phase))
+
+        def sample(self, *, phase="native_run"):
+            events.append(("sample", phase))
+
+        def record_discovery_end_fences(self):
+            events.append(("end", None))
+
+        def discover_orphans(self):
+            events.append(("discover", None))
+
+        def live_processes(self, *, phase="native_run"):
+            events.append(("live", phase))
+            return {}
+
+        def result(self):
+            return {
+                "peak_tree_rss_bytes": 100,
+                "observed_child_processes": 1,
+                "observed_browser_during_native_run": 1,
+                "read_errors": 0,
+                "fatal_read_errors": 0,
+                "unverified_processes": 0,
+                "cleanup_unverified_processes": 0,
+            }
+
+    monkeypatch.setattr(module.subprocess, "Popen", Worker)
+    monkeypatch.setattr(module, "ProcessTreeSampler", Sampler)
+
+    record = module.run_sample("tabs", "a", 0, workdir=tmp_path, interval=0.02, worker_timeout=10)
+
+    assert record["resource_ok"] is True
+    assert ("phase", "final") in events
+    assert ("sample", "final") in events
+    end_index = events.index(("end", None))
+    cleanup_index = events.index(("live", "cleanup"))
+    assert end_index < cleanup_index
+
+
+def _raise_from(error):
+    def raiser():
+        raise error
+
+    return raiser
+
+
+@pytest.mark.parametrize("pid_value", ["90", None, True])
+def test_sampler7_rejects_oserror_malformed_pid(monkeypatch, pid_value):
+    module = resource_module()
+    error = OSError(0, "sysctl(KERN_PROCARGS2)")
+    error.pid = pid_value
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, 2.0), FakeProcess(90, 2.0), module.psutil.NoSuchProcess(90)],
+        cmdline_error=error,
+    )
+    sampler.set_capture_phase("final")
+    sampler.discover_orphans()
+    sampler.record_discovery_end_fences()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    assert result["discovery_lifecycle_resolutions"] == []
+    detail = result["read_error_details"][0]
+    assert detail["error_pid_present"] is True
+    assert detail["error_pid_valid"] is False
+    assert detail["error_pid_match"] is False
+
+
+@pytest.mark.parametrize("pid_value", ["90", None, True])
+def test_sampler7_rejects_access_denied_malformed_pid(monkeypatch, pid_value):
+    module = resource_module()
+    error = module.psutil.AccessDenied(90)
+    error.pid = pid_value
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, 2.0), FakeProcess(90, 2.0), module.psutil.NoSuchProcess(90)],
+        cmdline_error=error,
+    )
+    sampler.set_capture_phase("final")
+    sampler.discover_orphans()
+    sampler.record_discovery_end_fences()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    assert result["discovery_lifecycle_resolutions"] == []
+    detail = result["read_error_details"][0]
+    assert detail["error_pid_present"] is True
+    assert detail["error_pid_valid"] is False
+    assert detail["error_pid_match"] is False
+
+
+def test_sampler7_short_circuits_closing_after_first_status_error(monkeypatch):
+    module = resource_module()
+    calls: list[str] = []
+    end = FakeProcess(90, 3.0)
+    end.status = _raise_from(OSError(0, "status read failed"))
+
+    def bad_running():
+        calls.append("is_running")
+        raise module.psutil.NoSuchProcess(91)
+
+    end.is_running = bad_running
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, 2.0), FakeProcess(90, 2.0), end],
+    )
+    sampler.set_capture_phase("final")
+    sampler.discover_orphans()
+    sampler.record_discovery_end_fences()
+
+    result = sampler.result()
+    assert calls == []
+    fence = result["discovery_end_fences"][0]
+    assert fence["fence"]["error_type"] == "OSError"
+    assert fence["fence"]["error_pid_present"] is False
+    assert fence["state"] == "reused"
+    assert fence["validated_exit"] is True
+    assert result["fatal_read_errors"] == 0
+
+
+def test_sampler7_short_circuits_after_matching_status_exception(monkeypatch):
+    module = resource_module()
+    calls: list[str] = []
+    end = FakeProcess(90, 3.0)
+    end.status = _raise_from(module.psutil.AccessDenied(90))
+
+    def bad_running():
+        calls.append("is_running")
+        raise OSError(0, "later malformed read")
+
+    bad_running.pid = "90"
+    end.is_running = bad_running
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, 2.0), FakeProcess(90, 2.0), end],
+    )
+    sampler.set_capture_phase("final")
+    sampler.discover_orphans()
+    sampler.record_discovery_end_fences()
+
+    result = sampler.result()
+    assert calls == []
+    fence = result["discovery_end_fences"][0]
+    assert fence["fence"]["error_type"] == "AccessDenied"
+    assert fence["fence"]["error_pid"] == 90
+    assert fence["fence"]["error_pid_present"] is True
+    assert fence["fence"]["error_pid_valid"] is True
+    assert fence["fence"]["error_pid_match"] is True
+    assert fence["state"] == "reused"
+    assert fence["validated_exit"] is True
+    assert result["fatal_read_errors"] == 0
+
+
+def test_sampler7_short_circuits_after_mismatched_status_exception(monkeypatch):
+    module = resource_module()
+    calls: list[str] = []
+    end = FakeProcess(90, 3.0)
+    end.status = _raise_from(module.psutil.AccessDenied(91))
+
+    def later_read():
+        calls.append("is_running")
+        return True
+
+    end.is_running = later_read
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, 2.0), FakeProcess(90, 2.0), end],
+    )
+    sampler.set_capture_phase("final")
+    sampler.discover_orphans()
+    sampler.record_discovery_end_fences()
+
+    result = sampler.result()
+    assert calls == []
+    fence = result["discovery_end_fences"][0]
+    assert fence["fence"]["error_pid"] == 91
+    assert fence["fence"]["error_pid_present"] is True
+    assert fence["fence"]["error_pid_valid"] is True
+    assert fence["fence"]["error_pid_match"] is False
+    assert fence["validated_exit"] is False
+    assert result["fatal_read_errors"] == 1
+    assert result["discovery_lifecycle_resolutions"] == []
+
+
+def test_sampler7_short_circuits_after_authoritative_status_exit(monkeypatch):
+    module = resource_module()
+    calls: list[str] = []
+    end = FakeProcess(90, 2.0)
+    end.status = _raise_from(module.psutil.NoSuchProcess(90))
+
+    def later_read():
+        calls.append("is_running")
+        return True
+
+    end.is_running = later_read
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, 2.0), FakeProcess(90, 2.0), end],
+    )
+    sampler.set_capture_phase("final")
+    sampler.discover_orphans()
+    sampler.record_discovery_end_fences()
+
+    result = sampler.result()
+    assert calls == []
+    fence = result["discovery_end_fences"][0]
+    assert fence["exit_signal"] == "exit_exception"
+    assert fence["validated_exit"] is True
+    assert fence["error_pid"] == 90
+    assert result["fatal_read_errors"] == 0
+
+
+@pytest.mark.parametrize(
+    ("closing_pid", "new_ctime", "status"),
+    [
+        (91, 2.0, "zombie"),
+        ("90", 2.0, "zombie"),
+        (91, 99.0, "running"),
+        ("90", 99.0, "running"),
+    ],
+)
+def test_sampler7_rejects_wrong_or_malformed_closing_pid(monkeypatch, closing_pid, new_ctime, status):
+    module = resource_module()
+    end = FakeProcess(90, new_ctime)
+    end.status = lambda: status
+    if isinstance(closing_pid, str):
+        error = module.psutil.AccessDenied(90)
+        error.pid = closing_pid
+    else:
+        error = module.psutil.AccessDenied(closing_pid)
+    end.is_running = _raise_from(error)
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, 2.0), FakeProcess(90, 2.0), end],
+    )
+    sampler.set_capture_phase("final")
+    sampler.discover_orphans()
+    sampler.record_discovery_end_fences()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    assert result["discovery_lifecycle_resolutions"] == []
+    fence = result["discovery_end_fences"][0]
+    assert fence["validated_exit"] is False
+    assert fence["fence"]["error_pid_present"] is True
