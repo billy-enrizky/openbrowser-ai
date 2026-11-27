@@ -65,7 +65,7 @@ class ServiceReaderError(Exception):
 @dataclass(frozen=True)
 class ServiceIdentity:
     pid: int
-    created_at: float
+    created_at: int | float
 
 
 @dataclass(frozen=True)
@@ -136,19 +136,28 @@ def _canonical_path(value: object) -> str | None:
     return os.path.normcase(os.path.normpath(value))
 
 
+def _valid_time(value: object) -> int | float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        numeric = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return None
+    if not math.isfinite(numeric) or numeric <= 0:
+        return None
+    return value
+
+
 def _valid_identity(value: object) -> bool:
     if not isinstance(value, ServiceIdentity):
         return False
     if type(value.pid) is not int or value.pid <= 0:
         return False
-    if isinstance(value.created_at, bool) or not isinstance(value.created_at, (int, float)):
-        return False
-    created_at = float(value.created_at)
-    return math.isfinite(created_at) and created_at > 0
+    return _valid_time(value.created_at) is not None
 
 
 def _same_identity(left: ServiceIdentity, right: ServiceIdentity) -> bool:
-    return left.pid == right.pid and float(left.created_at) == float(right.created_at)
+    return left.pid == right.pid and left.created_at == right.created_at
 
 
 def _failure_for_read(error: BaseException) -> ServiceFailure:
@@ -174,10 +183,8 @@ def _read_identity(process: ProcessView, expected_pid: int) -> tuple[ServiceIden
         created = process.create_time()
     except Exception as error:
         return None, _failure_for_read(error)
-    if isinstance(created, bool) or not isinstance(created, (int, float)):
-        return None, ServiceFailure.MALFORMED_CREATE_TIME
-    created_at = float(created)
-    if not math.isfinite(created_at) or created_at <= 0:
+    created_at = _valid_time(created)
+    if created_at is None:
         return None, ServiceFailure.MALFORMED_CREATE_TIME
     try:
         running = process.is_running()

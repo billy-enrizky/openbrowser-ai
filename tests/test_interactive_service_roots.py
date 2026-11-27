@@ -17,7 +17,7 @@ from benchmarks.interactive.adapters import service_roots
 @pytest.fixture(autouse=True)
 def no_native_io(monkeypatch):
     def forbidden(*args, **kwargs):
-        raise AssertionError("native I/O is forbidden in service-root fake tests")
+        pytest.fail("native I/O is forbidden in service-root fake tests")
 
     monkeypatch.setattr(psutil, "Process", forbidden)
     monkeypatch.setattr(psutil, "process_iter", forbidden)
@@ -31,6 +31,9 @@ CONTROLLER = service_roots.ServiceIdentity(10, 100.0)
 WORKER = service_roots.ServiceIdentity(20, 200.0)
 SOFTWARE = "/usr/bin/python3"
 SCOPE = "/tmp/openbrowser-owned"
+LARGE_TIME = 2**54
+LARGE_TIME_NEXT = LARGE_TIME + 1
+HUGE_TIME = 10**1000
 
 
 @dataclass
@@ -159,6 +162,14 @@ def assert_failure(result, failure):
     assert result.failure is failure
 
 
+def test_fake_io_guard_cannot_be_swallowed_by_capture():
+    def factory(pid):
+        psutil.Process(pid)
+
+    with pytest.raises(pytest.fail.Exception, match="native I/O is forbidden"):
+        capture(factory=factory)
+
+
 def test_capture_accepts_exact_identity_executable_and_scope():
     process = FakeProcess(30)
     result = capture(process)
@@ -249,6 +260,18 @@ def test_capture_rejects_malformed_create_time(created):
     assert_failure(result, service_roots.ServiceFailure.MALFORMED_CREATE_TIME)
 
 
+def test_capture_preserves_large_integer_create_time_raw():
+    result = capture(FakeProcess(30, ctimes=[LARGE_TIME]))
+    assert result.proof is not None
+    assert result.proof.identity.created_at == LARGE_TIME
+    assert type(result.proof.identity.created_at) is int
+
+
+def test_capture_rejects_large_integer_create_time_reuse():
+    result = capture(FakeProcess(30, ctimes=[LARGE_TIME, LARGE_TIME_NEXT]))
+    assert_failure(result, service_roots.ServiceFailure.REUSED)
+
+
 @pytest.mark.parametrize("executable", ["", "python3", None, 3])
 def test_capture_rejects_malformed_process_executable(executable):
     result = capture(FakeProcess(30, exes=[executable]))
@@ -264,6 +287,37 @@ def test_capture_rejects_malformed_process_scope(scope):
 def test_capture_rejects_scope_mismatch():
     result = capture(FakeProcess(30, scopes=["/tmp/foreign-scope"]))
     assert_failure(result, service_roots.ServiceFailure.SCOPE_MISMATCH)
+
+
+def test_capture_rejects_huge_controller_create_time_without_overflow():
+    called = False
+
+    def factory(pid):
+        nonlocal called
+        called = True
+        return FakeProcess(pid)
+
+    result = capture(controller=service_roots.ServiceIdentity(10, HUGE_TIME), factory=factory)
+    assert_failure(result, service_roots.ServiceFailure.INVALID_CONTROLLER)
+    assert called is False
+
+
+def test_capture_rejects_huge_worker_create_time_without_overflow():
+    called = False
+
+    def factory(pid):
+        nonlocal called
+        called = True
+        return FakeProcess(pid)
+
+    result = capture(worker=service_roots.ServiceIdentity(20, HUGE_TIME), factory=factory)
+    assert_failure(result, service_roots.ServiceFailure.INVALID_WORKER)
+    assert called is False
+
+
+def test_capture_rejects_huge_observed_create_time_without_overflow():
+    result = capture(FakeProcess(30, ctimes=[HUGE_TIME]))
+    assert_failure(result, service_roots.ServiceFailure.MALFORMED_CREATE_TIME)
 
 
 def test_capture_rejects_executable_mismatch():
@@ -393,6 +447,36 @@ def test_verify_rejects_source_mismatch_without_process_read():
 
     result = verify(proof, source=service_roots.ServiceSource.POPEN, factory=factory)
     assert_failure(result, service_roots.ServiceFailure.SOURCE_MISMATCH)
+    assert called is False
+
+
+def test_verify_rejects_large_integer_reuse():
+    proof = service_roots.NativeServiceProof(
+        identity=service_roots.ServiceIdentity(30, LARGE_TIME),
+        executable=SOFTWARE,
+        scope=SCOPE,
+        source=service_roots.ServiceSource.PID_FILE,
+    )
+    result = verify(proof, FakeProcess(30, ctimes=[LARGE_TIME_NEXT]))
+    assert_failure(result, service_roots.ServiceFailure.REUSED)
+
+
+def test_verify_rejects_huge_proof_create_time_without_overflow():
+    proof = service_roots.NativeServiceProof(
+        identity=service_roots.ServiceIdentity(30, HUGE_TIME),
+        executable=SOFTWARE,
+        scope=SCOPE,
+        source=service_roots.ServiceSource.PID_FILE,
+    )
+    called = False
+
+    def factory(pid):
+        nonlocal called
+        called = True
+        return FakeProcess(pid)
+
+    result = verify(proof, factory=factory)
+    assert_failure(result, service_roots.ServiceFailure.INVALID_PROOF)
     assert called is False
 
 
