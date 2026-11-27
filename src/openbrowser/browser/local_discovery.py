@@ -8,7 +8,7 @@ import json
 import math
 import re
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, TypeAlias
 
 MAX_HEADER_BYTES = 16 * 1024
 MAX_BODY_BYTES = 64 * 1024
@@ -19,7 +19,7 @@ _READ_CHUNK = 4096
 _HEADER_TERMINATOR = b"\r\n\r\n"
 _HEADER_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
 
-type Connector = Callable[
+Connector: TypeAlias = Callable[  # noqa: UP040
     [str, int],
     Awaitable[tuple[asyncio.StreamReader, asyncio.StreamWriter]],
 ]

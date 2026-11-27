@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import contextlib
 import json
@@ -361,6 +362,10 @@ def test_invalid_port_is_rejected_without_connecting(port):
 
     with pytest.raises((TypeError, ValueError)):
         asyncio.run(local_discovery.fetch_loopback_version(port, open_connection=connector))
+
+
+def test_source_parses_as_python_311():
+    ast.parse(MODULE_PATH.read_text(), filename=str(MODULE_PATH), feature_version=(3, 11))
 
 
 def test_inert_import_does_not_import_httpx():
