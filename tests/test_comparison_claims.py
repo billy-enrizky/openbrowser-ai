@@ -192,3 +192,23 @@ def test_http_memory_values_match_all_public_markdown_copies():
             expected = f'{median(values):.3f} MiB median ({min(values):.3f} to {max(values):.3f}, N=5)'
             assert expected in text, (name, expected)
         assert '25 of 25 in 5 of 5 runs' in text
+
+
+def test_benchmark_index_dates_match_their_sections():
+    page = _page("comparison.mdx")
+    assert "| [OpenBrowser no-browser memory](#no-browser-memory) | 2026-11-26 |" in page
+    assert "## 4. OpenBrowser no-browser memory, 2026-11-26" in page
+    scraping = (ROOT / "benchmarks" / "scraping" / "README.md").read_text()
+    assert "The memory lane is from 2026-11-26." in scraping
+    assert "The Firecrawl Local sequential and Lightpanda reference lanes are from 2026-11-25." in scraping
+    assert (
+        "The Firecrawl Local sequential and Lightpanda lanes are the latest reference runs from 2026-11-25."
+        in scraping
+    )
+    assert "The Firecrawl Local batch lane is from 2026-11-24." in scraping
+    for heading in (
+        "### 2.2. Firecrawl Local sequential, 2026-11-25, N=10",
+        "### 2.3. Firecrawl Local batch, 2026-11-24, N=10",
+        "### 2.4. Lightpanda no-render latency, 2026-11-25, N=10",
+    ):
+        assert heading in scraping
