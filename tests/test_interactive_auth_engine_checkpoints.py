@@ -68,7 +68,7 @@ def build_arm(name, ctx, events, monkeypatch):
         monkeypatch.setattr(arm, "_create_context", lambda *a: "context")
         monkeypatch.setattr(arm, "_ensure_context", lambda *a: "context")
         monkeypatch.setattr(arm, "_execute", lambda *a: events.append(("native", None)) or "{}\n")
-        monkeypatch.setattr(arm, "_close_context", lambda *a: events.append(("reset", None)))
+        monkeypatch.setattr(arm, "_reset_browser", lambda *a: events.append(("reset", None)))
         monkeypatch.setattr(arm, "_parse_last_json", dict)
         monkeypatch.setattr(arm, "_mock_keychain_profile", lambda *a: str(ctx.profile))
     elif name in {"playwright_cli", "playwright_mcp"}:

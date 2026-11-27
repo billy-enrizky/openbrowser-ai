@@ -80,6 +80,16 @@ class OpenBrowserMcpArm:
         if payload.get("status") != "closed":
             raise ModernMcpError(f"close_context returned {payload!r}")
 
+    def _reset_browser(self, client: ModernStdioMcpClient, context_id: str) -> None:
+        self._launch_proof = None
+        self._result.tool_calls += 1
+        payload = json.loads(client.call_tool_text("reset_browser", {"context_id": context_id}, timeout=120))
+        browser = payload.get("browser") if isinstance(payload, dict) else None
+        if not isinstance(payload, dict) or payload.get("ok") is not True or not isinstance(browser, dict):
+            raise ModernMcpError("reset_browser did not verify a stopped browser")
+        if browser.get("phase") != "stopped":
+            raise ModernMcpError("reset_browser did not verify a stopped browser")
+
     def _program(self, task: str, url: str, state_path: str | None = None) -> str:
         fast = self.fast_selectors
         if task == "wizard":
@@ -123,9 +133,7 @@ class OpenBrowserMcpArm:
                 )
                 if restart_for_auth:
                     browser_launch_checkpoint(self._mock_keychain_profile(ctx))
-                    self._close_context(client, context_id)
-                    context_id = self._create_context(client)
-                    self._context_id = context_id
+                    self._reset_browser(client, context_id)
                 account_output = self._execute(client, context_id, _read_account(ctx.base_url + "/account"), 120)
                 self._result.stdout += login_output + account_output
                 verified = verify_mock_keychain(self._mock_keychain_profile(ctx))
