@@ -2,6 +2,7 @@
 name: accessibility-audit
 description: |
   Audit web pages for accessibility issues, WCAG compliance, and screen reader compatibility.
+  Runs through keyless `openbrowser-ai -c` or local MCP code tools. No separate API key is required.
   Trigger when the user asks to: check accessibility, run an a11y audit, test WCAG compliance,
   check screen reader support, audit ARIA attributes, verify keyboard navigation,
   find accessibility issues, or check for missing alt text or labels.

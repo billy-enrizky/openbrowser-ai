@@ -2,6 +2,7 @@
 name: setup
 description: |
   Install, configure, repair, or verify OpenBrowser for the first time.
+  Configures the keyless CLI and local MCP server. Provider keys apply only to optional Agent runs.
   Trigger when the user asks to: install OpenBrowser, set up OpenBrowser,
   configure the MCP server, install the CLI, set up browser profiles,
   install the plugin skills, verify a browser, or repair a broken install.

@@ -2,6 +2,7 @@
 name: deep-research
 description: |
   Use when the user asks for /search, web search, source discovery, research, investigations, evidence gathering, comparisons, literature reviews, briefings, or cited reports.
+  Uses host reasoning and keyless `openbrowser-ai web-search` and `-c` code tools. No separate API key is required. Standalone `-p` is an optional configured-provider route.
 allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(uvx:*) Bash(python3:*) Bash(sleep:*) Bash(cat:*) Bash(irm:*) Bash(mkdir:*) Bash(date:*) Read Write
 ---
 

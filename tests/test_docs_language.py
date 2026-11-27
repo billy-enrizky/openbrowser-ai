@@ -158,3 +158,44 @@ def test_deep_research_documents_keyless_c_path_and_configured_p_route() -> None
         "NEVER use openbrowser-ai -p",
     ):
         assert token in text
+
+
+_OPENBROWSER_SKILLS = (
+    "accessibility-audit",
+    "deep-research",
+    "e2e-testing",
+    "file-download",
+    "form-filling",
+    "page-analysis",
+    "setup",
+    "web-scraping",
+)
+
+
+def _skill_frontmatter_description(name: str) -> str:
+    text = (_SKILLS_DIR / name / "SKILL.md").read_text(encoding="utf-8")
+    assert text.startswith("---\n")
+    frontmatter = text.split("---", 2)[1]
+    lines = frontmatter.splitlines()
+    start = lines.index("description: |") + 1
+    description: list[str] = []
+    for line in lines[start:]:
+        if not line.startswith("  "):
+            break
+        description.append(line.strip())
+    return "\n".join(description)
+
+
+def test_skill_frontmatter_frontloads_keyless_routing() -> None:
+    for name in _OPENBROWSER_SKILLS:
+        description = _skill_frontmatter_description(name)
+        assert "keyless" in description.lower(), f"{name} must front-load keyless routing"
+        assert "user asks" in description, f"{name} must keep its trigger branch"
+
+
+def test_deep_research_frontmatter_uses_host_reasoning_and_code_tools() -> None:
+    description = _skill_frontmatter_description("deep-research")
+    assert "host reasoning" in description
+    assert "code tools" in description
+    assert "optional configured-provider" in description
+    assert "using the openbrowser-ai agent" not in description
