@@ -7,8 +7,68 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import psutil
+import pytest
 
 from openbrowser.daemon import diagnostics
+
+
+def test_daemon_scan_defers_metadata_until_candidate_matches(tmp_path):
+	current = MagicMock(username=MagicMock(return_value='me'))
+	ordinary = MagicMock(pid=201)
+	ordinary.cmdline.return_value = ['python', 'ordinary.py']
+	foreign = MagicMock(pid=202)
+	foreign.cmdline.return_value = ['python', '-m', diagnostics.DAEMON_MODULE]
+	foreign.username.return_value = 'other-user'
+	daemon = MagicMock(pid=203)
+	daemon.cmdline.return_value = ['python', '-m', diagnostics.DAEMON_MODULE]
+	daemon.username.return_value = 'me'
+	daemon.create_time.return_value = 100.0
+	daemon.environ.return_value = {'OPENBROWSER_SOCKET': str(tmp_path / 'daemon.sock')}
+	processes = [ordinary, foreign, daemon]
+	for process in processes:
+		process.info = {'cmdline': process.cmdline.return_value, 'create_time': 100.0}
+	with (
+		patch.object(diagnostics.psutil, 'Process', return_value=current),
+		patch.object(diagnostics.psutil, 'process_iter', return_value=processes) as iterate,
+	):
+		rows = diagnostics.daemon_processes()
+	assert [row['pid'] for row in rows] == [203]
+	iterate.assert_called_once_with(['pid'])
+	ordinary.username.assert_not_called()
+	ordinary.create_time.assert_not_called()
+	foreign.create_time.assert_not_called()
+	daemon.create_time.assert_called_once_with()
+
+
+@pytest.mark.parametrize('operation', ['cmdline', 'username', 'create_time'])
+@pytest.mark.parametrize(
+	'error', [OSError(0, 'native read failed'), psutil.AccessDenied(pid=210), psutil.NoSuchProcess(pid=210)]
+)
+def test_daemon_scan_contains_each_candidate_read_failure(tmp_path, operation, error):
+	current = MagicMock(username=MagicMock(return_value='me'))
+	broken = MagicMock(pid=210)
+	broken.cmdline.return_value = ['python', '-m', diagnostics.DAEMON_MODULE]
+	broken.username.return_value = 'me'
+	broken.create_time.return_value = 100.0
+	broken.environ.return_value = {'OPENBROWSER_SOCKET': str(tmp_path / 'broken.sock')}
+	getattr(broken, operation).side_effect = error
+	good = MagicMock(pid=211)
+	good.cmdline.return_value = ['python', '-m', diagnostics.DAEMON_MODULE]
+	good.username.return_value = 'me'
+	good.create_time.return_value = 100.0
+	good.environ.return_value = {'OPENBROWSER_SOCKET': str(tmp_path / 'good.sock')}
+
+	def iterate(attrs):
+		for process in [broken, good]:
+			process.info = {attr: getattr(process, attr)() for attr in attrs if attr != 'pid'}
+			yield process
+
+	with (
+		patch.object(diagnostics.psutil, 'Process', return_value=current),
+		patch.object(diagnostics.psutil, 'process_iter', side_effect=iterate),
+	):
+		rows = diagnostics.daemon_processes()
+	assert [row['pid'] for row in rows] == [211]
 
 
 def test_socket_candidates_requires_a_pid_file_for_unlisted_sockets(tmp_path):
@@ -39,15 +99,21 @@ def test_daemon_processes_filters_commands_and_users(tmp_path):
 		'create_time': time.time() - 60,
 		'cmdline': ['python', '-m', 'openbrowser.daemon.server'],
 	}
+	daemon.cmdline.return_value = daemon.info['cmdline']
+	daemon.create_time.return_value = daemon.info['create_time']
 	daemon.username.return_value = 'me'
 	daemon.environ.return_value = {'OPENBROWSER_SOCKET': str(tmp_path / 'daemon.sock')}
 	other_user = MagicMock()
 	other_user.pid = 124
 	other_user.info = {'pid': 124, 'create_time': time.time(), 'cmdline': ['python', '-m', 'openbrowser.daemon.server']}
+	other_user.cmdline.return_value = other_user.info['cmdline']
+	other_user.create_time.return_value = other_user.info['create_time']
 	other_user.username.return_value = 'someone-else'
 	unrelated = MagicMock()
 	unrelated.pid = 125
 	unrelated.info = {'pid': 125, 'create_time': time.time(), 'cmdline': ['python', 'script.py']}
+	unrelated.cmdline.return_value = unrelated.info['cmdline']
+	unrelated.create_time.return_value = unrelated.info['create_time']
 	unrelated.username.return_value = 'me'
 
 	with (
@@ -82,6 +148,8 @@ def test_daemon_processes_ignores_a_lookalike_module(tmp_path):
 		'create_time': time.time() - 60,
 		'cmdline': ['python', '-m', 'openbrowser.daemon.server_extra'],
 	}
+	lookalike.cmdline.return_value = lookalike.info['cmdline']
+	lookalike.create_time.return_value = lookalike.info['create_time']
 	lookalike.username.return_value = 'me'
 
 	with (
@@ -103,6 +171,8 @@ def test_daemon_processes_treats_missing_environment_as_unknown(tmp_path):
 		'create_time': time.time() - 60,
 		'cmdline': ['python', '-m', 'openbrowser.daemon.server'],
 	}
+	daemon.cmdline.return_value = daemon.info['cmdline']
+	daemon.create_time.return_value = daemon.info['create_time']
 	daemon.username.return_value = 'me'
 	daemon.environ.return_value = {}
 	caller_socket = tmp_path / 'caller.sock'
@@ -129,6 +199,8 @@ def test_daemon_processes_derives_socket_from_daemon_home(tmp_path):
 		'create_time': time.time() - 60,
 		'cmdline': ['python', '-m', 'openbrowser.daemon.server'],
 	}
+	daemon.cmdline.return_value = daemon.info['cmdline']
+	daemon.create_time.return_value = daemon.info['create_time']
 	daemon.username.return_value = 'me'
 	daemon.environ.return_value = {'HOME': str(tmp_path)}
 
@@ -155,6 +227,8 @@ def test_daemon_processes_expands_tilde_socket_paths(tmp_path, monkeypatch):
 		'create_time': time.time() - 60,
 		'cmdline': ['python', '-m', 'openbrowser.daemon.server'],
 	}
+	daemon.cmdline.return_value = daemon.info['cmdline']
+	daemon.create_time.return_value = daemon.info['create_time']
 	daemon.username.return_value = 'me'
 	daemon.environ.return_value = {'OPENBROWSER_SOCKET': '~/.openbrowser/daemon.sock'}
 
@@ -178,6 +252,8 @@ def test_daemon_processes_treats_relative_socket_paths_as_unknown(monkeypatch):
 		'create_time': time.time() - 60,
 		'cmdline': ['python', '-m', 'openbrowser.daemon.server'],
 	}
+	daemon.cmdline.return_value = daemon.info['cmdline']
+	daemon.create_time.return_value = daemon.info['create_time']
 	daemon.username.return_value = 'me'
 	daemon.environ.return_value = {'OPENBROWSER_SOCKET': 'relative.sock'}
 
@@ -201,6 +277,8 @@ def test_reap_orphan_processes_kills_old_orphan(tmp_path):
 		'create_time': time.time() - 100,
 		'cmdline': ['python', '-m', 'openbrowser.daemon.server'],
 	}
+	orphan.cmdline.return_value = orphan.info['cmdline']
+	orphan.create_time.return_value = orphan.info['create_time']
 	orphan.username.return_value = 'me'
 	orphan.environ.return_value = {'OPENBROWSER_SOCKET': str(missing_socket)}
 	process = MagicMock()
@@ -231,6 +309,8 @@ def test_reap_skips_live_socket(tmp_path):
 		'create_time': time.time() - 100,
 		'cmdline': ['python', '-m', 'openbrowser.daemon.server'],
 	}
+	live.cmdline.return_value = live.info['cmdline']
+	live.create_time.return_value = live.info['create_time']
 	live.username.return_value = 'me'
 	live.environ.return_value = {'OPENBROWSER_SOCKET': str(socket_path)}
 
@@ -256,6 +336,8 @@ def test_reap_skips_process_with_missing_environment():
 		'create_time': time.time() - 100,
 		'cmdline': ['python', '-m', 'openbrowser.daemon.server'],
 	}
+	live.cmdline.return_value = live.info['cmdline']
+	live.create_time.return_value = live.info['create_time']
 	live.username.return_value = 'me'
 	live.environ.return_value = {}
 
@@ -278,6 +360,8 @@ def test_reap_skips_process_when_environment_is_unreadable(tmp_path):
 		'create_time': time.time() - 100,
 		'cmdline': ['python', '-m', 'openbrowser.daemon.server'],
 	}
+	opaque.cmdline.return_value = opaque.info['cmdline']
+	opaque.create_time.return_value = opaque.info['create_time']
 	opaque.username.return_value = 'me'
 	opaque.environ.side_effect = psutil.AccessDenied(pid=123)
 
@@ -295,6 +379,8 @@ def test_reap_skips_young_process(tmp_path):
 	young = MagicMock()
 	young.pid = 123
 	young.info = {'pid': 123, 'create_time': time.time(), 'cmdline': ['python', '-m', 'openbrowser.daemon.server']}
+	young.cmdline.return_value = young.info['cmdline']
+	young.create_time.return_value = young.info['create_time']
 	young.username.return_value = 'me'
 	young.environ.return_value = {'OPENBROWSER_SOCKET': str(tmp_path / 'missing.sock')}
 
@@ -316,6 +402,8 @@ def test_reap_skips_a_reused_pid(tmp_path):
 		'create_time': time.time() - 100,
 		'cmdline': ['python', '-m', 'openbrowser.daemon.server'],
 	}
+	orphan.cmdline.return_value = orphan.info['cmdline']
+	orphan.create_time.return_value = orphan.info['create_time']
 	orphan.username.return_value = 'me'
 	orphan.environ.return_value = {'OPENBROWSER_SOCKET': str(tmp_path / 'missing.sock')}
 	reused = MagicMock()
