@@ -30,7 +30,7 @@ BINARY = os.environ.get(
     str(Path.home() / ".cache" / "openbrowser-interactive-bench" / "browser-use-venv" / "bin" / "browser-use"),
 )
 
-ADAPTER_VERSION = "browser-use-native-readiness-v2"
+ADAPTER_VERSION = "warm-session-readiness-v4"
 STDERR_TAIL_BYTES = 32768
 WARMUP_SENTINEL = "BROWSER_USE_NATIVE_READY_V2"
 WARMUP_CODE = f"""
