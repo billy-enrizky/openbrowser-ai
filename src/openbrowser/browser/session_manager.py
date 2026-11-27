@@ -6,6 +6,8 @@ events, ensuring the session pool always reflects the current browser state.
 
 import asyncio
 import inspect
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from cdp_use.cdp.target import AttachedToTargetEvent, DetachedFromTargetEvent, SessionID, TargetID
@@ -16,6 +18,14 @@ from openbrowser.browser.tabs import TabState
 
 if TYPE_CHECKING:
 	from openbrowser.browser.session import BrowserSession, CDPSession
+
+
+@dataclass(frozen=True, slots=True)
+class _AttachContext:
+	"""Immutable registration identity for target-attach callbacks."""
+
+	root: Any
+	generation: int | None
 
 
 class SessionManager:
@@ -48,7 +58,11 @@ class SessionManager:
 
 		# Track callbacks so reset can retire them before dropping the client.
 		self._event_tasks: set[asyncio.Task[Any]] = set()
+		self._target_attached_observers: dict[
+			str, Callable[[AttachedToTargetEvent, SessionID | None], Any]
+		] = {}
 		self._closed = False
+		self._attach_context: _AttachContext | None = None
 		self._crash_listener_registered = False
 		self._monitored_root = getattr(browser_session, '_cdp_client_root', None)
 		self._monitored_connection_generation = self._session_connection_generation()
@@ -58,6 +72,17 @@ class SessionManager:
 		health = getattr(self.browser_session, '_cdp_health', None)
 		generation = getattr(health, 'connection_generation', None)
 		return generation if isinstance(generation, int) else None
+
+	def _event_context_is_current(self, context: _AttachContext) -> bool:
+		"""Return True while the callback's exact registration still owns events."""
+		if self._closed or self._attach_context is not context:
+			return False
+		root = self.browser_session._cdp_client_root
+		if root is None or root is not context.root:
+			return False
+		if context.generation is None:
+			return True
+		return self._session_connection_generation() == context.generation
 
 	def _crash_context_is_current(self) -> bool:
 		"""Return True while the monitored root and connection generation still own crashes."""
@@ -69,6 +94,20 @@ class SessionManager:
 		if self._monitored_connection_generation is None:
 			return True
 		return self._session_connection_generation() == self._monitored_connection_generation
+
+	def set_target_attached_observer(
+		self,
+		key: str,
+		callback: Callable[[AttachedToTargetEvent, SessionID | None], Any],
+	) -> None:
+		"""Set the one observer for a stable key on the manager's attach callback."""
+		if self._closed:
+			raise RuntimeError('SessionManager is closed')
+		if not isinstance(key, str) or not key:
+			raise ValueError('Target attach observer key must be a non-empty string')
+		if not callable(callback):
+			raise TypeError('Target attach observer callback must be callable')
+		self._target_attached_observers[key] = callback
 
 	def _health_machine(self) -> Any | None:
 		"""Return the session health tracker when it is the real explicit model."""
@@ -82,22 +121,31 @@ class SessionManager:
 
 		Registers CDP event handlers to keep the session pool synchronized with browser state.
 		"""
+		if self._closed:
+			raise RuntimeError('SessionManager is closed')
 		if not self.browser_session._cdp_client_root:
 			raise RuntimeError('CDP client not initialized')
 
-		self._closed = False
 		# Capture cdp_client_root in closure to avoid type errors
 		cdp_client = self.browser_session._cdp_client_root
+		generation = self._session_connection_generation()
+		attach_context = _AttachContext(root=cdp_client, generation=generation)
+		self._attach_context = attach_context
 		self._monitored_root = cdp_client
-		self._monitored_connection_generation = self._session_connection_generation()
+		self._monitored_connection_generation = generation
 
 		# Register synchronous event handlers (CDP requirement)
 		def on_attached(event: AttachedToTargetEvent, session_id: SessionID | None = None):
+			if not self._event_context_is_current(attach_context):
+				return
 			event_session_id = event['sessionId']
 			target_type = event['targetInfo'].get('type', 'unknown')
+			observers = tuple(self._target_attached_observers.items())
 
 			# Enable auto-attach for this session's children
 			async def _enable_auto_attach():
+				if not self._event_context_is_current(attach_context):
+					return
 				try:
 					await cdp_client.send.Target.setAutoAttach(
 						params={'autoAttach': True, 'waitForDebuggerOnStart': False, 'flatten': True},
@@ -117,9 +165,11 @@ class SessionManager:
 					else:
 						self.logger.debug(f'[SessionManager] Auto-attach failed for {target_type}: {e}')
 
-			# Schedule auto-attach and pool management
+			# Schedule auto-attach first, then pool management and observers.
 			self._schedule_task(_enable_auto_attach())
-			self._schedule_task(self._handle_target_attached(event))
+			self._schedule_task(
+				self._handle_target_attached_and_notify(event, session_id, observers, attach_context)
+			)
 
 		def on_detached(event: DetachedFromTargetEvent, session_id: SessionID | None = None):
 			self._schedule_task(self._handle_target_detached(event))
@@ -262,6 +312,8 @@ class SessionManager:
 	def cancel_pending(self) -> None:
 		"""Cancel callback tasks without awaiting, for forced runtime reset."""
 		self._closed = True
+		self._attach_context = None
+		self._target_attached_observers.clear()
 		current = asyncio.current_task()
 		for task in list(self._event_tasks):
 			if task is not current and not task.done():
@@ -271,6 +323,8 @@ class SessionManager:
 	async def clear(self) -> None:
 		"""Clear all session tracking and retire tracked callbacks."""
 		self._closed = True
+		self._attach_context = None
+		self._target_attached_observers.clear()
 		current = asyncio.current_task()
 		tasks = {task for task in self._event_tasks if task is not current and not task.done()}
 		for task in tasks:
@@ -300,7 +354,53 @@ class SessionManager:
 				return False
 			return len(self._target_sessions[target_id]) > 0
 
-	async def _handle_target_attached(self, event: AttachedToTargetEvent) -> None:
+	async def _handle_target_attached_and_notify(
+		self,
+		event: AttachedToTargetEvent,
+		callback_session_id: SessionID | None,
+		observers: tuple[tuple[str, Callable[[AttachedToTargetEvent, SessionID | None], Any]], ...],
+		context: _AttachContext,
+	) -> None:
+		"""Update the base pool before invoking attach observers once."""
+		if not self._event_context_is_current(context):
+			return
+		await self._handle_target_attached(event, context=context)
+		if not self._event_context_is_current(context):
+			return
+		await self._notify_target_attached_observers(event, callback_session_id, observers, context)
+
+	async def _notify_target_attached_observers(
+		self,
+		event: AttachedToTargetEvent,
+		callback_session_id: SessionID | None,
+		observers: tuple[tuple[str, Callable[[AttachedToTargetEvent, SessionID | None], Any]], ...],
+		context: _AttachContext,
+	) -> None:
+		"""Invoke each attach observer, isolating one ordinary failure."""
+		for key, callback in observers:
+			if not self._event_context_is_current(context):
+				return
+			try:
+				result = callback(event, callback_session_id)
+				if inspect.isawaitable(result):
+					await result
+					if not self._event_context_is_current(context):
+						return
+			except asyncio.CancelledError:
+				raise
+			except Exception as error:
+				self.logger.warning(
+					'[SessionManager] Target attach observer failed: key=%s error_type=%s',
+					key,
+					type(error).__name__,
+				)
+
+	async def _handle_target_attached(
+		self,
+		event: AttachedToTargetEvent,
+		*,
+		context: _AttachContext | None = None,
+	) -> None:
 		"""Handle Target.attachedToTarget event.
 
 		Called automatically by Chrome when a new target/session is created.
@@ -311,6 +411,9 @@ class SessionManager:
 		target_type = event['targetInfo']['type']
 		waiting_for_debugger = event.get('waitingForDebugger', False)
 
+		if context is not None and not self._event_context_is_current(context):
+			return
+
 		self.logger.debug(
 			f'[SessionManager] Target attached: {target_id[:8]}... (session={session_id[:8]}..., '
 			f'type={target_type}, waitingForDebugger={waiting_for_debugger})'
@@ -319,6 +422,8 @@ class SessionManager:
 		rebound_session = None
 		async with self._lock:
 			if self._closed:
+				return
+			if context is not None and not self._event_context_is_current(context):
 				return
 			# Track this session for the target
 			if target_id not in self._target_sessions:
@@ -335,10 +440,11 @@ class SessionManager:
 			# that a committed focus snapshot may still reference.
 			from openbrowser.browser.session import CDPSession
 
-			assert self.browser_session._cdp_client_root is not None, 'Root CDP client required'
+			root = context.root if context is not None else self.browser_session._cdp_client_root
+			assert root is not None, 'Root CDP client required'
 			existing = self.browser_session._cdp_session_pool.get(target_id)
 			rebound_session = CDPSession(
-				cdp_client=self.browser_session._cdp_client_root,
+				cdp_client=root,
 				target_id=target_id,
 				session_id=session_id,
 				title=event['targetInfo'].get('title', getattr(existing, 'title', 'Unknown title')),
@@ -375,6 +481,8 @@ class SessionManager:
 						state=TabState.OPEN,
 					)
 
+		if context is not None and not self._event_context_is_current(context):
+			return
 		if rebound_session is not None:
 			handler = getattr(self.browser_session, '_handle_attached_session', None)
 			if callable(handler):
@@ -388,11 +496,15 @@ class SessionManager:
 						f'{type(error).__name__}: {error}'
 					)
 
+		if context is not None and not self._event_context_is_current(context):
+			return
+
 		# Resume execution if waiting for debugger
 		if waiting_for_debugger:
 			try:
-				assert self.browser_session._cdp_client_root is not None
-				await self.browser_session._cdp_client_root.send.Runtime.runIfWaitingForDebugger(session_id=session_id)
+				root = context.root if context is not None else self.browser_session._cdp_client_root
+				assert root is not None
+				await root.send.Runtime.runIfWaitingForDebugger(session_id=session_id)
 				self.logger.debug(f'[SessionManager] Resumed execution for session {session_id[:8]}...')
 			except Exception as e:
 				self.logger.warning(f'[SessionManager] Failed to resume execution: {e}')

@@ -932,3 +932,387 @@ class TestSessionManagerCrash:
             assert health.connection_generation == 2
         assert health.last_focus_recovery_outcome.value == 'not_attempted'
         assert session.agent_focus.target_id == 'committed-replacement'
+
+
+class _SingleSlotTargetRegistration:
+    """Model cdp-use's one-callback-per-event registration contract."""
+
+    def __init__(self) -> None:
+        self.attached_to_target = None
+        self.attached_registration_count = 0
+
+    def attachedToTarget(self, callback):
+        self.attached_to_target = callback
+        self.attached_registration_count += 1
+
+    def detachedFromTarget(self, callback):
+        pass
+
+    def targetCrashed(self, callback):
+        pass
+
+
+def _make_single_slot_session():
+    session = _make_mock_browser_session()
+    registration = _SingleSlotTargetRegistration()
+    session._cdp_client_root.register.Target = registration
+    session._cdp_client_root.send.Target.setAutoAttach = AsyncMock()
+    session._cdp_client_root.send.Runtime.runIfWaitingForDebugger = AsyncMock()
+    return session, registration
+
+
+def _replace_single_slot_root(session):
+    old_root = session._cdp_client_root
+    new_root = _make_mock_cdp_client()
+    registration = _SingleSlotTargetRegistration()
+    new_root.register.Target = registration
+    new_root.send.Target.setAutoAttach = AsyncMock()
+    session._cdp_client_root = new_root
+    generation = session._cdp_health.begin_connect()
+    session._cdp_health.mark_connected(generation)
+    session._health.record_connected(generation)
+    session._cdp_session_pool.clear()
+    session._tab_registry.clear()
+    return old_root, new_root, registration, generation
+
+
+def _attached_event(
+    *,
+    target_id: str = 'target-1',
+    session_id: str = 'session-1',
+    target_type: str = 'page',
+    url: str = 'https://example.com',
+    waiting_for_debugger: bool = False,
+):
+    return {
+        'sessionId': session_id,
+        'targetInfo': {
+            'targetId': target_id,
+            'type': target_type,
+            'title': 'Example',
+            'url': url,
+        },
+        'waitingForDebugger': waiting_for_debugger,
+    }
+
+
+async def _drain_session_manager(sm: SessionManager) -> None:
+    while sm._event_tasks:
+        await asyncio.gather(*list(sm._event_tasks), return_exceptions=True)
+
+
+@pytest.mark.asyncio
+class TestSessionManagerTargetAttachedObservers:
+    async def test_single_slot_runs_base_pool_then_observer_once(self):
+        session, registration = _make_single_slot_session()
+        sm = SessionManager(session)
+        calls = []
+
+        def observer(event, outer_session_id=None):
+            target_id = event['targetInfo']['targetId']
+            calls.append((target_id, outer_session_id, session._cdp_session_pool[target_id].session_id))
+
+        sm.set_target_attached_observer('fetch-policy', observer)
+        await sm.start_monitoring()
+        assert registration.attached_registration_count == 1
+        assert registration.attached_to_target is not None
+
+        registration.attached_to_target(_attached_event(), 'parent-session')
+        await _drain_session_manager(sm)
+
+        assert calls == [('target-1', 'parent-session', 'session-1')]
+        assert session._cdp_session_pool['target-1'].target_id == 'target-1'
+        session._cdp_client_root.send.Target.setAutoAttach.assert_awaited_once_with(
+            params={'autoAttach': True, 'waitForDebuggerOnStart': False, 'flatten': True},
+            session_id='session-1',
+        )
+
+    async def test_same_key_replaces_observer_idempotently_after_start(self):
+        session, registration = _make_single_slot_session()
+        sm = SessionManager(session)
+        calls = []
+
+        await sm.start_monitoring()
+        sm.set_target_attached_observer('fetch-policy', lambda *_: calls.append('old'))
+        sm.set_target_attached_observer('fetch-policy', lambda *_: calls.append('new'))
+        sm.set_target_attached_observer('fetch-policy', lambda *_: calls.append('new'))
+
+        registration.attached_to_target(_attached_event())
+        await _drain_session_manager(sm)
+
+        assert calls == ['new']
+
+    async def test_failing_observer_is_isolated_and_logs_type_only(self, caplog):
+        session, registration = _make_single_slot_session()
+        sm = SessionManager(session)
+        calls = []
+
+        async def failing_observer(*_):
+            raise ValueError('secret observer payload')
+
+        def healthy_observer(*_):
+            calls.append('healthy')
+
+        sm.set_target_attached_observer('broken', failing_observer)
+        sm.set_target_attached_observer('fetch-policy', healthy_observer)
+        await sm.start_monitoring()
+
+        with caplog.at_level(logging.WARNING, logger='test_session_manager'):
+            registration.attached_to_target(_attached_event())
+            await _drain_session_manager(sm)
+
+        assert calls == ['healthy']
+        assert 'ValueError' in caplog.text
+        assert 'secret observer payload' not in caplog.text
+
+    @pytest.mark.parametrize(
+        ('target_type', 'url'),
+        [
+            ('page', 'https://example.com'),
+            ('iframe', 'https://frame.example.com'),
+            ('worker', 'https://example.com/worker.js'),
+            ('service_worker', 'chrome-extension://extension-id/worker.js'),
+        ],
+    )
+    async def test_observers_receive_iframe_worker_and_extension_targets(self, target_type, url):
+        session, registration = _make_single_slot_session()
+        sm = SessionManager(session)
+        calls = []
+
+        def observer(event, _outer_session_id=None):
+            calls.append(event['targetInfo']['type'])
+
+        sm.set_target_attached_observer('fetch-policy', observer)
+        await sm.start_monitoring()
+        registration.attached_to_target(
+            _attached_event(
+                target_id=f'{target_type}-target',
+                session_id=f'{target_type}-session',
+                target_type=target_type,
+                url=url,
+            )
+        )
+        await _drain_session_manager(sm)
+
+        assert calls == [target_type]
+        assert session._cdp_session_pool[f'{target_type}-target'].session_id == f'{target_type}-session'
+
+    async def test_closed_callback_is_suppressed_and_observers_are_cleared(self):
+        session, registration = _make_single_slot_session()
+        sm = SessionManager(session)
+        calls = []
+
+        sm.set_target_attached_observer('fetch-policy', lambda *_: calls.append('called'))
+        await sm.start_monitoring()
+        await sm.clear()
+
+        assert sm._target_attached_observers == {}
+        registration.attached_to_target(_attached_event())
+        await asyncio.sleep(0)
+
+        assert calls == []
+        assert session._cdp_session_pool == {}
+
+    async def test_stale_root_callback_is_suppressed(self):
+        session, registration = _make_single_slot_session()
+        sm = SessionManager(session)
+        calls = []
+
+        sm.set_target_attached_observer('fetch-policy', lambda *_: calls.append('called'))
+        await sm.start_monitoring()
+        session._cdp_client_root = MagicMock()
+
+        registration.attached_to_target(_attached_event())
+        await asyncio.sleep(0)
+
+        assert calls == []
+        assert session._cdp_session_pool == {}
+
+    async def test_stale_generation_callback_is_suppressed(self):
+        session, registration = _make_single_slot_session()
+        sm = SessionManager(session)
+        calls = []
+
+        sm.set_target_attached_observer('fetch-policy', lambda *_: calls.append('called'))
+        await sm.start_monitoring()
+        session._cdp_health.begin_connect()
+
+        registration.attached_to_target(_attached_event())
+        await asyncio.sleep(0)
+
+        assert calls == []
+        assert session._cdp_session_pool == {}
+
+    async def test_clear_cancels_inflight_observer_before_late_resume(self):
+        session, registration = _make_single_slot_session()
+        sm = SessionManager(session)
+        entered, release, cancelled, resumed = (
+            asyncio.Event(),
+            asyncio.Event(),
+            asyncio.Event(),
+            asyncio.Event(),
+        )
+
+        async def blocked_observer(*_):
+            entered.set()
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+            resumed.set()
+
+        sm.set_target_attached_observer('fetch-policy', blocked_observer)
+        await sm.start_monitoring()
+        registration.attached_to_target(_attached_event())
+        await asyncio.wait_for(entered.wait(), timeout=1.0)
+
+        await asyncio.wait_for(sm.clear(), timeout=1.0)
+        release.set()
+        await asyncio.sleep(0)
+
+        assert cancelled.is_set()
+        assert resumed.is_set() is False
+        assert sm._target_attached_observers == {}
+
+    async def test_cancel_pending_clears_observers_and_suppresses_late_callbacks(self):
+        session, registration = _make_single_slot_session()
+        sm = SessionManager(session)
+        calls = []
+
+        sm.set_target_attached_observer('fetch-policy', lambda *_: calls.append('called'))
+        await sm.start_monitoring()
+        sm.cancel_pending()
+
+        assert sm._target_attached_observers == {}
+        registration.attached_to_target(_attached_event())
+        await asyncio.sleep(0)
+
+        assert calls == []
+        assert session._cdp_session_pool == {}
+
+    async def test_old_handler_stays_invalid_after_manager_rebind(self):
+        session, old_registration = _make_single_slot_session()
+        sm = SessionManager(session)
+        calls = []
+
+        def record_target(event, _session_id=None):
+            calls.append(event['targetInfo']['targetId'])
+
+        sm.set_target_attached_observer('fetch-policy', record_target)
+        await sm.start_monitoring()
+        old_callback = old_registration.attached_to_target
+        old_root, new_root, new_registration, _ = _replace_single_slot_root(session)
+        await sm.start_monitoring()
+
+        old_callback(_attached_event(target_id='old-root-target'))
+        await _drain_session_manager(sm)
+
+        assert calls == []
+        assert session._cdp_session_pool == {}
+        old_root.send.Target.setAutoAttach.assert_not_awaited()
+
+        new_registration.attached_to_target(
+            _attached_event(target_id='new-root-target', session_id='new-root-session')
+        )
+        await _drain_session_manager(sm)
+
+        assert calls == ['new-root-target']
+        assert session._cdp_session_pool['new-root-target'].cdp_client is new_root
+
+    async def test_same_root_reregistration_invalidates_old_handler_but_accepts_new(self):
+        session, registration = _make_single_slot_session()
+        sm = SessionManager(session)
+        calls = []
+
+        def record_target(event, _sid=None):
+            calls.append(event['targetInfo']['targetId'])
+
+        sm.set_target_attached_observer('fetch-policy', record_target)
+        await sm.start_monitoring()
+        old_callback = registration.attached_to_target
+        await sm.start_monitoring()
+        new_callback = registration.attached_to_target
+
+        old_callback(_attached_event(target_id='old-target'))
+        await _drain_session_manager(sm)
+        assert calls == []
+        assert session._cdp_session_pool == {}
+
+        new_callback(_attached_event(target_id='new-target'))
+        await _drain_session_manager(sm)
+        assert calls == ['new-target']
+        assert session._cdp_session_pool['new-target'].target_id == 'new-target'
+
+    async def test_old_handler_stays_invalid_across_awaited_focus_rebind(self):
+        session, registration = _make_single_slot_session()
+        sm = SessionManager(session)
+        calls = []
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def blocked_focus_rebind(*_):
+            entered.set()
+            await release.wait()
+
+        session._handle_attached_session = AsyncMock(side_effect=blocked_focus_rebind)
+        sm.set_target_attached_observer('fetch-policy', lambda *_: calls.append('called'))
+        await sm.start_monitoring()
+        old_callback = registration.attached_to_target
+        old_callback(_attached_event(waiting_for_debugger=True))
+        await asyncio.wait_for(entered.wait(), timeout=1.0)
+
+        old_root, _, _, _ = _replace_single_slot_root(session)
+        await sm.start_monitoring()
+        release.set()
+        await _drain_session_manager(sm)
+
+        assert calls == []
+        old_root.send.Runtime.runIfWaitingForDebugger.assert_not_awaited()
+
+    async def test_awaited_observer_does_not_continue_after_manager_rebind(self):
+        session, registration = _make_single_slot_session()
+        sm = SessionManager(session)
+        calls = []
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def blocked_observer(*_):
+            calls.append('first-start')
+            entered.set()
+            await release.wait()
+            calls.append('first-end')
+
+        sm.set_target_attached_observer('first', blocked_observer)
+        sm.set_target_attached_observer('second', lambda *_: calls.append('second'))
+        await sm.start_monitoring()
+        registration.attached_to_target(_attached_event())
+        await asyncio.wait_for(entered.wait(), timeout=1.0)
+
+        _replace_single_slot_root(session)
+        await sm.start_monitoring()
+        release.set()
+        await _drain_session_manager(sm)
+
+        assert calls == ['first-start', 'first-end']
+
+    @pytest.mark.parametrize('retirement', ['clear', 'cancel_pending'])
+    async def test_retired_manager_rejects_new_observer_registration(self, retirement):
+        session, _registration = _make_single_slot_session()
+        sm = SessionManager(session)
+        await sm.start_monitoring()
+
+        if retirement == 'clear':
+            await sm.clear()
+        else:
+            sm.cancel_pending()
+
+        with pytest.raises(RuntimeError, match='closed'):
+            sm.set_target_attached_observer('late', lambda *_: None)
+
+    async def test_retired_manager_rejects_restart(self):
+        session, _registration = _make_single_slot_session()
+        sm = SessionManager(session)
+        await sm.start_monitoring()
+        await sm.clear()
+
+        with pytest.raises(RuntimeError, match='closed'):
+            await sm.start_monitoring()
