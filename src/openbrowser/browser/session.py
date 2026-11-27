@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self, Union, cast, overload
 from uuid import UUID
 
-import httpx
 from bubus import EventBus
 from cdp_use import CDPClient
 from cdp_use.cdp.fetch import AuthRequiredEvent, RequestPausedEvent
@@ -5946,6 +5945,8 @@ class BrowserSession(BaseModel):
 				raise RuntimeError('Cannot setup CDP connection without CDP URL')
 
 			if not self.cdp_url.startswith('ws'):
+				import httpx
+
 				# If it's an HTTP URL, fetch the WebSocket URL from /json/version endpoint
 				url = self.cdp_url.rstrip('/')
 				if not url.endswith('/json/version'):
