@@ -2,7 +2,7 @@
 
 Register additional actions on `tools` before constructing the agent.
 This template uses ChatOpenAI and needs OPENAI_API_KEY before it runs.
-MCP and openbrowser-ai -c need no LLM key.
+MCP and openbrowser-ai -c need no separate OpenAI, OpenBrowser, or MCP API key.
 """
 
 import asyncio

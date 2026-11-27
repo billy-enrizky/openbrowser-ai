@@ -366,8 +366,50 @@ class TestMainCommand:
             if call.args and isinstance(call.args[0], str)
         )
         assert result.exit_code == 0
-        assert "This generated Agent template uses ChatOpenAI and needs OPENAI_API_KEY." in rendered
-        assert "MCP and openbrowser-ai -c need no LLM key." in rendered
+        assert "This generated Agent template may use a hosted model provider." in rendered
+        assert "If this template uses a hosted model provider, set that provider key:" in rendered
+        assert "Local models need no hosted provider key." in rendered
+        assert "MCP and openbrowser-ai -c need no separate OpenAI, OpenBrowser, or MCP API key." in rendered
+        assert "ChatOpenAI" not in rendered
+        assert "OPENAI_API_KEY" not in rendered
+
+    def test_main_uses_template_provider_metadata(self, tmp_path):
+        """Template metadata supplies the provider name and key variable."""
+        mock_templates = {
+            "default": {
+                "file": "default.py",
+                "description": "Basic agent with Google Gemini",
+                "provider_name": "Google Gemini",
+                "provider_key": "GOOGLE_API_KEY",
+            },
+        }
+
+        with (
+            patch.object(init_cmd_mod, "_get_template_list", return_value=mock_templates),
+            patch.object(init_cmd_mod, "_get_template_content", return_value="# template content"),
+            patch.object(init_cmd_mod, "_write_init_file", return_value=True),
+            patch.object(init_cmd_mod, "console"),
+            patch.object(init_cmd_mod, "Panel"),
+            patch.object(init_cmd_mod, "Text") as MockText,
+        ):
+            MockText.return_value = MagicMock()
+            from click.testing import CliRunner
+
+            runner = CliRunner()
+            with runner.isolated_filesystem(temp_dir=tmp_path):
+                result = runner.invoke(init_cmd_mod.main, ["--template", "default"])
+
+        rendered = "".join(
+            call.args[0]
+            for call in MockText.return_value.append.call_args_list
+            if call.args and isinstance(call.args[0], str)
+        )
+        assert result.exit_code == 0
+        assert "This generated Agent template uses Google Gemini and needs GOOGLE_API_KEY." in rendered
+        assert "4. Set GOOGLE_API_KEY in the .env file or environment:" in rendered
+        assert "GOOGLE_API_KEY=your-key" in rendered
+        assert "Local models need no hosted provider key." in rendered
+        assert "MCP and openbrowser-ai -c need no separate OpenAI, OpenBrowser, or MCP API key." in rendered
 
     def test_main_interactive_mode(self, tmp_path):
         """Test main in interactive mode (no template specified)."""

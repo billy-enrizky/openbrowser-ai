@@ -1,22 +1,32 @@
 {
   "default": {
     "description": "Basic agent with Google Gemini",
-    "file": "simple.py"
+    "file": "simple.py",
+    "provider_name": "Google Gemini",
+    "provider_key": "GOOGLE_API_KEY"
   },
   "basic_search": {
     "description": "Simple Google search example",
-    "file": "getting_started/01_basic_search.py"
+    "file": "getting_started/01_basic_search.py",
+    "provider_name": "Google Gemini",
+    "provider_key": "GOOGLE_API_KEY"
   },
   "form_filling": {
     "description": "Form filling automation",
-    "file": "getting_started/02_form_filling.py"
+    "file": "getting_started/02_form_filling.py",
+    "provider_name": "Google Gemini",
+    "provider_key": "GOOGLE_API_KEY"
   },
   "data_extraction": {
     "description": "Extract data from web pages",
-    "file": "getting_started/03_data_extraction.py"
+    "file": "getting_started/03_data_extraction.py",
+    "provider_name": "Google Gemini",
+    "provider_key": "GOOGLE_API_KEY"
   },
   "multi_step": {
     "description": "Multi-step task automation",
-    "file": "getting_started/04_multi_step_task.py"
+    "file": "getting_started/04_multi_step_task.py",
+    "provider_name": "Google Gemini",
+    "provider_key": "GOOGLE_API_KEY"
   }
 }

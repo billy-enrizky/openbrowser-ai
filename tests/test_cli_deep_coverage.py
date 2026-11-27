@@ -1279,7 +1279,7 @@ class TestRunTemplateGeneration:
         captured = capsys.readouterr()
         assert Path(output).exists()
         assert "This generated Agent template uses ChatOpenAI and needs OPENAI_API_KEY." in captured.out
-        assert "MCP and openbrowser-ai -c need no LLM key." in captured.out
+        assert "MCP and openbrowser-ai -c need no separate OpenAI, OpenBrowser, or MCP API key." in captured.out
 
 
 # ---------------------------------------------------------------------------
@@ -1451,7 +1451,7 @@ class TestTemplateMetadata:
         for filename in ("default_template.py", "advanced_template.py", "tools_template.py"):
             text = (templates_dir / filename).read_text(encoding="utf-8")
             assert "This template uses ChatOpenAI and needs OPENAI_API_KEY" in text
-            assert "MCP and openbrowser-ai -c need no LLM key." in text
+            assert "MCP and openbrowser-ai -c need no separate OpenAI, OpenBrowser, or MCP API key." in text
 
 
 # ---------------------------------------------------------------------------

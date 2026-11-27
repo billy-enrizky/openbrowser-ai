@@ -120,7 +120,7 @@ OpenBrowser 0.1.61 compatible wheels include the native CLI frontend and the `op
 
 ## 2. Try it without an LLM
 
-OpenBrowser web search, scrape, form filling, page analysis, and downloads work immediately through the CLI or MCP. These workflows do not need an LLM API key.
+OpenBrowser web search, scrape, form filling, page analysis, and downloads work immediately through the CLI or MCP. These workflows do not need a separate OpenAI, OpenBrowser, or MCP API key.
 
 <Note>
 Use `openbrowser-ai web-search` for CLI source discovery, `openbrowser.web_search` in Python, and `web_search` in MCP or CodeAgent. These are the canonical names in OpenBrowser 0.1.61 and later.
@@ -143,7 +143,7 @@ Search snippets are discovery previews. Scrape and read the source page before y
 
 ## 3. Choose your favorite LLM
 
-Provider keys apply only to Agent and CodeAgent runs. The browser skills and MCP server do not use them.
+Provider keys apply only to Agent and CodeAgent runs that use a hosted provider. Local models need no hosted provider key. The browser skills and MCP server need no separate OpenAI, OpenBrowser, or MCP API key.
 
 Create a `.env` file and add your provider key.
 

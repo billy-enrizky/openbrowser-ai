@@ -260,7 +260,7 @@ pip install openbrowser-ai[video]      # Video recording support
 
 ## 4. Quick Start
 
-CodeAgent examples need a provider key. BrowserSession examples and `openbrowser-ai -c` need no LLM key.
+The CodeAgent examples below use hosted providers and need the matching provider key. Local models need no hosted provider key. BrowserSession examples and `openbrowser-ai -c` need no separate OpenAI, OpenBrowser, or MCP API key.
 
 ### 4.1. Basic Usage
 
@@ -355,7 +355,7 @@ The same status surfaces add `browser.health` when a session exists. `health.pha
 
 ### 5.2. Environment Variables
 
-Provider keys are for Agent and CodeAgent runs. MCP, `openbrowser-ai -c`, `scrape`, `web-search`, and the browser skills use no LLM key.
+Provider keys are for Agent and CodeAgent runs that use a hosted provider. Local models need no hosted provider key. MCP, `openbrowser-ai -c`, `scrape`, `web-search`, and the browser skills need no separate OpenAI, OpenBrowser, or MCP API key.
 
 ```bash
 # Google (recommended)
@@ -542,7 +542,7 @@ For OpenClaw plugin documentation, see [docs.openclaw.ai/tools/plugin](https://d
 
 [![MCP Registry](https://img.shields.io/badge/MCP-Registry-blue)](https://registry.modelcontextprotocol.io/?q=openbrowser)
 
-OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser automation as tools for AI assistants like Claude. Listed on the [MCP Registry](https://registry.modelcontextprotocol.io/?q=openbrowser) as `me.openbrowser/openbrowser-ai`. The default stdio transport is a lean JSON-RPC loop that answers discovery and the tool catalog before it imports the MCP SDK. It negotiates protocol version `2026-07-28` with modern clients. Set `OPENBROWSER_MCP_TRANSPORT=sdk` to use the MCP SDK 2.3 escape hatch. Invalid values exit with code 2. No external LLM API keys required: the MCP client provides the intelligence.
+OpenBrowser includes an MCP (Model Context Protocol) server that exposes browser automation as tools for AI assistants like Claude. Listed on the [MCP Registry](https://registry.modelcontextprotocol.io/?q=openbrowser) as `me.openbrowser/openbrowser-ai`. The default stdio transport is a lean JSON-RPC loop that answers discovery and the tool catalog before it imports the MCP SDK. It negotiates protocol version `2026-07-28` with modern clients. Set `OPENBROWSER_MCP_TRANSPORT=sdk` to use the MCP SDK 2.3 escape hatch. Invalid values exit with code 2. No separate OpenAI, OpenBrowser, or MCP API key is required. The MCP client provides the intelligence.
 
 By default, each modern MCP context uses an isolated managed profile under `~/.config/openbrowser/profiles/mcp-<owner-id>`. The legacy no-handle owner uses `mcp-<server-instance-id>`. The owner ID is internal. Read the resolved path from `get_status.profile.user_data_dir`. The `context_id` handle is separate. The profile's `storage_state.json` is seeded once from `~/.config/openbrowser/profiles/default/storage_state.json`, so existing logins are available without allowing concurrent contexts to kill or corrupt one another's browser. Profiles are retained on disk after `close_context`. A new MCP server process cannot resume a context handle, and it creates a new isolated profile unless you configure an explicit shared profile. Configure `OPENBROWSER_USER_DATA_DIR` for a profile that survives restarts. `OPENBROWSER_STORAGE_STATE` is a one-time seed for managed profiles. Later changes are saved to the active profile copy. OpenBrowser also auto-cleans disposable Chromium caches in managed profiles, which keeps disk usage down without deleting cookies or login state. If you explicitly configure the same `OPENBROWSER_USER_DATA_DIR` for multiple contexts or servers, the profile lease rejects the second owner with a clear error.
 
@@ -780,7 +780,7 @@ Then run the calls in the same environment. The daemon keeps Python variables be
 
 Use `--render-mode full`, `--render-mode lightweight`, or `--render-mode no-render` to choose a rendering policy for a one-shot run, or `--no-render` as a shortcut for the last one. No-render mode disables screenshots and visual-only actions. For asset control without changing the mode, use `--text-only` to block external CSS, images, fonts, media, and text tracks while keeping scripts and screenshots, or one of `--no-css`, `--no-images`, `--no-fonts`, `--no-media`, `--no-scripts`. The `scrape` command accepts `--no-css`, `--no-images`, `--no-fonts`, `--no-media`, and `--render-mode`. `--no-scripts` is available on the one-shot prompt interface. The `scrape` browser fallback uses the Playwright headless shell by default. Set `OPENBROWSER_USE_HEADLESS_SHELL=0` to force full Chrome.
 
-The `-c` flag connects to a persistent browser daemon over a Unix socket (localhost TCP on Windows). Variables persist across calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity. The `-c` path needs no LLM key.
+The `-c` flag connects to a persistent browser daemon over a Unix socket (localhost TCP on Windows). Variables persist across calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity. The `-c` path needs no separate OpenAI, OpenBrowser, or MCP API key.
 
 After a browser failure, run `openbrowser-ai daemon status` before retrying because the first call may have partially run. Read `browser.health` for the last crash, focus-recovery, and local process observation. `health` is not a live page-readiness probe. Wait while recovery is pending. After a failed recovery, use `openbrowser-ai daemon reset` only when no usable target exists. Reset clears the Python executor and namespace, so persist values first.
 

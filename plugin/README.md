@@ -34,7 +34,7 @@ Local CLI daemon sessions persist cookies and login state in Chrome's user-data 
 - **Python 3.12+** with [uv](https://docs.astral.sh/uv/) package manager
 - **Claude Code** CLI
 
-MCP and `openbrowser-ai -c` need no LLM key.
+Local MCP and `openbrowser-ai -c` need no separate OpenAI, OpenBrowser, or MCP API key.
 
 ## 2. Installation
 
@@ -102,7 +102,7 @@ Add to your project's `.mcp.json`:
 }
 ```
 
-The default stdio transport is the lean JSON-RPC loop. Set `OPENBROWSER_MCP_TRANSPORT=sdk` to use the MCP SDK transport instead. Invalid values exit with code 2. MCP runs through the Python CLI. On a native wheel, `openbrowser-ai --mcp` delegates to `openbrowser-ai-py --mcp`.
+The default stdio transport is the lean JSON-RPC loop. Set `OPENBROWSER_MCP_TRANSPORT=sdk` to use the MCP SDK transport instead. Invalid values exit with code 2. MCP runs through the Python CLI. On a native wheel, `openbrowser-ai --mcp` delegates to `openbrowser-ai-py --mcp`. Local MCP needs no separate OpenAI, OpenBrowser, or MCP API key.
 
 ### 2.6. Native CLI frontend
 

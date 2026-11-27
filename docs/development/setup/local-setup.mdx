@@ -39,9 +39,9 @@ Create `.env` at the repository root:
 touch .env
 ```
 
-The form filling, scraping, page analysis, and download skills run through `openbrowser-ai -c` and need no LLM key. Provider keys apply only to Agent and CodeAgent work.
+The form filling, scraping, page analysis, and download skills run through `openbrowser-ai -c` and need no separate OpenAI, OpenBrowser, or MCP API key. Provider keys apply only to Agent and CodeAgent runs that use a hosted provider. Local models need no hosted provider key.
 
-Add one provider key for Agent or CodeAgent work:
+Add one provider key when Agent or CodeAgent uses a hosted provider:
 
 ```bash
 GOOGLE_API_KEY=...
@@ -49,7 +49,7 @@ GOOGLE_API_KEY=...
 # or ANTHROPIC_API_KEY=...
 ```
 
-MCP and `openbrowser-ai -c` do not need an LLM key. Optional settings:
+MCP and `openbrowser-ai -c` need no separate OpenAI, OpenBrowser, or MCP API key. Optional settings:
 
 ```bash
 OPENBROWSER_LOGGING_LEVEL=debug

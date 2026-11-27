@@ -346,22 +346,38 @@ def main(
 
 				next_steps.append('\n')
 		else:
-			# Default workflow for templates without custom next_steps
+			# Default workflow for templates without custom next_steps.
+			metadata = INIT_TEMPLATES[template]
+			provider_key = metadata.get('provider_key')
+			provider_name = metadata.get('provider_name')
+			if isinstance(provider_key, str) and provider_key:
+				if not (isinstance(provider_name, str) and provider_name):
+					provider_name = 'a hosted provider'
+				scope_line = (
+					f'\nThis generated Agent template uses {provider_name} '
+					f'and needs {provider_key}.\n'
+				)
+				provider_step = f'4. Set {provider_key} in the .env file or environment:\n'
+				provider_command = f'   {provider_key}=your-key\n'
+			else:
+				scope_line = '\nThis generated Agent template may use a hosted model provider.\n'
+				provider_step = '4. If this template uses a hosted model provider, set that provider key:\n'
+				provider_command = '   # Example: GOOGLE_API_KEY=your-key\n'
+			next_steps.append(scope_line, style='bold')
 			next_steps.append(
-				'\nThis generated Agent template uses ChatOpenAI and needs OPENAI_API_KEY.\n',
-				style='bold',
+				'MCP and openbrowser-ai -c need no separate OpenAI, OpenBrowser, or MCP API key.\n\n',
+				style='dim',
 			)
-			next_steps.append('MCP and openbrowser-ai -c need no LLM key.\n\n', style='dim')
 			next_steps.append('1. Navigate to project directory:\n', style='bold')
 			next_steps.append(f'   cd {template}\n\n', style='dim')
 			next_steps.append('2. Initialize uv project:\n', style='bold')
 			next_steps.append('   uv init\n\n', style='dim')
 			next_steps.append('3. Install openbrowser:\n', style='bold')
 			next_steps.append('   uv add openbrowser-ai\n\n', style='dim')
-			next_steps.append('4. Set OPENAI_API_KEY in the .env file or environment:\n', style='bold')
-			next_steps.append('   OPENAI_API_KEY=your-key\n', style='dim')
+			next_steps.append(provider_step, style='bold')
+			next_steps.append(provider_command, style='dim')
 			next_steps.append(
-				'   (Get an OpenAI key at https://platform.openai.com/api-keys)\n\n',
+				'   Local models need no hosted provider key.\n\n',
 				style='dim italic',
 			)
 			next_steps.append('5. Run your script:\n', style='bold')

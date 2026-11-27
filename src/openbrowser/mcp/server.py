@@ -298,9 +298,11 @@ def _tool_catalog(description: str, *, modern: bool) -> tuple[Any, ...]:
 	if modern:
 		reset_schema['required'] = ['context_id']
 
+	keyless_note = 'No separate OpenAI, OpenBrowser, or MCP API key is required.'
+	execute_description = description if keyless_note in description else f'{keyless_note} {description}'
 	execute = types.Tool(
 		name='execute_code',
-		description=description,
+		description=execute_description,
 		input_schema=execute_schema,
 		annotations=types.ToolAnnotations(
 			read_only_hint=False,
@@ -365,6 +367,7 @@ def _tool_catalog(description: str, *, modern: bool) -> tuple[Any, ...]:
 		name='web_search',
 		description=(
 			'Run OpenBrowser web search without starting a browser or requiring a context_id. '
+			'No separate OpenAI, OpenBrowser, or MCP API key is required. '
 			'Returns a JSON array with title, url, and snippet fields. Snippets are discovery previews. '
 			'Scrape and read the source page before citing it. Values above 20 are capped at 20.'
 		),
@@ -411,6 +414,7 @@ def _tool_catalog(description: str, *, modern: bool) -> tuple[Any, ...]:
 		name='scrape_web',
 		description=(
 			'Fetch one HTTP(S) URL without starting a browser and without a context_id. '
+			'No separate OpenAI, OpenBrowser, or MCP API key is required. '
 			'This is the no-Blink, no-V8 mode: it does not run JavaScript, take screenshots, '
 			'use browser cookies, or fall back to a browser. Use it for server-rendered pages. '
 			'Returns JSON with url, title, format, content, stats, and engine_used=http. '
@@ -450,6 +454,7 @@ def _tool_catalog(description: str, *, modern: bool) -> tuple[Any, ...]:
 		name='create_context',
 		description=(
 			'Create an isolated OpenBrowser context and return its context_id. '
+			'No separate OpenAI, OpenBrowser, or MCP API key is required. '
 			'No browser starts until the first execute_code call. '
 			'Call this once, then pass context_id to execute_code, get_status, and reset_browser. '
 			'The context lives until close_context or server exit and cannot be resumed by a new server process. '
