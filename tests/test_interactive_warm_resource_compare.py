@@ -845,6 +845,15 @@ def test_preallocated_marker_cleans_reparented_descendant(tmp_path, monkeypatch)
             "create_time": 2.0,
         }
 
+        def cmdline(self):
+            return self.info["cmdline"]
+
+        def create_time(self):
+            return self.info["create_time"]
+
+        def uids(self):
+            return SimpleNamespace(effective=resource_compare.os.geteuid())
+
     child = Descendant()
 
     def factory(pid):
