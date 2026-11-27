@@ -435,7 +435,9 @@ async def test_catalog_is_snapshot_and_cannot_mutate_validation(monkeypatch):
         monkeypatch.delenv("OPENBROWSER_COMPACT_DESCRIPTION")
         fresh = await client.list_tools(cache_mode="refresh")
         fresh_execute = next(tool for tool in fresh.tools if tool.name == "execute_code")
-        assert fresh_execute.description == original == module._EXECUTE_CODE_DESCRIPTION_COMPACT
+        keyless = 'No separate OpenAI, OpenBrowser, or MCP API key is required. '
+        expected = keyless + module._EXECUTE_CODE_DESCRIPTION_COMPACT
+        assert fresh_execute.description == original == expected
         assert fresh_execute.input_schema["properties"]["code"]["type"] == "string"
         created = await client.call_tool("create_context", {})
         context_id = created.structured_content["context_id"]

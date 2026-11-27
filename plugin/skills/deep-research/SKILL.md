@@ -2,6 +2,7 @@
 name: deep-research
 description: |
   Use when the user asks for /search, web search, source discovery, research, investigations, evidence gathering, comparisons, literature reviews, briefings, or cited reports.
+  Uses host reasoning and keyless `openbrowser-ai web-search` and `-c` code tools. No separate API key is required. Standalone `-p` is an optional configured-provider route.
 allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(uvx:*) Bash(python3:*) Bash(sleep:*) Bash(cat:*) Bash(irm:*) Bash(mkdir:*) Bash(date:*) Read Write
 ---
 
@@ -74,7 +75,7 @@ curl -fsSL https://openbrowser.me/install.sh | sh
 irm https://openbrowser.me/install.ps1 | iex
 ```
 
-No LLM API key required. The skill drives the daemon via `openbrowser-ai -c` only, which executes raw CDP / JS through the daemon's Python namespace and never invokes a model. (The `-p` "prompt mode" of the CLI is a separate code path that loads `get_llm()` and requires an OpenAI / Anthropic / Google key. This skill explicitly avoids `-p`.)
+No separate API key is required. The host assistant does the reasoning. The packaged `openbrowser-ai web-search` and `openbrowser-ai -c` routes execute directly, and local MCP `execute_code` also runs without a separate key. The `-p` prompt mode is a separate optional route that uses the provider configured for the agent. This skill avoids `-p`.
 
 Set the headless env var so the daemon starts without a visible browser window. The daemon forces `headless=True` unless `OPENBROWSER_HEADLESS` is explicitly false; a config file alone does not opt into a visible window:
 
@@ -469,7 +470,7 @@ If any sub-question's partial file is missing or has <2 findings, fall through t
 
 ### 2.5. Step 2b -- Retry weak sub-questions with broader sub-agents
 
-If a sub-question came back with <2 findings, do NOT use `openbrowser-ai -p`. The `-p` mode requires an LLM API key (OpenAI / Anthropic / Google) because it runs the full Browser Agent loop with LLM-driven navigation,. This skill is `-c`-only by design: the daemon executes raw CDP / JS and needs no API key.
+If a sub-question came back with <2 findings, do NOT use `openbrowser-ai -p`. The `-p` mode runs the full Browser Agent loop with LLM-driven navigation through the optional provider configured for the agent. This skill is `-c`-only by design: the host assistant does the reasoning, and the daemon executes raw CDP / JS without a separate API key.
 
 Identify weak sub-questions, then dispatch a fresh round of parallel sub-agents (same `/dispatching-parallel-agents` pattern as Step 2a) with a broader prompt. The retry sub-agents reuse the same single-tab discipline and write to `agent-retry-NN.json` partials.
 
@@ -499,8 +500,9 @@ Project root: <PROJECT_ROOT>
 Hard constraints:
 
 - You own ONE tab. NEVER pass new_tab=True to navigate() after the first call.
-- Use openbrowser-ai -c only. NEVER use openbrowser-ai -p (it requires an LLM
-  API key and we explicitly avoid that path).
+- Use openbrowser-ai -c only. NEVER use openbrowser-ai -p. The -p route is a
+  separate optional configured-provider path. This -c workflow needs no
+  separate API key, and the host assistant does the reasoning.
 - The first-wave attempt failed: heuristic sentence picker returned <2 findings.
   This means the page text either had no high-overlap sentences for the question,
   or the SERP returned thin sources. Try one or more of:
@@ -837,7 +839,7 @@ fi
 - **Partial files as the contract:** sub-agents write to `$DEEP_RESEARCH_PARTIAL_DIR/agent-NN.json`, the orchestrator reads them back. Sub-agents do NOT communicate findings via stdout. If a partial file is missing or empty, that sub-agent failed; rerun it or fall through to Step 2b.
 - **`exact_url` normalization:** the merge accepts `exact_url` as an alias for `url`. All merge steps (Step 2a, 2b, 3) normalize this automatically. Step 4 has a final safety pass. Never rely on `url` being set before the merge step runs.
 - **Daemon restart recovery:** if the daemon restarts mid-session, `_plan`/`_findings`/`_sources` are lost from namespace. Partial JSON files under `$DEEP_RESEARCH_PARTIAL_DIR` survive. Source the same run environment and re-run the Step 2a merge block. Re-run Step 1 with the same `QUERY` and project root to restore `_plan`; the slug-collision bump avoids overwriting the existing output file.
-- **No `-p`, ever:** this skill never shells out to `openbrowser-ai -p`. The `-p` mode runs the full Browser Agent loop with LLM-driven navigation and requires an OpenAI / Anthropic / Google API key. The `-c` daemon path needs no API key. If you see `-p` anywhere in skill code, that is a bug.
+- **No `-p`, ever:** this skill never shells out to `openbrowser-ai -p`. The `-p` mode runs the full Browser Agent loop with LLM-driven navigation through the optional provider configured for the agent. The `-c` daemon path needs no separate API key, and the host assistant does the reasoning. If you see `-p` anywhere in skill code, that is a bug.
 - **Source diversity:** if dedup leaves <60% of findings (heavy domain repetition), rerun the affected sub-agent with explicit "prefer different domains than: <list>" appended to its prompt.
 - **Drilldown cost:** drilldown dispatches up to `len(sub_questions) * 3` extra parallel sub-agents. Reserve for genuinely deep topics.
 - **Rerun semantics:** rerunning Step 5 alone re-renders from current `_findings`, useful after manual edits.

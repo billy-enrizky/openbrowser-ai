@@ -2,6 +2,7 @@
 name: e2e-testing
 description: |
   Test web applications end-to-end by simulating user interactions and verifying expected outcomes.
+  Runs through keyless `openbrowser-ai -c` or local MCP code tools. No separate API key is required.
   Trigger when the user asks to: test a web app, verify a user flow, run end-to-end tests,
   QA a feature, check that a page works correctly, validate user journeys, or test a deployment.
 allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Read Write
@@ -31,6 +32,8 @@ Simulate real user interactions and verify web application behavior using Python
 These tests need a browser because they navigate, click, and inspect rendered state. OpenBrowser no-browser mode starts no Chrome, Blink, or V8 process, but it cannot run JavaScript, take screenshots, or use browser cookies, so it cannot replace the workflow below.
 
 All code runs via `openbrowser-ai -c`. The daemon starts automatically and persists variables across calls. Run `openbrowser-ai warm` once before a multi-call workflow to start the daemon and browser before the workflow begins. Most browser functions are async, use `await`. `list_downloads()`, `download_outcomes()`, and `download_failures()` are synchronous.
+
+`openbrowser-ai -c` needs no separate OpenAI, OpenBrowser, or MCP API key.
 
 The CLI daemon persists cookies and login state in the Chrome user-data directory at `~/.config/openbrowser/profiles/daemon`, so authenticated sessions can be reused across later runs. No `storage_state.json` file is written unless you configure one explicitly.
 

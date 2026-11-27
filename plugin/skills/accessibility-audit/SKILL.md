@@ -2,6 +2,7 @@
 name: accessibility-audit
 description: |
   Audit web pages for accessibility issues, WCAG compliance, and screen reader compatibility.
+  Runs through keyless `openbrowser-ai -c` or local MCP code tools. No separate API key is required.
   Trigger when the user asks to: check accessibility, run an a11y audit, test WCAG compliance,
   check screen reader support, audit ARIA attributes, verify keyboard navigation,
   find accessibility issues, or check for missing alt text or labels.
@@ -35,6 +36,8 @@ Audit web pages for accessibility issues following WCAG 2.1 guidelines using Pyt
 This audit reads the rendered DOM and runs JavaScript, so it needs the browser workflow. OpenBrowser no-browser mode (`openbrowser-ai scrape <url> --no-browser`) starts no Chrome, Blink, or V8 process, but it cannot run JavaScript, take screenshots, or use browser cookies, so it cannot perform these checks.
 
 All code runs via `openbrowser-ai -c`. The daemon starts automatically and persists variables across calls. Run `openbrowser-ai warm` once before a multi-call workflow to start the daemon and browser before the workflow begins. Most browser functions are async, use `await`. `list_downloads()`, `download_outcomes()`, and `download_failures()` are synchronous.
+
+`openbrowser-ai -c` needs no separate OpenAI, OpenBrowser, or MCP API key.
 
 The CLI daemon persists cookies and login state in the Chrome user-data directory at `~/.config/openbrowser/profiles/daemon`, so authenticated sessions can be reused across later runs. No `storage_state.json` file is written unless you configure one explicitly.
 

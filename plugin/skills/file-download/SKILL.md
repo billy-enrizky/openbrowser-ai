@@ -2,6 +2,7 @@
 name: file-download
 description: |
   Download files from websites, save PDFs, and read downloaded content.
+  Runs through keyless `openbrowser-ai -c` or local MCP code tools. No separate API key is required.
   Trigger when the user asks to: download a file, save a PDF, export a document,
   fetch a file from a URL, grab a report, download and read a PDF, or save page content as a file.
 allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Read Write
@@ -33,6 +34,8 @@ Download files from websites using the browser's authenticated session. Handles 
 Authenticated downloads need the browser session. OpenBrowser no-browser mode starts no Chrome, Blink, or V8 process, but it does not send browser cookies and cannot run JavaScript, so use `download_file()` for files that depend on a login.
 
 All code runs via `openbrowser-ai -c`. The daemon starts automatically and persists variables across calls. Run `openbrowser-ai warm` once before a multi-call workflow to start the daemon and browser before the workflow begins. Most browser functions are async, use `await`. `list_downloads()`, `download_outcomes()`, and `download_failures()` are synchronous.
+
+`openbrowser-ai -c` needs no separate OpenAI, OpenBrowser, or MCP API key.
 
 The CLI daemon persists cookies and login state in the Chrome user-data directory at `~/.config/openbrowser/profiles/daemon`, so authenticated sessions can be reused across later runs. No `storage_state.json` file is written unless you configure one explicitly.
 
