@@ -30,6 +30,7 @@ from .adapters.base import ArmResult, RunContext
 from .engine_preflight import configured_engine_pin
 from .engine_session import EngineSession
 from .resource_compare import (
+    SAMPLER_METHOD_VERSION,
     ProcessTreeSampler,
     arm_versions,
     binding_snapshot,
@@ -576,6 +577,7 @@ def run_warm_lane(
         header: dict = {
             "record_type": "run",
             "method": METHOD,
+            "sampler_method_version": SAMPLER_METHOD_VERSION,
             "arms": arms,
             "tasks": tasks,
             "samples": samples,
@@ -603,6 +605,7 @@ def run_warm_lane(
                     {
                         "record_type": "end",
                         "method": METHOD,
+                        "sampler_method_version": SAMPLER_METHOD_VERSION,
                         "observations": 0,
                         "expected_observations": expected_observations,
                         "failures": 0,
@@ -850,6 +853,7 @@ def run_warm_lane(
                         row = {
                             **record,
                             "record_type": "sample",
+                            "sampler_method_version": SAMPLER_METHOD_VERSION,
                             "order": entry.position,
                             "arm_order": list(entry.order),
                             "oracle_ok": oracle.ok,
@@ -947,6 +951,7 @@ def run_warm_lane(
             terminal = {
                 "record_type": "end",
                 "method": METHOD,
+                "sampler_method_version": SAMPLER_METHOD_VERSION,
                 "observations": len(records),
                 "expected_observations": expected_observations,
                 "failures": failures,

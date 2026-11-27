@@ -381,11 +381,15 @@ def test_all_four_warm_tasks_record_eligible_metrics(tmp_path):
     assert all(record["warm_peak_child_footprint_bytes"] == 60 for record in records)
     assert all(record["warm_task_tree_cpu_delta_seconds"] == 1.0 for record in records)
     assert all(record["latency_claim_allowed"] is False for record in records)
-    terminal = json.loads(output.read_text().splitlines()[-1])
+    lines = [json.loads(line) for line in output.read_text().splitlines()]
+    terminal = lines[-1]
     assert terminal["valid"] is True
     assert terminal["cleanup_verified"] is True
     assert terminal["provenance_verified"] is True
     assert terminal["observations"] == 8
+    assert terminal["sampler_method_version"] == warm.SAMPLER_METHOD_VERSION == 7
+    assert lines[0]["sampler_method_version"] == 7
+    assert all(record["sampler_method_version"] == 7 for record in records)
     assert all(session.closed for session in sessions)
 
 
@@ -629,7 +633,9 @@ def test_preflight_failure_writes_terminal_footer(tmp_path, monkeypatch):
     assert records == []
     lines = [json.loads(line) for line in output.read_text().splitlines()]
     assert lines[0]["preflight_error"] == "RuntimeError"
+    assert lines[0]["sampler_method_version"] == warm.SAMPLER_METHOD_VERSION == 7
     assert lines[-1]["valid"] is False
+    assert lines[-1]["sampler_method_version"] == 7
 
 
 def test_unverified_identity_and_invalid_metrics_reject_resource(tmp_path):
