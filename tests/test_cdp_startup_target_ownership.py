@@ -33,7 +33,10 @@ def no_native_io(monkeypatch):
     monkeypatch.setattr(psutil, "Process", denied)
 
 
-@pytest.mark.parametrize("ownership", ["owned", "missing", "foreign", "lookup_error", "global_only"])
+@pytest.mark.parametrize(
+    "ownership",
+    ["owned", "pending", "cancelled", "failed", "ack_error", "missing", "foreign", "lookup_error", "global_only"],
+)
 async def test_startup_uses_only_an_owned_live_session(ownership):
     session, mocks = _unconnected_session()
     root = mocks["cdp_root"]
@@ -42,10 +45,22 @@ async def test_startup_uses_only_an_owned_live_session(ownership):
         target.pop("attached")
     root.send.Target.getTargets = AsyncMock(return_value={"targetInfos": [target]})
     manager = _manager_for(mocks)
-    candidate = SimpleNamespace(cdp_client=root if ownership == "owned" else object())
-    manager.get_live_session_for_target = AsyncMock(
-        return_value=candidate if ownership in ("owned", "foreign") else None
-    )
+    owned = ownership in ("owned", "pending", "cancelled", "failed", "ack_error")
+    candidate = SimpleNamespace(cdp_client=root if owned else object(), session_id="automatic-session")
+    manager.get_live_session_for_target = AsyncMock(return_value=candidate if owned or ownership == "foreign" else None)
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def pending_ack(session_id):
+        assert session_id == "automatic-session"
+        entered.set()
+        await release.wait()
+        return True
+
+    manager.wait_for_auto_attach = AsyncMock(return_value=ownership != "failed")
+    if ownership in ("pending", "cancelled"):
+        manager.wait_for_auto_attach.side_effect = pending_ack
+    elif ownership == "ack_error":
+        manager.wait_for_auto_attach.side_effect = RuntimeError("ack unavailable")
     if ownership == "lookup_error":
         manager.get_live_session_for_target.side_effect = RuntimeError("lookup unavailable")
     with (
@@ -60,14 +75,105 @@ async def test_startup_uses_only_an_owned_live_session(ownership):
             AsyncMock(return_value=SimpleNamespace(session=mocks["cdp_session"], snapshot=None)),
         ),
     ):
-        await session.connect()
-    if ownership == "owned":
+        if ownership in ("pending", "cancelled"):
+            task = asyncio.create_task(session.connect())
+            try:
+                await asyncio.wait_for(entered.wait(), timeout=1.0)
+                assert not task.done()
+                root.send.Target.attachToTarget.assert_not_awaited()
+                if ownership == "cancelled":
+                    task.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await task
+                else:
+                    release.set()
+                    await task
+            finally:
+                release.set()
+                if not task.done():
+                    task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+        else:
+            await session.connect()
+    if ownership in ("owned", "pending", "cancelled"):
         root.send.Target.attachToTarget.assert_not_awaited()
         root.send.Target.setAutoAttach.assert_awaited_once()
     else:
         root.send.Target.attachToTarget.assert_awaited_once_with(
             params={"targetId": target["targetId"], "flatten": True}
         )
+    if owned:
+        manager.wait_for_auto_attach.assert_awaited_once_with("automatic-session")
+    else:
+        manager.wait_for_auto_attach.assert_not_awaited()
+
+
+@pytest.mark.parametrize("ack_succeeds", [True, False])
+async def test_startup_waits_for_real_manager_acknowledgment(ack_succeeds, monkeypatch):
+    session, mocks = _unconnected_session()
+    root = _make_mock_cdp_client()
+    root.send = mocks["cdp_root"].send
+    root.start = AsyncMock()
+    root.stop = AsyncMock()
+    manual_attach = AsyncMock(return_value={"sessionId": "manual-session"})
+    root.send.Target.attachToTarget = manual_attach
+    registry = EventRegistry()
+    root.register = CDPRegistrationLibrary(registry)
+    target = {**_page_target(), "attached": True}
+    pooled, listed, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def note_pool(*_):
+        pooled.set()
+
+    async def auto_attach(*, params, session_id=None):
+        if session_id is None:
+            await registry.handle_event(
+                "Target.attachedToTarget",
+                {"sessionId": "automatic-session", "targetInfo": target, "waitingForDebugger": False},
+            )
+            await pooled.wait()
+        elif session_id == "automatic-session":
+            await release.wait()
+            if not ack_succeeds:
+                raise RuntimeError("recursive attachment rejected")
+        return {}
+
+    async def list_targets():
+        listed.set()
+        return {"targetInfos": [target]}
+
+    root.send.Target.setAutoAttach = AsyncMock(side_effect=auto_attach)
+    root.send.Target.getTargets = AsyncMock(side_effect=list_targets)
+    monkeypatch.setattr(session, "_handle_attached_session", AsyncMock(side_effect=note_pool))
+    with (
+        patch("openbrowser.browser.session.CDPClient", return_value=root),
+        patch.object(BrowserSession, "_setup_proxy_auth", AsyncMock()),
+        patch.object(BrowserSession, "_read_document_identity", AsyncMock(return_value=None)),
+        patch.object(BrowserSession, "_notify_focus_changed", AsyncMock()),
+        patch.object(
+            BrowserSession,
+            "_focus_transition_to_target",
+            AsyncMock(return_value=SimpleNamespace(session=mocks["cdp_session"], snapshot=None)),
+        ),
+    ):
+        task = asyncio.create_task(session.connect())
+        try:
+            await asyncio.wait_for(listed.wait(), timeout=1.0)
+            assert not task.done()
+            manual_attach.assert_not_awaited()
+            release.set()
+            await asyncio.wait_for(task, timeout=1.0)
+            if ack_succeeds:
+                manual_attach.assert_not_awaited()
+            else:
+                manual_attach.assert_awaited_once_with(params={"targetId": target["targetId"], "flatten": True})
+        finally:
+            release.set()
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            if session._session_manager is not None:
+                await session._session_manager.clear()
 
 
 @pytest.mark.parametrize("mode", ["lightweight", "no-render", "proxy"])

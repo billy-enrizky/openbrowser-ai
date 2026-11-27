@@ -6053,7 +6053,11 @@ class BrowserSession(BaseModel):
 					if target.get('attached') is True:
 						try:
 							existing = await attempt_manager.get_live_session_for_target(target_id)
-							if existing is not None and existing.cdp_client is attempt_root:
+							if (
+								existing is not None
+								and existing.cdp_client is attempt_root
+								and await attempt_manager.wait_for_auto_attach(existing.session_id) is True
+							):
 								continue
 						except Exception as lookup_error:
 							self.logger.debug('Initial target session lookup failed: %s', type(lookup_error).__name__)
