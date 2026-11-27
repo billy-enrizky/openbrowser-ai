@@ -145,6 +145,23 @@ class FakeProcess:
         return SimpleNamespace(user=self.cpu, system=0.0)
 
 
+class DiscoveryProcess:
+    def __init__(self, pid, command, created_at: Any = 1.0):
+        self.pid = pid
+        self._command = command
+        self._created_at = created_at
+
+    def cmdline(self):
+        if callable(self._command):
+            return self._command()
+        return list(self._command)
+
+    def create_time(self):
+        if callable(self._created_at):
+            return self._created_at()
+        return self._created_at
+
+
 def fake_sampler(module, processes, root=10, marker=None):
     def lookup(pid):
         if pid not in processes:
@@ -749,7 +766,7 @@ def test_source_manifest_separates_harness_and_application_content(monkeypatch, 
     assert first["harness_digest"] == second["harness_digest"]
     assert first["expected_app_digest"] != second["expected_app_digest"]
     assert first["source_digest"] != second["source_digest"]
-    assert first["sampler_method_version"] == module.SAMPLER_METHOD_VERSION == 5
+    assert first["sampler_method_version"] == module.SAMPLER_METHOD_VERSION == 6
     assert first["configuration_digest"] == second["configuration_digest"]
 
 
@@ -774,20 +791,19 @@ def test_cleanup_finds_a_marked_orphan_created_as_its_parent_exits(monkeypatch):
     child.terminate = terminate
     orphan.terminate = lambda: None
     orphan.kill = lambda: processes.pop(30, None)
-    monkeypatch.setattr(
-        module.psutil,
-        "process_iter",
-        lambda attrs: [
-            SimpleNamespace(
-                pid=pid,
-                info={
-                    "create_time": process.created_at,
-                    "cmdline": [process.executable, "--user-data-dir=" + (marker if pid == 30 else "/other")],
-                },
+
+    def process_iter(attrs):
+        assert attrs == ["pid"]
+        return [
+            DiscoveryProcess(
+                pid,
+                [process.executable, "--user-data-dir=" + (marker if pid == 30 else "/other")],
+                process.created_at,
             )
             for pid, process in processes.items()
-        ],
-    )
+        ]
+
+    monkeypatch.setattr(module.psutil, "process_iter", process_iter)
     fake_clock(monkeypatch, module)
 
     result = module.cleanup_owned(sampler, interval=0.1, timeout=1.0)
@@ -796,6 +812,159 @@ def test_cleanup_finds_a_marked_orphan_created_as_its_parent_exits(monkeypatch):
     assert set(processes) == {40}
     evidence = next(item for item in sampler.result()["processes"] if item["pid"] == 30)
     assert evidence["observed_during_native_run"] is False
+
+
+def test_discover_orphans_latches_iterator_oserror_as_unknown(monkeypatch):
+    module = resource_module()
+    marker = "/tmp/resource-owned-abcdef/runs"
+    sampler = fake_sampler(module, {}, root=10, marker=marker)
+
+    def fail_iter(attrs):
+        assert attrs == ["pid"]
+        if False:
+            yield None
+        raise OSError(0, "Undefined error: 0 (originated from sysctl(KERN_PROCARGS2))")
+
+    monkeypatch.setattr(module.psutil, "process_iter", fail_iter)
+    sampler.discover_orphans()
+    first = sampler.result()
+
+    assert first["fatal_read_errors"] == 1
+    assert first["unverified_processes"] == 1
+    assert first["cleanup_unverified_processes"] == 1
+    assert first["fatal_read_identities"] == [{"pid": None, "created_at": None}]
+    detail = first["read_error_details"][0]
+    assert detail["pid"] is None
+    assert detail["created_at"] is None
+    assert detail["operation"] == "process_iter"
+    assert detail["phase"] == "orphan_discovery"
+    assert detail["error_type"] == "OSError"
+    assert detail["errno"] == 0
+    assert detail["resolution"] == "unknown"
+    assert detail["resolution_source"] == "discovery_scan"
+    assert "error" not in detail
+
+    monkeypatch.setattr(module.psutil, "process_iter", lambda attrs: [])
+    sampler.discover_orphans()
+    second = sampler.result()
+    assert second["fatal_read_errors"] == 1
+    assert second["unverified_processes"] == 1
+    assert second["cleanup_unverified_processes"] == 0
+
+
+def test_discover_orphans_records_cmdline_oserror_with_known_pid(monkeypatch):
+    module = resource_module()
+    marker = "/tmp/resource-owned-abcdef/runs"
+    sampler = fake_sampler(module, {}, root=10, marker=marker)
+
+    def fail_cmdline():
+        raise OSError(0, "Undefined error: 0 (originated from sysctl(KERN_PROCARGS2))")
+
+    process = DiscoveryProcess(20, fail_cmdline, lambda: pytest.fail("create_time must not run"))
+    monkeypatch.setattr(module.psutil, "process_iter", lambda attrs: [process])
+    sampler.discover_orphans()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    assert result["unverified_processes"] == 1
+    assert result["cleanup_unverified_processes"] == 1
+    assert result["fatal_read_identities"] == [{"pid": 20, "created_at": None}]
+    assert 20 in sampler._marker_unverified
+    assert all(pid != 20 for pid, _ in sampler._known)
+    detail = result["read_error_details"][0]
+    assert detail["pid"] == 20
+    assert detail["created_at"] is None
+    assert detail["operation"] == "cmdline"
+    assert detail["resolution"] == "unknown"
+    assert detail["resolution_source"] == "discovery_scan"
+
+
+def test_discover_orphans_records_owned_create_time_failure(monkeypatch):
+    module = resource_module()
+    marker = "/tmp/resource-owned-abcdef/runs"
+    sampler = fake_sampler(module, {}, root=10, marker=marker)
+
+    def fail_time():
+        raise OSError(0, "create time unavailable")
+
+    process = DiscoveryProcess(30, ["Chrome", f"--user-data-dir={marker}"], fail_time)
+    monkeypatch.setattr(module.psutil, "process_iter", lambda attrs: [process])
+    sampler.discover_orphans()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    assert result["unverified_processes"] == 1
+    assert result["cleanup_unverified_processes"] == 1
+    assert 30 in sampler._marker_unverified
+    assert all(pid != 30 for pid, _ in sampler._known)
+    detail = result["read_error_details"][0]
+    assert detail["pid"] == 30
+    assert detail["created_at"] is None
+    assert detail["operation"] == "create_time"
+    assert detail["resolution"] == "unknown"
+    assert detail["resolution_source"] == "discovery_scan"
+
+
+def test_discover_orphans_accepts_only_marker_matches(monkeypatch):
+    module = resource_module()
+    marker = "/tmp/resource-owned-abcdef/runs"
+    sampler = fake_sampler(module, {}, root=10, marker=marker)
+    matched = DiscoveryProcess(40, ["Chrome", f"--user-data-dir={marker}"], 4.5)
+    unrelated = DiscoveryProcess(41, ["Chrome", "--user-data-dir=/other"], 5.0)
+    monkeypatch.setattr(module.psutil, "process_iter", lambda attrs: [matched, unrelated])
+
+    sampler.discover_orphans()
+
+    result = sampler.result()
+    assert (40, 4.5) in sampler._known
+    assert (41, 5.0) not in sampler._known
+    assert result["read_errors"] == 0
+    assert result["fatal_read_errors"] == 0
+    assert result["unverified_processes"] == 0
+    assert result["cleanup_unverified_processes"] == 0
+
+
+@pytest.mark.parametrize(
+    ("exception_name", "expect_unverified"),
+    [("AccessDenied", True), ("NoSuchProcess", False), ("ZombieProcess", False)],
+)
+def test_discover_orphans_preserves_handled_exception_policy(monkeypatch, exception_name, expect_unverified):
+    module = resource_module()
+    marker = "/tmp/resource-owned-abcdef/runs"
+    sampler = fake_sampler(module, {}, root=10, marker=marker)
+
+    def fail_cmdline():
+        raise getattr(module.psutil, exception_name)(50)
+
+    process = DiscoveryProcess(50, fail_cmdline, lambda: pytest.fail("create_time must not run"))
+    monkeypatch.setattr(module.psutil, "process_iter", lambda attrs: [process])
+    sampler.discover_orphans()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 0
+    assert (50 in sampler._marker_unverified) is expect_unverified
+    assert result["cleanup_unverified_processes"] == int(expect_unverified)
+
+
+def test_cleanup_reports_discovery_oserror_without_escaping(monkeypatch):
+    module = resource_module()
+    marker = "/tmp/resource-owned-abcdef/runs"
+    sampler = fake_sampler(module, {}, root=10, marker=marker)
+
+    def fail_iter(attrs):
+        assert attrs == ["pid"]
+        if False:
+            yield None
+        raise OSError(0, "Undefined error: 0 (originated from sysctl(KERN_PROCARGS2))")
+
+    monkeypatch.setattr(module.psutil, "process_iter", fail_iter)
+    fake_clock(monkeypatch, module)
+
+    result = module.cleanup_owned(sampler, interval=0.05, timeout=0.1)
+
+    assert result["verified"] is False
+    assert result["unverified_processes"] == 1
+    assert sampler.result()["fatal_read_errors"] >= 1
 
 
 @pytest.mark.parametrize(
@@ -1290,7 +1459,7 @@ def test_sampler_skips_cmdline_for_non_browser_processes():
     result = sampler.result()
     assert calls == []
     assert result["fatal_read_errors"] == 0
-    assert result["sampler_method_version"] == module.SAMPLER_METHOD_VERSION == 5
+    assert result["sampler_method_version"] == module.SAMPLER_METHOD_VERSION == 6
 
 
 def test_sampler_skips_cmdline_for_helper_and_crashpad():

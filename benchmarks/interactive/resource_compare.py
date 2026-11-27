@@ -37,9 +37,9 @@ MODULE = "benchmarks.interactive.resource_compare"
 LOGGER = logging.getLogger(__name__)
 DEFAULT_WORKDIR = Path("/tmp") if os.name != "nt" else Path(tempfile.gettempdir())
 SAMPLE_PREFIX = "r-"
-SAMPLER_METHOD_VERSION = 5
+SAMPLER_METHOD_VERSION = 6
 MAX_READ_ERROR_DETAILS = 32
-_RESOLUTION_SOURCES = frozenset({"read_exception", "identity_fence", "memory_task_fence"})
+_RESOLUTION_SOURCES = frozenset({"read_exception", "identity_fence", "memory_task_fence", "discovery_scan"})
 _MEMORY_TASK_VERIFICATIONS = frozenset(
     {
         "not_run",
@@ -54,6 +54,19 @@ _MEMORY_TASK_VERIFICATIONS = frozenset(
         "unknown",
     }
 )
+ReadIdentity = tuple[int | None, float | None]
+
+
+def _read_identity_sort_key(identity: ReadIdentity) -> tuple[bool, int, bool, float]:
+    pid, created_at = identity
+    try:
+        created_order = float(created_at) if created_at is not None else 0.0
+    except (OverflowError, TypeError, ValueError):
+        created_order = 0.0
+    if not math.isfinite(created_order):
+        created_order = 0.0
+    return (pid is None, pid if pid is not None else 0, created_at is None, created_order)
+
 
 DEFAULT_ARMS = list(CANONICAL_ARMS)
 METRICS = (
@@ -103,13 +116,13 @@ class ResourceLedger:
         self.read_resolutions: dict[str, int] = {}
         self.read_error_details: list[dict] = []
         self.read_error_details_truncated = 0
-        self.fatal_read_identities: set[tuple[int, float]] = set()
+        self.fatal_read_identities: set[ReadIdentity] = set()
 
     def note_read_error(
         self,
         error: BaseException,
         *,
-        identity: tuple[int, float],
+        identity: ReadIdentity | None,
         operation: str,
         phase: str,
         sample_index: int,
@@ -119,6 +132,7 @@ class ResourceLedger:
         memory_task_verification: str = "not_run",
     ) -> bool:
         self.read_errors += 1
+        identity = (None, None) if identity is None else identity
         name = type(error).__name__
         errno_value = getattr(error, "errno", None)
         if isinstance(errno_value, bool) or not isinstance(errno_value, int):
@@ -227,7 +241,8 @@ class ResourceLedger:
             "read_error_details": list(self.read_error_details),
             "read_error_details_truncated": self.read_error_details_truncated,
             "fatal_read_identities": [
-                {"pid": pid, "created_at": created_at} for pid, created_at in sorted(self.fatal_read_identities)
+                {"pid": pid, "created_at": created_at}
+                for pid, created_at in sorted(self.fatal_read_identities, key=_read_identity_sort_key)
             ],
             "rss_accounting": "sampled_sum_includes_worker_shared_pages_may_repeat",
         }
@@ -310,6 +325,7 @@ class ProcessTreeSampler:
             raise ValueError("The ownership marker must be a private absolute run path")
         self._ownership_marker = ownership_marker
         self._marker_unverified: set[int] = set()
+        self._discovery_unverified = False
         self._process = process_factory or psutil.Process
         self._footprint = footprint_reader if footprint_reader is not None else make_footprint_reader()
         try:
@@ -435,24 +451,67 @@ class ProcessTreeSampler:
             memory_task_verification=memory_task_verification,
         )
 
+    def _note_discovery_error(
+        self,
+        error: BaseException,
+        *,
+        operation: str,
+        identity: ReadIdentity | None,
+    ) -> None:
+        normalized_identity = (None, None) if identity is None else identity
+        pid = normalized_identity[0]
+        if _valid_pid(pid):
+            assert isinstance(pid, int)
+            self._marker_unverified.add(pid)
+        else:
+            self._discovery_unverified = True
+        self._ledger.note_read_error(
+            error,
+            identity=normalized_identity,
+            operation=operation,
+            phase="orphan_discovery",
+            sample_index=self._ledger.samples,
+            resolution="unknown",
+            resolution_source="discovery_scan",
+        )
+
     def discover_orphans(self) -> None:
         """Recover visible profile-marked children that escaped ancestry sampling."""
         if self._ownership_marker is None:
             return
         self._marker_unverified.clear()
-        for process in psutil.process_iter(["pid", "cmdline", "create_time"]):
-            try:
-                command = process.info.get("cmdline") or []
-                if process.pid == os.getpid() or not any(self._ownership_marker in value for value in command):
+        self._discovery_unverified = False
+        try:
+            processes = psutil.process_iter(["pid"])
+            for process in processes:
+                try:
+                    pid = process.pid
+                except Exception as error:
+                    self._note_discovery_error(error, operation="pid", identity=None)
                     continue
-                created = process.info.get("create_time")
-                if created is None:
+                if not _valid_pid(pid):
+                    self._note_discovery_error(ValueError("invalid process id"), operation="pid", identity=None)
+                    continue
+                operation = "cmdline"
+                try:
+                    command = process.cmdline()
+                    if not isinstance(command, (list, tuple)) or not all(isinstance(value, str) for value in command):
+                        raise TypeError("process command line is malformed")
+                    if pid == os.getpid() or not any(self._ownership_marker in value for value in command):
+                        continue
+                    operation = "create_time"
                     created = process.create_time()
-                self._known.add((process.pid, created))
-            except (psutil.NoSuchProcess, psutil.ZombieProcess):
-                continue
-            except psutil.AccessDenied:
-                self._marker_unverified.add(process.pid)
+                    if not _valid_create_time(created):
+                        raise ValueError("process create time is invalid")
+                    self._known.add((pid, float(created)))
+                except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                    continue
+                except psutil.AccessDenied:
+                    self._marker_unverified.add(pid)
+                except Exception as error:
+                    self._note_discovery_error(error, operation=operation, identity=(pid, None))
+        except Exception as error:
+            self._note_discovery_error(error, operation="process_iter", identity=None)
 
     def live_processes(self, *, phase: str = "native_run") -> dict[tuple[int, float], Any]:
         self._unverified.clear()
@@ -561,11 +620,19 @@ class ProcessTreeSampler:
 
     def result(self) -> dict:
         live_unknown = {pid for pid, _ in self._unverified} | self._marker_unverified
-        observation_unknown = live_unknown | {pid for pid, _ in self._ledger.fatal_read_identities}
+        fatal_pids = {pid for pid, _ in self._ledger.fatal_read_identities if _valid_pid(pid)}
+        observation_unknown = live_unknown | fatal_pids
+        unidentified_fatal = any(pid is None for pid, _ in self._ledger.fatal_read_identities)
+        observation_count = len(observation_unknown)
+        if unidentified_fatal or self._discovery_unverified:
+            observation_count += 1
+        cleanup_count = len(live_unknown)
+        if self._discovery_unverified:
+            cleanup_count += 1
         return {
             **self._ledger.result(),
-            "unverified_processes": len(observation_unknown),
-            "cleanup_unverified_processes": len(live_unknown),
+            "unverified_processes": observation_count,
+            "cleanup_unverified_processes": cleanup_count,
         }
 
 
