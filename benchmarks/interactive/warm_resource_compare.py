@@ -172,19 +172,31 @@ def _native_request(arm: str, ready: dict, scope: NativeRunScope) -> NativeServi
         arm_value = NativeArm(arm)
     except ValueError as error:
         raise ValueError("native_service_arm") from error
-    executable = _expected_service_executable(arm, ready.get("binary"))
+    native = ready.get("native")
+    if not isinstance(native, dict):
+        raise ValueError("native_service_source")
+    expected_kind = (
+        "popen"
+        if arm in _MCP_ARMS
+        else "native_status"
+        if arm == "playwright-cli"
+        else "pid_file"
+        if arm in _FILE_SERVICE_ARMS
+        else None
+    )
+    if expected_kind is None or native.get("kind") != expected_kind:
+        raise ValueError("native_service_source")
+    binary = native.get("binary")
+    executable = _expected_service_executable(arm, binary)
     native_identity = None
     if arm not in _FILE_SERVICE_ARMS:
-        native = ready.get("native")
-        if not isinstance(native, dict):
-            raise ValueError("native_service_source")
         pid = native.get("pid")
         created_at = native.get("created_at")
         if type(pid) is not int or pid <= 0 or not _valid_service_time(created_at):
             raise ValueError("native_service_source")
         assert type(created_at) is int or type(created_at) is float
         native_identity = ServiceIdentity(pid, created_at)
-    daemon_entry = _playwright_cli_daemon_entry(ready.get("binary")) if arm == "playwright-cli" else None
+    daemon_entry = _playwright_cli_daemon_entry(binary) if arm == "playwright-cli" else None
     return NativeServiceRequest(
         arm=arm_value,
         scope=scope,
@@ -304,7 +316,7 @@ def _service_read_evidence(read: Any) -> dict:
     }
 
 
-def _write_private_evidence(directory: Path, name: str, payload: dict) -> str:
+def _write_private_evidence(directory: Path, name: str, payload: object) -> str:
     data = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / name
@@ -355,6 +367,16 @@ def _fresh_identity(pid: int) -> ServiceIdentity:
 
 def _session_identity(session: Any) -> ServiceIdentity:
     return _fresh_identity(session.pid)
+
+
+def _worker_identity_payload(session: Any, identity: ServiceIdentity | None, error_type: str | None) -> dict:
+    handle_pid = getattr(session, "pid", None)
+    known_pid = handle_pid if type(handle_pid) is int and handle_pid > 0 else None
+    return {
+        "pid": identity.pid if identity is not None else known_pid,
+        "created_at": identity.created_at if identity is not None else None,
+        "error": error_type,
+    }
 
 
 class _WarmNativeRoot:
@@ -1043,6 +1065,8 @@ def run_warm_lane(
         owned_scopes: dict[str, str] = {}
         native_root_pending: set[str] = set(arms)
         native_ready_failures: dict[str, dict] = {}
+        worker_facts: dict[str, dict] = {}
+        worker_envelopes: dict[str, dict] = {}
         retired_arms: set[str] = set()
         retired_workers: dict[str, dict] = {}
         setup_error: str | None = None
@@ -1055,6 +1079,20 @@ def run_warm_lane(
                     owned_scopes[arm] = str(owned)
                     session = session_factory(arm, owned, diagnostics)
                     sessions[arm] = session
+                    worker_identity = None
+                    worker_identity_error = None
+                    try:
+                        worker_identity = worker_identity_for(session)
+                    except Exception as error:
+                        worker_identity_error = type(error).__name__
+                    identity_payload = _worker_identity_payload(session, worker_identity, worker_identity_error)
+                    identity_name = f"worker-identity-{arm}.json"
+                    identity_sha256 = _write_private_evidence(diagnostics, identity_name, identity_payload)
+                    worker_facts[arm] = {
+                        **identity_payload,
+                        "artifact": identity_name,
+                        "sha256": identity_sha256,
+                    }
                     lane_samplers[arm] = _make_owned_sampler(
                         session.pid,
                         str(owned),
@@ -1062,16 +1100,33 @@ def run_warm_lane(
                         controller,
                     )
                     _sample_tree(lane_samplers[arm])
-                    ready = session.receive(worker_timeout)
+                    try:
+                        ready = session.receive(worker_timeout)
+                    except Exception as error:
+                        worker_envelopes[arm] = {"present": False, "error": type(error).__name__}
+                        raise
+                    envelope_name = f"worker-ready-{arm}.json"
+                    envelope_sha256 = _write_private_evidence(diagnostics, envelope_name, ready)
+                    worker_envelopes[arm] = {
+                        "present": True,
+                        "type": ready.get("type")
+                        if isinstance(ready, dict) and isinstance(ready.get("type"), str)
+                        else None,
+                        "artifact": envelope_name,
+                        "sha256": envelope_sha256,
+                    }
+                    if not isinstance(ready, dict):
+                        raise ValueError("worker_ready")
                     if ready.get("type") == "fatal":
                         raise RuntimeError(f"{arm} warmup failed: {ready.get('error')}")
                     if ready.get("type") != "ready":
                         raise RuntimeError(f"{arm} did not become ready")
+                    if worker_identity is None:
+                        raise ValueError("worker_identity")
                     root = _validated_root(ready.get("root"), workdir, expected=owned)
                     downloads = _validated_downloads(ready.get("downloads"), root)
                     if Path(downloads).resolve() != (owned / "downloads").resolve():
                         raise ValueError("ready downloads does not match the preallocated arm scope")
-                    worker_identity = worker_identity_for(session)
                     scope = _native_run_scope(root, ready.get("session"))
                     native_root = native_root_factory(
                         arm,
@@ -1536,6 +1591,8 @@ def run_warm_lane(
                 "expected_observations": expected_observations,
                 "failures": failures,
                 "warmups": warmups,
+                "worker_facts": worker_facts,
+                "worker_envelopes": worker_envelopes,
                 "cleanup": cleanup_reports,
                 "retired_workers": retired_workers,
                 "fixture_errors": fixture_errors,

@@ -1366,7 +1366,11 @@ def test_native_request_maps_all_seven_native_sources(monkeypatch):
     monkeypatch.setattr(warm, "_playwright_cli_daemon_entry", lambda binary: "/expected/cliDaemon.js")
     scope = warm._native_run_scope("/tmp/owned", "session-1")
     for arm in warm.DEFAULT_ARMS:
-        ready = {"binary": "/declared/launcher", "native": {"pid": 123, "created_at": 10.5}}
+        kind = "popen" if arm in warm._MCP_ARMS else "native_status" if arm == "playwright-cli" else "pid_file"
+        native: dict[str, object] = {"kind": kind, "binary": "/declared/launcher"}
+        if arm not in warm._FILE_SERVICE_ARMS:
+            native.update(pid=123, created_at=10.5)
+        ready = {"native": native}
         request = warm._native_request(arm, ready, scope)
         if arm in warm._FILE_SERVICE_ARMS:
             assert request.native_identity is None
@@ -1381,8 +1385,13 @@ def test_native_request_requires_direct_pid_and_create_time(arm, monkeypatch):
     monkeypatch.setattr(warm, "_expected_service_executable", lambda arm, binary: "/expected/native")
     monkeypatch.setattr(warm, "_playwright_cli_daemon_entry", lambda binary: "/expected/cliDaemon.js")
     scope = warm._native_run_scope("/tmp/owned", "session-1")
+    kind = "popen" if arm in warm._MCP_ARMS else "native_status"
     with pytest.raises(ValueError, match="native_service_source"):
-        warm._native_request(arm, {"binary": "/declared/launcher", "native": {}}, scope)
+        warm._native_request(
+            arm,
+            {"native": {"kind": kind, "binary": "/declared/launcher"}},
+            scope,
+        )
 
 
 def test_worker_native_source_serializes_mcp_popen(monkeypatch):
@@ -2617,3 +2626,268 @@ def test_unknown_native_continuity_aborts_later_tasks(tmp_path):
     assert terminal["observations"] == 1
     assert terminal["aborted"] is True
     assert terminal["cleanup_verified"] is False
+
+
+def test_native_request_rejects_kind_mismatch(monkeypatch):
+    monkeypatch.setattr(warm, "_expected_service_executable", lambda arm, binary: "/expected/native")
+    scope = warm._native_run_scope("/tmp/owned", "session-1")
+    with pytest.raises(ValueError, match="native_service_source"):
+        warm._native_request(
+            "openbrowser-fast",
+            {"native": {"kind": "popen", "binary": "/declared/launcher"}},
+            scope,
+        )
+
+
+def test_native_request_nested_binary_wins_over_top_level(monkeypatch):
+    seen = {}
+
+    def capture(arm, binary):
+        seen["binary"] = binary
+        return "/expected/native"
+
+    monkeypatch.setattr(warm, "_expected_service_executable", capture)
+    scope = warm._native_run_scope("/tmp/owned", "session-1")
+    request = warm._native_request(
+        "openbrowser-fast",
+        {
+            "binary": "/wrong/top-level",
+            "native": {"kind": "pid_file", "binary": "/right/nested"},
+        },
+        scope,
+    )
+    assert seen["binary"] == "/right/nested"
+    assert request.executable == "/expected/native"
+
+
+_SIMPLE_ENTRY = """
+import sys
+from openbrowser.cli_entry import cli
+if __name__ == "__main__":
+    sys.exit(cli())
+"""
+
+
+def _roundtrip_paths(tmp_path: Path, arm: str, node: Path):
+    if arm in warm._OPENBROWSER_ARMS:
+        interpreter = tmp_path / "python3"
+        interpreter.write_bytes(b"")
+        interpreter.chmod(0o755)
+        binary = tmp_path / f"{arm}-bin"
+        binary.write_text(f"#!{interpreter}\n{_SIMPLE_ENTRY}")
+        binary.chmod(0o755)
+        return str(binary.resolve()), str(interpreter.resolve()), None
+    if arm == "browser-use":
+        interpreter = tmp_path / f"{arm}-interpreter"
+        interpreter.write_bytes(b"")
+        interpreter.chmod(0o755)
+        binary = tmp_path / f"{arm}-bin"
+        binary.write_text(f"#!{interpreter}\n")
+        binary.chmod(0o755)
+        return str(binary.resolve()), str(interpreter.resolve()), None
+    if arm == "agent-browser":
+        binary = tmp_path / f"{arm}-bin"
+        binary.write_bytes(b"")
+        binary.chmod(0o755)
+        return str(binary.resolve()), str(binary.resolve()), None
+    if arm == "playwright-cli":
+        base = tmp_path / "pw"
+        binary = base / "a/b/c/playwright-cli"
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b"")
+        daemon = base / "a/playwright-core/lib/entry/cliDaemon.js"
+        daemon.parent.mkdir(parents=True)
+        daemon.write_bytes(b"")
+        return str(binary.resolve()), str(node.resolve()), str(daemon.resolve())
+    binary = tmp_path / f"{arm}-bin"
+    binary.write_bytes(b"")
+    return str(binary.resolve()), str(node.resolve()), None
+
+
+@pytest.mark.parametrize("arm", warm.DEFAULT_ARMS)
+def test_run_worker_ready_roundtrips_through_native_request(tmp_path, monkeypatch, capsys, arm):
+    node = tmp_path / "node"
+    node.write_bytes(b"")
+    node.chmod(0o755)
+    binary, expected_executable, expected_daemon = _roundtrip_paths(tmp_path, arm, node)
+
+    class Arm:
+        def __init__(self):
+            self.binary = binary
+            if arm in warm._MCP_ARMS:
+                self._client = SimpleNamespace(process=SimpleNamespace(pid=1234))
+            if arm == "playwright-cli":
+                self.session_pid = 1234
+
+        def warmup(self, ctx):
+            return {"browser_version": "test"}, 1.0
+
+        def cleanup(self, ctx):
+            return None
+
+    class Engine:
+        def __init__(self, pin):
+            self.pin = pin
+
+        def capture_warm(self, arm, ctx):
+            return None
+
+    class Inbox:
+        def next(self):
+            return {"type": "finish"}
+
+    ctx = SimpleNamespace(
+        root=Path(tmp_path),
+        downloads=Path(tmp_path) / "downloads",
+        session="session-1",
+        task="",
+        sample=0,
+        base_url="",
+    )
+    monkeypatch.setattr(warm, "make_arm", lambda name: Arm())
+    monkeypatch.setattr(warm, "make_owned_context", lambda workdir, name: ctx)
+    monkeypatch.setattr(warm, "EngineSession", Engine)
+    monkeypatch.setattr(warm, "_WorkerInbox", Inbox)
+    monkeypatch.setattr(warm.psutil, "Process", lambda pid: SimpleNamespace(create_time=lambda: 10.5))
+    monkeypatch.setattr(warm.shutil, "which", lambda name, path=None: str(node))
+
+    assert warm.run_worker(arm, tmp_path) == 0
+    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.strip()]
+    ready = next(line for line in lines if line.get("type") == "ready")
+    scope = warm._native_run_scope(ready["root"], ready["session"])
+    request = warm._native_request(arm, ready, scope)
+
+    assert request.executable == expected_executable
+    assert request.daemon_entry == expected_daemon
+    if arm in warm._FILE_SERVICE_ARMS:
+        assert request.native_identity is None
+    else:
+        assert request.native_identity == ServiceIdentity(1234, 10.5)
+
+
+def test_fatal_ready_envelope_and_worker_fact_are_retained(tmp_path):
+    class FatalSession(FakeSession):
+        def __init__(self, arm, workdir, **kwargs):
+            super().__init__(arm, workdir, **kwargs)
+            self.inbox.queue.clear()
+            self.inbox.put({"type": "fatal", "error": "boom"})
+
+    created = []
+
+    def factory(arm, workdir, diagnostics):
+        session = FatalSession(arm, Path(workdir))
+        created.append(session)
+        return session
+
+    output, records, _sessions = run_lane(
+        tmp_path,
+        arms=("a",),
+        session_factory=factory,
+    )
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    envelope = terminal["worker_envelopes"]["a"]
+    artifact = output.parent / f"{output.stem}.diagnostics" / envelope["artifact"]
+    fact = terminal["worker_facts"]["a"]
+
+    assert records == []
+    assert terminal["setup_error"] == "RuntimeError"
+    assert envelope["type"] == "fatal"
+    assert envelope["sha256"] == hashlib.sha256(artifact.read_bytes()).hexdigest()
+    identity_artifact = output.parent / f"{output.stem}.diagnostics" / fact["artifact"]
+    assert fact["pid"] == created[0].pid
+    assert fact["created_at"] == float(created[0].pid)
+    assert fact["sha256"] == hashlib.sha256(identity_artifact.read_bytes()).hexdigest()
+    assert terminal["native_root_pending"]["a"]["scope_preserved"] is True
+    assert terminal["cleanup"]["a"]["scope_preserved"] is True
+
+
+def test_worker_identity_create_time_failure_retains_known_pid(tmp_path):
+    def broken(session):
+        raise OSError("create time read failed")
+
+    output, _records, sessions = run_lane(
+        tmp_path,
+        arms=("a",),
+        worker_identity_factory=broken,
+    )
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    fact = terminal["worker_facts"]["a"]
+    payload = json.loads((output.parent / f"{output.stem}.diagnostics" / fact["artifact"]).read_text())
+
+    assert terminal["setup_error"] == "ValueError"
+    assert fact["pid"] == sessions[0].pid
+    assert fact["created_at"] is None
+    assert fact["error"] == "OSError"
+    assert payload == {"pid": sessions[0].pid, "created_at": None, "error": "OSError"}
+    assert terminal["worker_envelopes"]["a"]["type"] == "ready"
+
+
+@pytest.mark.parametrize("handle_pid", [None, True, -1, 0, "42", 42.0])
+def test_worker_identity_payload_nulls_malformed_handle_pid(handle_pid):
+    session = SimpleNamespace(pid=handle_pid)
+    payload = warm._worker_identity_payload(session, None, "OSError")
+    assert payload == {"pid": None, "created_at": None, "error": "OSError"}
+
+
+def test_missing_binary_envelope_is_retained_with_pending_scope(tmp_path):
+    output, records, _sessions = run_lane(
+        tmp_path,
+        arms=("openbrowser-fast",),
+        native_root_factory=warm._default_native_root,
+        ready_extra_factory=lambda arm: {"native": {"kind": "pid_file", "binary": None}},
+    )
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    envelope = terminal["worker_envelopes"]["openbrowser-fast"]
+    artifact = output.parent / f"{output.stem}.diagnostics" / envelope["artifact"]
+
+    assert records == []
+    assert terminal["setup_error"] == "ValueError"
+    assert envelope["type"] == "ready"
+    assert envelope["sha256"] == hashlib.sha256(artifact.read_bytes()).hexdigest()
+    assert terminal["native_root_pending"]["openbrowser-fast"]["scope_preserved"] is True
+    assert terminal["cleanup"]["openbrowser-fast"]["scope_preserved"] is True
+
+
+def test_valid_ready_passes_worker_identity_and_nested_descriptor(tmp_path):
+    captured = {}
+
+    def factory(arm, ready, scope, controller, worker):
+        captured["worker"] = worker
+        captured["ready"] = ready
+        return FakeNativeRoot(arm, ready, scope, controller, worker)
+
+    output, _records, sessions = run_lane(
+        tmp_path,
+        arms=("a",),
+        native_root_factory=factory,
+        ready_extra_factory=lambda arm: {"native": {"kind": "pid_file", "binary": "/fake/native"}},
+    )
+    terminal = json.loads(output.read_text().splitlines()[-1])
+
+    assert captured["worker"] == ServiceIdentity(sessions[0].pid, float(sessions[0].pid))
+    assert captured["ready"]["native"] == {"kind": "pid_file", "binary": "/fake/native"}
+    assert terminal["worker_facts"]["a"]["pid"] == sessions[0].pid
+    assert terminal["worker_envelopes"]["a"]["type"] == "ready"
+
+
+def test_malformed_ready_envelope_is_archived_before_type_check(tmp_path):
+    class MalformedSession(FakeSession):
+        def receive(self, timeout):
+            return ["not-a-dict"]
+
+    output, records, _sessions = run_lane(
+        tmp_path,
+        arms=("a",),
+        session_factory=lambda arm, workdir, diagnostics: MalformedSession(arm, Path(workdir)),
+    )
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    envelope = terminal["worker_envelopes"]["a"]
+    artifact = output.parent / f"{output.stem}.diagnostics" / envelope["artifact"]
+
+    assert records == []
+    assert terminal["setup_error"] == "ValueError"
+    assert envelope["present"] is True
+    assert envelope["type"] is None
+    assert envelope["sha256"] == hashlib.sha256(artifact.read_bytes()).hexdigest()
+    assert json.loads(artifact.read_text()) == ["not-a-dict"]
+    assert terminal["native_root_pending"]["a"]["scope_preserved"] is True
