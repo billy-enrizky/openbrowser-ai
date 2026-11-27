@@ -222,11 +222,14 @@ async def test_explicit_remote_http_attach_preserves_headers_and_client_policy(m
     assert "trust_env" not in state.constructor_kwargs[0]
 
 
-@pytest.mark.parametrize("timeout", [float("nan"), float("inf"), -float("inf"), True, None, "bad", 10**1000])
-async def test_nonfinite_or_malformed_overall_deadline_fails_before_connect(monkeypatch, timeout):
+@pytest.mark.parametrize(
+    "request_kwargs",
+    [{"timeout": value} for value in [float("nan"), float("inf"), -float("inf"), True, None, "bad", 10**1000]],
+)
+async def test_nonfinite_or_malformed_overall_deadline_fails_before_connect(monkeypatch, request_kwargs):
     async def forbidden(*args, **kwargs):
         pytest.fail("invalid overall deadline must not start a request")
 
     monkeypatch.setattr(module.local_discovery, "fetch_loopback_version", forbidden)
     with pytest.raises(ValueError, match="finite number"):
-        await module.LocalBrowserWatchdog._wait_for_cdp_url(9222, timeout=timeout)
+        await module.LocalBrowserWatchdog._wait_for_cdp_url(9222, **request_kwargs)

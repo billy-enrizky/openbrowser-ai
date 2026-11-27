@@ -298,6 +298,7 @@ class TestOnBrowserKillEvent:
         with patch.object(type(watchdog), "_cleanup_process", new_callable=AsyncMock) as mock_cleanup:
             await watchdog.on_BrowserKillEvent(event)
 
+        mock_cleanup.assert_awaited_once()
         assert watchdog._subprocess is None
         assert watchdog._temp_dirs_to_cleanup == []
         assert session.browser_profile.user_data_dir == "/original/path"
@@ -677,12 +678,11 @@ async def test_wait_for_process_exit_returns_promptly_when_the_process_is_gone(m
 
     from openbrowser.browser.watchdogs import local_browser_watchdog as module
 
-    class Gone:
-        def is_running(self):
-            raise module.psutil.NoSuchProcess(1234)
+    process = MagicMock(spec=module.psutil.Process)
+    process.is_running.side_effect = module.psutil.NoSuchProcess(1234)
 
     started = asyncio.get_running_loop().time()
-    assert await module.LocalBrowserWatchdog._wait_for_process_exit(Gone()) is True
+    assert await module.LocalBrowserWatchdog._wait_for_process_exit(process) is True
     assert asyncio.get_running_loop().time() - started < 0.05
 
 
@@ -691,17 +691,14 @@ async def test_wait_for_process_exit_ramps_its_poll_interval(monkeypatch):
     from openbrowser.browser.watchdogs import local_browser_watchdog as module
 
     sleeps: list[float] = []
-    states = {"calls": 0}
-
-    class Exiting:
-        def is_running(self):
-            states["calls"] += 1
-            return states["calls"] < 4
+    process = MagicMock(spec=module.psutil.Process)
+    process.is_running.side_effect = [True, True, True, False]
 
     async def record_sleep(delay):
         sleeps.append(delay)
 
     monkeypatch.setattr(module.asyncio, "sleep", record_sleep)
-    assert await module.LocalBrowserWatchdog._wait_for_process_exit(Exiting()) is True
+    assert await module.LocalBrowserWatchdog._wait_for_process_exit(process) is True
+    assert process.is_running.call_count == 4
     assert sleeps[:3] == [0.01, 0.02, 0.04]
     assert all(delay <= 0.1 for delay in sleeps)

@@ -1119,7 +1119,7 @@ class LocalBrowserWatchdog(BaseWatchdog):
 		except Exception:
 			return False
 
-	def _cleanup_temp_dir(self, temp_dir: Path | str) -> None:
+	def _cleanup_temp_dir(self, temp_dir: Path | str | None) -> None:
 		"""Clean up temporary directory.
 
 		Args:
