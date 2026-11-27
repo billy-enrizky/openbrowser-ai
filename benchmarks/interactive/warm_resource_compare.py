@@ -1280,6 +1280,11 @@ def run_warm_lane(
                                 raise ValueError("worker record is stale or foreign")
                         except Exception as error:
                             if entry.arm not in retired_arms:
+                                if (
+                                    getattr(native_before, "eligible", False) is not True
+                                    or getattr(native_after, "eligible", False) is not True
+                                ):
+                                    native_root_pending.add(entry.arm)
                                 retired_arms.add(entry.arm)
                                 with contextlib.suppress(Exception):
                                     session.close()
@@ -1287,6 +1292,14 @@ def run_warm_lane(
                                     retired_cleanup = cleanup(lane_samplers[entry.arm], interval=interval)
                                 except Exception:
                                     retired_cleanup = {"verified": False}
+                                if entry.arm in native_root_pending:
+                                    retired_cleanup = {
+                                        "verified": False,
+                                        "errors": ["native_service_continuity_unknown"],
+                                        "scope": owned_scopes.get(entry.arm),
+                                        "scope_preserved": True,
+                                        "observed_cleanup": retired_cleanup,
+                                    }
                                 retired_workers[entry.arm] = {
                                     "reason": "protocol_failure",
                                     "cleanup": retired_cleanup,
@@ -1475,6 +1488,9 @@ def run_warm_lane(
                     }
                     if arm in native_ready_failures:
                         pending_report["evidence"] = dict(native_ready_failures[arm])
+                    retired_cleanup = retired_workers.get(arm, {}).get("cleanup", {})
+                    if "observed_cleanup" in retired_cleanup:
+                        pending_report["observed_cleanup"] = retired_cleanup["observed_cleanup"]
                     cleanup_reports[arm] = pending_report
                 elif sampler is None:
                     cleanup_reports[arm] = {"verified": False, "errors": ["sampler_unavailable"]}

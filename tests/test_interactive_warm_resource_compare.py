@@ -820,7 +820,11 @@ def test_failed_observation_is_retained(tmp_path):
     _output, records, _ = run_lane(tmp_path, session_options={"proactive_fatal": True})
     assert all(record["ok"] is False for record in records)
     terminal = json.loads((tmp_path / "warm-resource.jsonl").read_text().splitlines()[-1])
-    assert terminal["failures"] == 2
+    assert terminal["failures"] == 1
+    assert terminal["observations"] == len(records) == 1
+    assert terminal["expected_observations"] == 2
+    assert terminal["aborted"] is True
+    assert terminal["cleanup_verified"] is False
     assert terminal["valid"] is False
 
 
@@ -2004,17 +2008,21 @@ def test_protocol_failure_retires_only_its_worker_without_rewarm(tmp_path):
         cleanup=cleanup,
     )
     assert len(sessions) == 2
-    assert len(rows) == 4
+    assert len(rows) == 1
     assert len([m for m in sessions["a"].sent if m["type"] == "task"]) == 1
-    assert len([m for m in sessions["b"].sent if m["type"] == "task"]) == 2
+    assert len([m for m in sessions["b"].sent if m["type"] == "task"]) == 0
     assert all(not row["ok"] and not row["resource_ok"] for row in rows if row["arm"] == "a")
-    assert all(row["ok"] and row["resource_ok"] for row in rows if row["arm"] == "b")
-    assert len(cleanups) == 3
+    assert not any(row["arm"] == "b" for row in rows)
+    assert len(cleanups) == 2
     terminal = json.loads(output.read_text().splitlines()[-1])
-    assert terminal["failures"] == 2
+    assert terminal["failures"] == 1
+    assert terminal["expected_observations"] == 4
+    assert terminal["aborted"] is True
+    assert terminal["cleanup_verified"] is False
     assert terminal["valid"] is False
     assert set(terminal["retired_workers"]) == {"a"}
-    assert terminal["retired_workers"]["a"]["cleanup"]["verified"] is True
+    assert terminal["retired_workers"]["a"]["cleanup"]["verified"] is False
+    assert terminal["retired_workers"]["a"]["cleanup"]["observed_cleanup"]["verified"] is True
 
 
 def test_orphan_discovery_exception_keeps_capture_and_verify_in_sync(tmp_path):
@@ -2541,3 +2549,71 @@ def test_lane_requires_explicit_unknown_tree_cpu(valid_lane_bundle, phase):
     row[f"warm_{phase}_resources"].pop("observed_tree_cpu_seconds")
     row.update(warm_worker_task_cpu_delta_seconds=None, warm_worker_cpu_delta_error="invalid_counter")
     assert not warm.lane_valid(records, terminal)
+
+
+@pytest.mark.parametrize("phase", ["before", "after"])
+def test_native_continuity_loss_prevents_verified_cleanup(tmp_path, phase):
+    def factory(*args):
+        return FakeNativeRoot(*args, **{phase + "_eligible": False})
+
+    output, rows, _ = run_lane(tmp_path, arms=("a",), native_root_factory=factory)
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    assert rows[0]["ok"] is False
+    assert terminal["valid"] is False
+    assert terminal["cleanup_verified"] is False
+    assert terminal["cleanup"]["a"]["scope_preserved"] is True
+    assert terminal["cleanup"]["a"]["observed_cleanup"]["verified"] is True
+    assert terminal["retired_workers"]["a"]["cleanup"]["verified"] is False
+    assert terminal["native_root_pending"]["a"]["scope_preserved"] is True
+
+
+@pytest.mark.parametrize("phase", ["before", "after"])
+def test_native_continuity_exception_preserves_scope(tmp_path, phase):
+    class BrokenProof(FakeNativeRoot):
+        def verify_before(self):
+            if phase == "before":
+                raise OSError("fake proof read failure")
+            return super().verify_before()
+
+        def verify_after(self, before):
+            raise OSError("fake proof read failure")
+
+    output, rows, _ = run_lane(tmp_path, arms=("a",), native_root_factory=BrokenProof)
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    assert rows[0]["ok"] is False
+    assert terminal["cleanup_verified"] is False
+    assert terminal["cleanup"]["a"]["scope_preserved"] is True
+    assert terminal["aborted"] is True
+
+
+def test_protocol_failure_without_closing_native_proof_keeps_uncertainty(tmp_path):
+    output, rows, _ = run_lane(tmp_path, arms=("a",), session_options={"bad_nonce": True})
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    assert rows[0]["native_service_after"] is None
+    assert terminal["cleanup_verified"] is False
+    assert terminal["cleanup"]["a"]["observed_cleanup"]["verified"] is True
+
+
+def test_record_failure_with_complete_native_proofs_can_verify_cleanup(tmp_path):
+    output, rows, _ = run_lane(tmp_path, arms=("a",), session_options={"bad_record": True})
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    assert rows[0]["native_service_before"]["eligible"] is True
+    assert rows[0]["native_service_after"]["eligible"] is True
+    assert rows[0]["ok"] is False
+    assert terminal["cleanup_verified"] is True
+    assert not terminal.get("native_root_pending")
+
+
+def test_unknown_native_continuity_aborts_later_tasks(tmp_path):
+    def factory(*args):
+        return FakeNativeRoot(*args, before_eligible=False)
+
+    output, rows, sessions = run_lane(tmp_path, arms=("a", "b"), tasks=("wizard", "modal"), native_root_factory=factory)
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    assert len(rows) == 1
+    assert sum(message["type"] == "task" for session in sessions for message in session.sent) == 1
+    assert all(session.closed for session in sessions)
+    assert terminal["expected_observations"] == 4
+    assert terminal["observations"] == 1
+    assert terminal["aborted"] is True
+    assert terminal["cleanup_verified"] is False
