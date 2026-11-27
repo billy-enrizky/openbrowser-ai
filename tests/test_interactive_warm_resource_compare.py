@@ -1592,3 +1592,85 @@ def test_raw_warm_rows_retain_complete_resource_snapshots(tmp_path):
     assert raw[1]["warm_baseline_resources"] == baseline
     assert raw[1]["warm_final_resources"] == final
     assert raw[-1]["failures"] == 1 and raw[-1]["valid"] is False
+
+
+@pytest.mark.parametrize("poll_native", [False, True])
+@pytest.mark.parametrize("end_fails", [False, True])
+def test_discovery_diagnostics_follow_capture_phases_without_repairing_failure(tmp_path, poll_native, end_fails):
+    log = []
+    samplers = []
+
+    class DiagnosticSampler(FakeSampler):
+        def __init__(self):
+            super().__init__([{"cpu": 1.0, "rss": 100, "footprint": 50}, {"cpu": 2.0, "rss": 120, "footprint": 60}])
+            self.phase = "outside_capture"
+            self.phases = []
+            self.errors = []
+            self.fences = []
+
+        def set_capture_phase(self, phase):
+            self.phase = phase
+            self.phases.append(phase)
+
+        def sample(self):
+            log.append("sample:" + self.phase)
+            if self.phase == "baseline":
+                self.errors.append({"capture_phase": self.phase, "resolution": "unknown"})
+            super().sample()
+
+        def record_discovery_end_fences(self):
+            log.append("end:" + self.phase)
+            if end_fails:
+                raise OSError(0, f"probe {BENCH_PASSWORD}")
+            self.fences.append({"capture_phase": self.phase, "resolution": "gone"})
+
+        def result(self):
+            value = super().result()
+            value.update(
+                read_errors=len(self.errors),
+                fatal_read_errors=len(self.errors),
+                unverified_processes=len(self.errors),
+                read_error_details=list(self.errors),
+                discovery_end_fences=list(self.fences),
+            )
+            return value
+
+    class PollSession(FakeSession):
+        delayed = False
+
+        def receive(self, timeout):
+            if poll_native and not self.delayed and self.inbox.queue and self.inbox.queue[0]["type"] == "native_done":
+                self.delayed = True
+                raise TimeoutError("native polling tick")
+            return super().receive(timeout)
+
+    def sampler_factory(pid, marker):
+        sampler = DiagnosticSampler()
+        samplers.append(sampler)
+        return sampler
+
+    output, rows, _ = run_lane(
+        tmp_path,
+        arms=("a",),
+        sampler_factory=sampler_factory,
+        session_factory=lambda arm, root, diagnostics: PollSession(arm, root, event_log=log),
+    )
+    row = rows[0]
+    expected = ["baseline", "native_run", "final"] if poll_native else ["baseline", "final"]
+    assert samplers[1].phases == expected
+    assert log.count("end:final") == 1
+    assert log.index("sample:final") < log.index("end:final") < log.index("send:verify")
+    assert row["ok"] is row["oracle_ok"] is True
+    assert row["resource_ok"] is False
+    assert row["warm_baseline_resources"]["discovery_end_fences"] == []
+    if end_fails:
+        assert row["warm_final_resources"] is None
+        assert row["warm_sampling_error"]["operation"] == "end_probe"
+        assert BENCH_PASSWORD not in json.dumps(row)
+    else:
+        assert row["warm_fatal_read_errors"] == 1
+        assert row["warm_final_resources"]["read_error_details"] == [
+            {"capture_phase": "baseline", "resolution": "unknown"}
+        ]
+        assert row["warm_final_resources"]["discovery_end_fences"] == [{"capture_phase": "final", "resolution": "gone"}]
+    assert json.loads(output.read_text().splitlines()[-1])["valid"] is False

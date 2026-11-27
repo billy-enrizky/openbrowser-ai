@@ -486,9 +486,22 @@ class _ResourceCapture:
         if self.error is not None:
             return
         try:
+            set_phase = getattr(self.sampler, "set_capture_phase", None)
+            if callable(set_phase):
+                set_phase(self.phase)
             _sample_tree(self.sampler)
         except Exception as error:
             self._failed("sample", error)
+
+    def finish(self) -> None:
+        if self.error is not None:
+            return
+        try:
+            probe = getattr(self.sampler, "record_discovery_end_fences", None)
+            if callable(probe):
+                probe()
+        except Exception as error:
+            self._failed("end_probe", error)
 
     def result(self) -> dict:
         if self.error is not None:
@@ -739,6 +752,7 @@ def run_warm_lane(
                                 raise RuntimeError("worker native completion does not match the task")
                             capture.phase = "final"
                             capture.sample()
+                            capture.finish()
                             resources = capture.result()
                             session.send(
                                 {
