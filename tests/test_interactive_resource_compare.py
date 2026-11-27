@@ -3916,3 +3916,86 @@ def test_memory_task_proof_continues_when_second_factory_pid_metadata_fails():
     assert memory_probe["operation"] == "memory_info"
     assert memory_probe["verification"] == "success"
     assert broken.calls == ["create_time"]
+
+
+class DeadStatusProcess:
+    def __init__(self):
+        self.pid = 20
+        self.calls = []
+
+    def create_time(self):
+        self.calls.append("create_time")
+        return 2.0
+
+    def is_running(self):
+        self.calls.append("is_running")
+        return True
+
+    def status(self):
+        self.calls.append("status")
+        return "dead"
+
+    def memory_info(self):
+        pytest.fail("memory_info must not run for a dead first identity")
+
+
+def test_identity_dead_status_after_matching_fence_is_gone():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    dead = DeadStatusProcess()
+    sampler = module.ProcessTreeSampler(
+        10,
+        process_factory=lambda pid: root if pid == 10 else dead,
+        footprint_supported=False,
+    )
+
+    sampler._note_read_error(
+        OSError(0, "ambiguous"),
+        identity=(20, 2.0),
+        operation="cmdline",
+        phase="native_run",
+        sample_index=0,
+    )
+
+    detail = sampler.result()["read_error_details"][0]
+    probe = detail["resolution_probe"]
+    assert dead.calls == ["is_running", "create_time", "status"]
+    assert detail["resolution"] == "gone"
+    assert detail["resolution_source"] == "identity_fence"
+    assert detail["memory_task_verification"] == "not_run"
+    assert detail["memory_probe"] is None
+    assert probe["operation"] == "status"
+    assert probe["status"] == "dead"
+    assert probe["resolution"] == "gone"
+
+
+def test_memory_task_does_not_run_second_phase_for_dead_first_identity():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    dead = DeadStatusProcess()
+    factory_calls = []
+
+    def factory(pid):
+        if pid == 10:
+            return root
+        factory_calls.append(pid)
+        return dead
+
+    sampler = module.ProcessTreeSampler(10, process_factory=factory, footprint_supported=False)
+    factory_calls.clear()
+
+    sampler._note_read_error(
+        module.psutil.AccessDenied(20),
+        identity=(20, 2.0),
+        operation="memory_info",
+        phase="native_run",
+        sample_index=0,
+    )
+
+    detail = sampler.result()["read_error_details"][0]
+    assert factory_calls == [20]
+    assert dead.calls == ["is_running", "create_time", "status"]
+    assert detail["resolution"] == "gone"
+    assert detail["resolution_source"] == "identity_fence"
+    assert detail["memory_task_verification"] == "not_run"
+    assert detail["memory_probe"] is None

@@ -789,6 +789,8 @@ class ProcessTreeSampler:
         status = status_value if isinstance(status_value, str) and status_value in _PROCESS_STATUSES else None
         if status_value == psutil.STATUS_ZOMBIE:
             return finish("zombie", None, operation="status")
+        if status_value == psutil.STATUS_DEAD:
+            return finish("gone", None, operation="status")
         return finish("alive", None, operation="status")
 
     def _memory_task_proof(
