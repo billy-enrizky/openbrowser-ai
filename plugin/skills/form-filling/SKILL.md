@@ -2,6 +2,7 @@
 name: form-filling
 description: |
   Fill out web forms, submit data, and handle login or registration flows.
+  Runs through keyless `openbrowser-ai -c` or local MCP code tools. No separate API key is required.
   Trigger when the user asks to: fill a form, submit data on a website, log in to a site,
   register an account, complete a checkout, enter information into fields, or automate form submission.
 allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Read Write

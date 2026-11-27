@@ -2,6 +2,7 @@
 name: web-scraping
 description: |
   Extract structured data from websites, scrape page content, and collect information across multiple pages.
+  Runs through keyless `openbrowser-ai scrape` and `-c`, or local MCP code tools. No separate API key is required.
   Trigger when the user asks to: extract data from a website, scrape a page, collect information from URLs,
   pull content from web pages, gather data across multiple pages, or download page content.
 allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Read Write

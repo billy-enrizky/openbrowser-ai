@@ -2,6 +2,7 @@
 name: page-analysis
 description: |
   Analyze web page content, structure, and layout to understand what a page contains and how it is organized.
+  Runs through keyless `openbrowser-ai -c` or local MCP code tools. No separate API key is required.
   Trigger when the user asks to: analyze a page, understand page structure, inspect a website,
   summarize page content, examine page layout, review a web page, or describe what is on a page.
 allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Read Write

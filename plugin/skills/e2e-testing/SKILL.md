@@ -2,6 +2,7 @@
 name: e2e-testing
 description: |
   Test web applications end-to-end by simulating user interactions and verifying expected outcomes.
+  Runs through keyless `openbrowser-ai -c` or local MCP code tools. No separate API key is required.
   Trigger when the user asks to: test a web app, verify a user flow, run end-to-end tests,
   QA a feature, check that a page works correctly, validate user journeys, or test a deployment.
 allowed-tools: Bash(openbrowser-ai:*) Bash(curl:*) Bash(uv:*) Bash(irm:*) Read Write
