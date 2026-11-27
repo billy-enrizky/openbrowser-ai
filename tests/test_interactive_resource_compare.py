@@ -3444,6 +3444,249 @@ def test_read_exception_serializes_original_error_pid_facts(exception_name, reso
     assert detail["memory_probe"] is None
 
 
+def native_enrollment_setup(tmp_path, *, worker_created=1.0, service_created=7.3, controller_created=9.0):
+    from benchmarks.interactive.adapters.native_service_readers import (
+        HostReaders,
+        NativeArm,
+        NativeRunScope,
+        NativeServiceRequest,
+        capture_native_service,
+    )
+    from benchmarks.interactive.adapters.service_roots import ServiceIdentity
+
+    module = resource_module()
+    scope = NativeRunScope(tmp_path, tmp_path / "home", tmp_path / "config", tmp_path / "profile", "b123456789")
+
+    class Daemon(FakeProcess):
+        def environ(self):
+            return {"BH_RUNTIME_DIR": str(tmp_path / "bu-runtime"), "BH_TMP_DIR": str(tmp_path / "bu-tmp")}
+
+        def cmdline(self):
+            return [self.executable, "-m", "browser_harness.daemon"]
+
+    worker = FakeProcess(10, worker_created, rss=100, cpu=0.1)
+    daemon = Daemon(73, service_created, rss=300, cpu=0.5)
+    daemon.executable = "/usr/bin/python3"
+    controller = FakeProcess(90, controller_created, rss=9999, cpu=90.0)
+    processes = {10: worker, 73: daemon, 90: controller}
+
+    def factory(pid):
+        return processes[pid]
+
+    controller_identity = ServiceIdentity(90, controller_created)
+    request = NativeServiceRequest(NativeArm.BROWSER_USE, scope, daemon.executable)
+    service = capture_native_service(
+        request,
+        HostReaders(read_bytes=lambda path, limit: b"73", process_factory=factory),
+        controller=controller_identity,
+        worker=ServiceIdentity(10, 1.0),
+    )
+    assert service.eligible
+    return module, processes, factory, controller_identity, service
+
+
+def enrolled_sampler(tmp_path, *, worker_created=1.0, service_created=7.3, controller_created=9.0):
+    module, processes, factory, controller, service = native_enrollment_setup(
+        tmp_path, worker_created=worker_created, service_created=service_created, controller_created=controller_created
+    )
+    sampler = module.ProcessTreeSampler(
+        10,
+        process_factory=factory,
+        footprint_reader=lambda pid: processes[pid].rss - 1,
+        ownership_marker=str(tmp_path),
+        controller_identity=controller,
+    )
+    return sampler, processes, controller, service
+
+
+def test_explicit_reparented_service_contributes_native_child_cost(tmp_path):
+    sampler, _, controller, service = enrolled_sampler(tmp_path)
+    sampler.enroll_native_service(service, controller=controller)
+    sampler.sample()
+    result = sampler.result()
+    assert result["peak_child_tree_rss_bytes"] == 300
+    assert result["observed_child_cpu_seconds"] == pytest.approx(0.5)
+    assert result["peak_worker_rss_bytes"] == 100
+    assert result["native_service_method_version"] == 1
+    assert result["native_service_roots_observed"] is True
+    assert result["native_service_roots"][0]["pid"] == 73
+    assert result["native_service_roots"][0]["observed"] is True
+
+
+def test_service_seen_through_ancestry_and_enrollment_counts_once(tmp_path):
+    sampler, processes, controller, service = enrolled_sampler(tmp_path)
+    processes[10].descendants = [processes[73]]
+    sampler.enroll_native_service(service, controller=controller)
+    sampler.enroll_native_service(service, controller=controller)
+    sampler.sample()
+    result = sampler.result()
+    assert result["peak_tree_rss_bytes"] == 400
+    assert result["observed_processes"] == 2
+    assert len(result["native_service_roots"]) == 1
+
+
+def test_controller_cannot_enter_traversal_accounting_or_cleanup(tmp_path):
+    sampler, processes, controller, service = enrolled_sampler(tmp_path)
+    processes[10].descendants = [processes[90]]
+    processes[73].descendants = [processes[90]]
+    sampler.enroll_native_service(service, controller=controller)
+    sampler.sample()
+    result = sampler.result()
+    assert result["peak_tree_rss_bytes"] == 400
+    assert all(item["pid"] != 90 for item in result["processes"])
+    assert all(identity[0] != 90 for identity in sampler.live_processes(phase="cleanup"))
+    assert result["native_controller_excluded"] is True
+
+
+def test_unenrolled_sampler_never_claims_complete_native_roots(tmp_path):
+    sampler, _, _, _ = enrolled_sampler(tmp_path)
+    sampler.sample()
+    assert sampler.result()["native_service_roots_observed"] is False
+    assert sampler.result()["native_service_roots"] == []
+
+
+@pytest.mark.parametrize("field,value", [("created_at", 8.0), ("executable", "/other/python"), ("state", "zombie")])
+def test_stale_or_changed_root_is_rejected_before_enrollment(tmp_path, field, value):
+    sampler, processes, controller, service = enrolled_sampler(tmp_path)
+    setattr(processes[73], field, value)
+    with pytest.raises(ValueError, match="native_service"):
+        sampler.enroll_native_service(service, controller=controller)
+    assert sampler.result()["native_service_roots"] == []
+
+
+def test_ineligible_host_proof_never_seeds_the_sampler(tmp_path):
+    from dataclasses import replace
+
+    from benchmarks.interactive.adapters.native_service_readers import ReadFailure
+
+    sampler, _, controller, service = enrolled_sampler(tmp_path)
+    invalid = replace(service, failure=ReadFailure.UNKNOWN)
+    with pytest.raises(ValueError, match="native_service"):
+        sampler.enroll_native_service(invalid, controller=controller)
+    assert (73, 7.3) not in sampler._known
+
+
+def test_invalid_worker_identity_blocks_native_enrollment(tmp_path):
+    sampler, _, controller, service = enrolled_sampler(tmp_path, worker_created=0.0)
+    with pytest.raises(ValueError, match="worker"):
+        sampler.enroll_native_service(service, controller=controller)
+
+
+def test_enrollment_public_metadata_has_no_executable_or_scope_paths(tmp_path):
+    sampler, _, controller, service = enrolled_sampler(tmp_path)
+    sampler.enroll_native_service(service, controller=controller)
+    sampler.sample()
+    public = json.dumps(sampler.result()["native_service_roots"])
+    assert str(tmp_path) not in public
+    assert "/usr/bin" not in public
+    assert "scope_digest" in public
+
+
+def test_enrollment_closing_fence_uses_fresh_process_identity(tmp_path):
+    sampler, processes, controller, service = enrolled_sampler(tmp_path)
+    changed = []
+
+    def factory(pid):
+        process = processes[pid]
+        cached_time = process.create_time()
+
+        def executable():
+            value = process.exe()
+            if pid == 73 and not changed:
+                changed.append(pid)
+                process.created_at = 8.0
+            return value
+
+        return SimpleNamespace(
+            pid=pid,
+            create_time=lambda: cached_time,
+            is_running=process.is_running,
+            status=process.status,
+            exe=executable,
+        )
+
+    sampler._process = factory
+    with pytest.raises(ValueError, match="native_service"):
+        sampler.enroll_native_service(service, controller=controller)
+    assert sampler.result()["native_service_roots"] == []
+
+
+def test_controller_marker_discovery_does_not_enroll_controller(tmp_path, monkeypatch):
+    module = resource_module()
+    sampler, _processes, _, _ = enrolled_sampler(tmp_path)
+    candidate = DiscoveryProcess(90, ["python", str(tmp_path)], created_at=9.0)
+    monkeypatch.setattr(module.psutil, "process_iter", lambda attrs: [candidate])
+    sampler.discover_orphans()
+    assert (90, 9.0) not in sampler._known
+    assert all(identity[0] != 90 for identity in sampler.live_processes())
+
+
+def test_marker_discovery_keeps_raw_large_integer_create_time(tmp_path, monkeypatch):
+    module = resource_module()
+    sampler, processes, _, _ = enrolled_sampler(tmp_path)
+    created = 2**54 + 1
+    processes[73].created_at = created
+    candidate = DiscoveryProcess(73, ["python", str(tmp_path)], created_at=created)
+    monkeypatch.setattr(module.psutil, "process_iter", lambda attrs: [candidate])
+    sampler.discover_orphans()
+    assert (73, created) in sampler._known
+    assert any(pid == 73 and type(value) is int and value == created for pid, value in sampler._known)
+
+
+def test_cleanup_never_signals_excluded_controller(tmp_path, monkeypatch):
+    module = resource_module()
+    sampler, processes, controller, service = enrolled_sampler(tmp_path)
+    processes[10].descendants = [processes[73], processes[90]]
+    sampler.enroll_native_service(service, controller=controller)
+    sampler.sample()
+    monkeypatch.setattr(module.psutil, "process_iter", lambda attrs: [])
+    for pid in (10, 73):
+        processes[pid].terminate = lambda pid=pid: setattr(processes[pid], "state", module.psutil.STATUS_ZOMBIE)
+    processes[90].terminate = lambda: pytest.fail("Controller was signaled")
+    result = module.cleanup_owned(sampler, interval=0.0, timeout=1.0)
+    assert result["verified"] is True
+    assert processes[90].state == "running"
+
+
+def test_verified_controller_is_excluded_before_command_reads(tmp_path, monkeypatch):
+    module = resource_module()
+    sampler, _processes, _, _ = enrolled_sampler(tmp_path)
+
+    def forbidden():
+        pytest.fail("Controller command line was inspected")
+
+    candidate = DiscoveryProcess(90, forbidden, created_at=9.0)
+    monkeypatch.setattr(module.psutil, "process_iter", lambda attrs: [candidate])
+    sampler.discover_orphans()
+    assert sampler.result()["read_errors"] == 0
+    assert (90, 9.0) not in sampler._known
+
+
+@pytest.mark.parametrize("pid", [10, 73, 90])
+@pytest.mark.parametrize("value", [True, None, "1.0", float("nan"), float("inf"), [], {}])
+def test_native_enrollment_rejects_malformed_live_create_times(tmp_path, pid, value):
+    sampler, processes, controller, service = enrolled_sampler(tmp_path, service_created=1.0, controller_created=1.0)
+    processes[pid].created_at = value
+    with pytest.raises(ValueError, match="native_service"):
+        sampler.enroll_native_service(service, controller=controller)
+
+
+@pytest.mark.parametrize("value", [None, True, 12, [], {}, "", "relative", Path("/usr/bin/python3"), "/bad\x00exe"])
+def test_native_enrollment_rejects_malformed_live_executable(tmp_path, value):
+    sampler, processes, controller, service = enrolled_sampler(tmp_path)
+    processes[73].executable = value
+    with pytest.raises(ValueError, match="native_service_executable"):
+        sampler.enroll_native_service(service, controller=controller)
+
+
+@pytest.mark.parametrize("value", [None, True, [], {}, "garbage", "stopped", "zombie", "dead"])
+def test_native_enrollment_requires_a_known_live_status(tmp_path, value):
+    sampler, processes, controller, service = enrolled_sampler(tmp_path)
+    processes[73].state = value
+    with pytest.raises(ValueError, match="native_service"):
+        sampler.enroll_native_service(service, controller=controller)
+
+
 @pytest.mark.parametrize(
     ("present", "expected_operation", "expected_resolution"),
     [(False, "factory", "gone"), (True, "status", "zombie")],

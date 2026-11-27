@@ -1,8 +1,8 @@
 """Isolated interactive resource lane, using the unchanged native task oracles.
 
-Resource observations include the common Python worker and task driver. Summed
-RSS can count shared pages more than once. CPU is a sampled lower bound, not a
-complete operating-system charge. Use the latency lane for timing comparisons.
+Resource snapshots retain worker diagnostics and owned native processes. Summed
+RSS can count shared pages more than once. CPU totals are sampled lower bounds.
+The latency lane supplies timing comparisons.
 """
 
 from __future__ import annotations
@@ -29,6 +29,8 @@ from typing import Any
 
 import psutil
 
+from .adapters.native_service_readers import ServiceRead
+from .adapters.service_roots import NativeServiceProof, ServiceIdentity, ServiceSource
 from .arms import CANONICAL_ARMS
 from .engine_preflight import configured_engine_pin
 from .measurement import MEASUREMENT_METHOD
@@ -39,6 +41,10 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_WORKDIR = Path("/tmp") if os.name != "nt" else Path(tempfile.gettempdir())
 SAMPLE_PREFIX = "r-"
 SAMPLER_METHOD_VERSION = 7
+NATIVE_SERVICE_METHOD_VERSION = 1
+_NATIVE_LIVE_STATUSES = frozenset(
+    {"running", "sleeping", "disk-sleep", "idle", "waking", "parked", "locked", "waiting"}
+)
 MAX_READ_ERROR_DETAILS = 32
 MAX_DISCOVERY_END_FENCES = 32
 _CAPTURE_PHASES = frozenset({"baseline", "native_run", "final"})
@@ -677,6 +683,7 @@ class ProcessTreeSampler:
         footprint_reader: Callable[[int], int | None] | None = None,
         footprint_supported: bool | None = None,
         ownership_marker: str | None = None,
+        controller_identity: ServiceIdentity | None = None,
     ):
         if ownership_marker is not None and (len(ownership_marker) < 12 or not Path(ownership_marker).is_absolute()):
             raise ValueError("The ownership marker must be a private absolute run path")
@@ -706,6 +713,116 @@ class ProcessTreeSampler:
             root_identity,
             footprint_supported=self._footprint is not None if footprint_supported is None else footprint_supported,
         )
+        self._native_services: dict[tuple[int, int | float], NativeServiceProof] = {}
+        self._native_controller: ServiceIdentity | None = None
+        self._excluded_identities: set[tuple[int, int | float]] = set()
+        if controller_identity is not None:
+            self._set_native_controller(controller_identity)
+
+    def _set_native_controller(self, identity: ServiceIdentity) -> None:
+        if (
+            not isinstance(identity, ServiceIdentity)
+            or not _valid_pid(identity.pid)
+            or not _valid_create_time(identity.created_at)
+            or identity.pid == self._ledger.root_identity[0]
+        ):
+            raise ValueError("native_controller_identity")
+        if self._native_controller is not None and self._native_controller != identity:
+            raise ValueError("native_controller_changed")
+        key = identity.pid, identity.created_at
+        if key in self._known or key in self._ledger._details:
+            raise ValueError("native_controller_previously_observed")
+        self._native_controller = identity
+        self._excluded_identities.add(key)
+
+    def enroll_native_service(self, read: ServiceRead, *, controller: ServiceIdentity) -> None:
+        """Seed a verified service between samples, retaining its exact identity.
+
+        The caller serializes enrollment and sampling. The host reader proves
+        scope ownership; this boundary rejects stale identity or executable
+        state before adding the persistent service to the retained tree.
+        """
+        try:
+            proof = read.proof.proof if isinstance(read, ServiceRead) and read.eligible else None
+        except Exception as error:
+            raise ValueError("native_service_proof") from error
+        if (
+            not isinstance(proof, NativeServiceProof)
+            or not isinstance(proof.identity, ServiceIdentity)
+            or not _valid_pid(proof.identity.pid)
+            or not _valid_create_time(proof.identity.created_at)
+            or not isinstance(proof.source, ServiceSource)
+            or not isinstance(proof.executable, str)
+            or not Path(proof.executable).is_absolute()
+            or not isinstance(proof.scope, str)
+            or not Path(proof.scope).is_absolute()
+        ):
+            raise ValueError("native_service_proof")
+        if not _valid_pid(self._ledger.root_identity[0]) or not _valid_create_time(self._ledger.root_identity[1]):
+            raise ValueError("native_worker_identity")
+        if self._ownership_marker is None or os.path.normcase(
+            os.path.normpath(str(read.before.request.scope.root))
+        ) != os.path.normcase(os.path.normpath(self._ownership_marker)):
+            raise ValueError("native_service_scope")
+        self._set_native_controller(controller)
+        key = proof.identity.pid, proof.identity.created_at
+        if proof.identity.pid in {controller.pid, self._ledger.root_identity[0]}:
+            raise ValueError("native_service_excluded")
+        try:
+            for pid, created in (self._ledger.root_identity, (controller.pid, controller.created_at), key):
+                process = self._process(pid)
+                current_created = process.create_time()
+                current_status = process.status()
+                if (
+                    type(process.pid) is not int
+                    or process.pid != pid
+                    or not _valid_create_time(current_created)
+                    or current_created != created
+                    or process.is_running() is not True
+                    or not isinstance(current_status, str)
+                    or current_status not in _NATIVE_LIVE_STATUSES
+                ):
+                    raise ValueError("native_service_identity")
+                if (pid, created) == key:
+                    executable = process.exe()
+                    if (
+                        not isinstance(executable, str)
+                        or not executable
+                        or "\x00" in executable
+                        or not os.path.isabs(executable)
+                        or os.path.normcase(os.path.normpath(executable)) != proof.executable
+                    ):
+                        raise ValueError("native_service_executable")
+                closing = self._process(pid)
+                closing_created = closing.create_time()
+                closing_status = closing.status()
+                if (
+                    type(closing.pid) is not int
+                    or closing.pid != pid
+                    or not _valid_create_time(closing_created)
+                    or closing_created != created
+                    or closing.is_running() is not True
+                    or not isinstance(closing_status, str)
+                    or closing_status not in _NATIVE_LIVE_STATUSES
+                ):
+                    raise ValueError("native_service_identity")
+                if (pid, created) == key:
+                    executable = closing.exe()
+                    if (
+                        not isinstance(executable, str)
+                        or not executable
+                        or "\x00" in executable
+                        or not os.path.isabs(executable)
+                        or os.path.normcase(os.path.normpath(executable)) != proof.executable
+                    ):
+                        raise ValueError("native_service_executable")
+        except (psutil.Error, OSError) as error:
+            raise ValueError("native_service_unavailable") from error
+        previous = self._native_services.get(key)
+        if previous is not None and previous != proof:
+            raise ValueError("native_service_conflict")
+        self._native_services[key] = proof
+        self._known.add(key)
 
     def _identity_resolution(
         self, identity: tuple[int, float], *, probe_sink: list[dict] | None = None
@@ -1261,6 +1378,14 @@ class ProcessTreeSampler:
                 else:
                     self._discovery_uid_stats["unfiltered"] += 1
                 before_identity = self._probe_identity(pid)
+                if (
+                    (pid, before_identity.ctime) in self._excluded_identities
+                    and before_identity.error_type is None
+                    and before_identity.running is True
+                    and isinstance(before_identity.status, str)
+                    and before_identity.status in _NATIVE_LIVE_STATUSES
+                ):
+                    continue
                 operation = "cmdline"
                 try:
                     command = process.cmdline()
@@ -1272,7 +1397,9 @@ class ProcessTreeSampler:
                     created = process.create_time()
                     if not _valid_create_time(created):
                         raise ValueError("process create time is invalid")
-                    self._known.add((pid, float(created)))
+                    identity = pid, created
+                    if identity not in self._excluded_identities:
+                        self._known.add(identity)
                 except (psutil.NoSuchProcess, psutil.ZombieProcess):
                     continue
                 except Exception as error:
@@ -1330,6 +1457,8 @@ class ProcessTreeSampler:
         checked: set[tuple[int, float]] = set()
         while queue:
             identity = queue.pop()
+            if identity in self._excluded_identities:
+                continue
             if identity in checked:
                 continue
             checked.add(identity)
@@ -1364,8 +1493,9 @@ class ProcessTreeSampler:
                         )
                         self._unverified.add(child_identity)
                         continue
-                    self._known.add(child_identity)
-                    queue.append(child_identity)
+                    if child_identity not in self._excluded_identities:
+                        self._known.add(child_identity)
+                        queue.append(child_identity)
             except (psutil.NoSuchProcess, psutil.ZombieProcess):
                 continue
             except (psutil.Error, OSError) as error:
@@ -1441,6 +1571,26 @@ class ProcessTreeSampler:
             cleanup_count += 1
         return {
             **self._ledger.result(),
+            "native_service_method_version": NATIVE_SERVICE_METHOD_VERSION,
+            "native_service_roots": [
+                {
+                    "pid": proof.identity.pid,
+                    "created_at": proof.identity.created_at,
+                    "source": proof.source.value,
+                    "executable_basename": Path(proof.executable).name,
+                    "scope_digest": hashlib.sha256(os.fsencode(proof.scope)).hexdigest(),
+                    "observed": identity in self._ledger._details,
+                }
+                for identity, proof in sorted(self._native_services.items())
+            ],
+            "native_service_roots_observed": bool(self._native_services)
+            and all(identity in self._ledger._details for identity in self._native_services),
+            "native_controller_excluded": None
+            if self._native_controller is None
+            else (
+                (self._native_controller.pid, self._native_controller.created_at) not in self._known
+                and (self._native_controller.pid, self._native_controller.created_at) not in self._ledger._details
+            ),
             "unverified_processes": observation_count,
             "cleanup_unverified_processes": cleanup_count,
             "discovery_uid_stats": dict(self._discovery_uid_stats),
