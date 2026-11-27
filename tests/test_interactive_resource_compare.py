@@ -2562,6 +2562,7 @@ def test_lane_writes_strict_terminal_metadata(monkeypatch, tmp_path):
     raw = [json.loads(line) for line in output.read_text().splitlines()]
 
     assert raw[0]["expected_observations"] == 4
+    assert raw[-1]["sampler_method_version"] == 7
     assert raw[-1]["expected_observations"] == 4
     assert raw[-1]["observations"] == 4
     assert raw[-1]["valid"] is True

@@ -1691,6 +1691,7 @@ def run_lane(
         )
         terminal = {
             "record_type": "end",
+            "sampler_method_version": SAMPLER_METHOD_VERSION,
             "observations": len(records),
             "expected_observations": expected_observations,
             "failures": sum(not item["ok"] or not item.get("resource_ok", True) for item in records),
