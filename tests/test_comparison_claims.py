@@ -45,7 +45,7 @@ def test_comparison_page_has_current_sections_only():
     assert _sections(_page('comparison.mdx')) == [
         '1. Benchmark index',
         '2. How to read this page',
-        '3. Current interactive lanes, 2026-11-25',
+        '3. Current interactive lanes, 2026-11-27',
         '4. OpenBrowser no-browser memory, 2026-11-26',
         '5. Other native local lanes, 2026-11-24',
         '6. Why OpenBrowser is faster and more efficient',
@@ -96,8 +96,8 @@ def test_benchmark_readmes_have_current_sections_only():
     scraping = (ROOT / 'benchmarks' / 'scraping' / 'README.md').read_text()
     assert _sections(interactive) == [
         '1. How to read these numbers',
-        '2. Current results, 2026-11-25, rotated N=5',
-        '3. Interactive resource lane, 2026-11-25',
+        '2. Current results, 2026-11-27, rotated N=5',
+        '3. Interactive resource lane, 2026-11-27',
         '4. Arms',
         '5. Tasks',
         '6. Fair-run procedure',

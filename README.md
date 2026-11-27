@@ -654,7 +654,7 @@ Prefer indexed actions whenever an element index exists. Coordinate actions use 
 
 Section 13.1 reports the current native local baseline. For a local, no-LLM comparison with pinned runtimes and verified page work, use the [navigation comparison verifier](benchmarks/navigation_compare_README.md). It reports engine, IPC, wait-policy, failure, and cleanup differences. Read it as a navigation-lane result.
 
-### 13.1. Native Local Benchmarks (2026-11-25)
+### 13.1. Native Local Benchmarks (2026-11-27)
 
 Local deterministic fixtures, no LLM, and interleaved samples with exact oracles. The full method, raw JSONL, and host-load caveats are in [benchmarks/scraping/README.md](benchmarks/scraping/README.md) and [benchmarks/interactive/README.md](benchmarks/interactive/README.md). Build and host are recorded in each raw artifact. The figures below are the last clean tracked N=5 run.
 
@@ -691,34 +691,36 @@ No-browser MCP memory, 2026-11-26. Peak process-tree RSS (MiB) ↓ **Lower is be
 
 [Raw memory data](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-mcp-scrape-web-resource-2026-11-26-n5.json) and [build provenance](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-mcp-scrape-web-resource-2026-11-26-n5.provenance.json). These values describe one local static fixture and the observed MCP process tree.
 
-Warm interactive v2, N=5, rotated arm order. Latency (ms) ↓ **Lower is better**.
+Warm interactive, N=5, rotated arm order, seven interfaces. Latency (ms) ↓ **Lower is better**. Each cell is median / p95.
 
-Warm-session readiness uses the native session workflow with OpenBrowser app `5a88fb97`. Each arm starts once and every task gets a fresh fixture server. All 100 observations passed the adapter, exact oracle, and keychain checks. Warm tables show milliseconds to three decimal places. The raw file keeps full precision.
+Warm-session readiness uses the native session workflow with OpenBrowser app `0.1.61.dev173+g9f630f7c6`. Each arm starts once and every task gets a fresh fixture page. All 140 observations passed the adapter, exact oracle, keychain, and cleanup checks.
 
-| Task | OpenBrowser MCP p50 ms | OpenBrowser CLI p50 ms | chrome-devtools-mcp p50 ms | agent-browser p50 ms | browser-use p50 ms |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `wizard` | 43.555 | 88.456 | 3441.495 | 451.787 | 471.800 |
-| `modal` | 199.144 | 244.149 | 2716.979 | 1095.635 | 912.795 |
-| `download` | 332.502 | 384.810 | 767.921 | 414.847 | 558.928 |
-| `tabs` | 62.077 | 113.553 | 1453.474 | 359.101 | 194.579 |
+| Task | OpenBrowser MCP | OpenBrowser CLI | Playwright MCP | Playwright CLI |
+| --- | ---: | ---: | ---: | ---: |
+| `wizard` | 54.394 / 85.800 | 93.174 / 109.643 | 359.009 / 380.117 | 561.216 / 565.046 |
+| `modal` | 204.733 / 216.366 | 237.042 / 249.272 | 282.960 / 288.477 | 479.470 / 498.992 |
+| `download` | 342.371 / 359.854 | 364.725 / 371.380 | 371.945 / 378.389 | 570.364 / 587.300 |
+| `tabs` | 78.586 / 84.018 | 114.917 / 124.138 | 128.525 / 129.309 | 309.912 / 313.608 |
 
-Both OpenBrowser arms have the lowest warm p50 on all four tasks. Each arm won all 60 eligible pairs, for 120 of 120 total. The `auth` task is cold only because it restarts the browser.
+Both OpenBrowser surfaces have the lowest warm p50 on all four tasks among all seven interfaces. OpenBrowser MCP won 120 of 120 pairs against the other six interfaces. OpenBrowser CLI won 118 of 120, with one `modal` sample and one `tabs` sample slower than Playwright MCP. Chrome DevTools MCP, agent-browser CLI, and browser-use CLI results are in [the comparison page](https://docs.openbrowser.me/comparison).
 
-[Raw data](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-five-arm-readiness-v2-2026-11-25-n5.jsonl), [summary](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-five-arm-readiness-v2-2026-11-25-n5.summary.json), and [method provenance](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-five-arm-readiness-v2-2026-11-25-n5.provenance.json).
+[Raw data](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-seven-arm-2026-11-27-n5.jsonl) and [summary](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-seven-arm-2026-11-27-n5.summary.json).
 
-Cold interactive release baseline, N=5, rotated arm order, lower is better. The timer measures time to result. Final adapter cleanup runs once outside the timed interval for every arm.
+Cold interactive, N=5, rotated arm order, lower is better. Each cell is median / p95. The timer measures time to result, and final adapter cleanup runs once outside the timed interval for every arm.
 
-| Task | OpenBrowser MCP p50 | OpenBrowser CLI p50 | chrome-devtools-mcp p50 | agent-browser p50 | browser-use p50 |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `wizard` | **569 ms** | 677 ms | 4312 ms | 1573 ms | 1111 ms |
-| `modal` | **725 ms** | 841 ms | 3471 ms | 2304 ms | 1744 ms |
-| `download` | **860 ms** | 963 ms | 1513 ms | 1484 ms | 1126 ms |
-| `tabs` | **593 ms** | 683 ms | 2220 ms | 1393 ms | 797 ms |
-| `auth` | **1305 ms** | 1604 ms | 3703 ms | 2506 ms | 2476 ms |
+| Task | OpenBrowser MCP | OpenBrowser CLI | Playwright MCP | Playwright CLI |
+| --- | ---: | ---: | ---: | ---: |
+| `wizard` | 699.861 / 1146.867 | 795.955 / 824.244 | 941.537 / 949.036 | 1732.262 / 1853.461 |
+| `modal` | 823.093 / 841.969 | 945.112 / 970.386 | 850.733 / 934.007 | 1709.790 / 1727.923 |
+| `download` | 978.479 / 1036.389 | 1075.754 / 1105.994 | 938.340 / 951.259 | 1738.421 / 1783.139 |
+| `tabs` | 722.224 / 768.955 | 812.648 / 814.743 | 669.406 / 691.612 | 1491.717 / 1561.706 |
+| `auth` | 1140.787 / 1188.648 | 1365.922 / 1452.703 | 1038.182 / 1078.800 | 2889.772 / 2955.748 |
 
-In the cold release baseline, both OpenBrowser arms have the lowest p50 on all five tasks and won 5 of 5 pairs against every other framework. All 125 runs passed the exact oracle and keychain check.
+Against Playwright, both OpenBrowser surfaces win 63 of 100 cold pairs. OpenBrowser wins 13 of 20 median and 12 of 20 p95 comparisons. Against the two Playwright surfaces, every cold loss is against Playwright MCP. Across the five other interfaces, OpenBrowser wins 42 of 50 median and 40 of 50 p95 groups; three group losses go to browser-use. OpenBrowser MCP has the lowest p50 among all seven interfaces on 2 of 5 tasks. All losses stay in [the retained queue](https://docs.openbrowser.me/comparison).
 
-Interactive resource lane, N=5: both OpenBrowser arms have the lowest median child footprint, process-tree RSS, and CPU on all five tasks. Both arms won all 150 eligible pairs per metric. Every cell is N=5 and all 125 observations passed. See [the charted comparison](https://docs.openbrowser.me/comparison).
+[Raw data](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-seven-arm-2026-11-27-n5.jsonl) and [summary](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-seven-arm-2026-11-27-n5.summary.json).
+
+Interactive resource lane, N=5: cold 175 observations and warm 140 observations across seven interfaces. Both OpenBrowser surfaces hold the lowest median RSS on all five cold tasks and all four warm tasks. Median and maximum RSS win all 90 groups. OpenBrowser wins 899 of 900 footprint and RSS pairs; one warm `download` sample is 1.953 MiB above Chrome DevTools MCP. Cold CPU remains a Playwright MCP loss. Every cell is N=5, and all observations passed the oracle, keychain, resource, and cleanup checks. See [the charted comparison](https://docs.openbrowser.me/comparison).
 
 ### 13.2. Why OpenBrowser is faster and more efficient
 
@@ -729,7 +731,7 @@ The measured paths use four areas of work.
 3. **Strict HTTP.** Explicit `--no-browser` and `engine="http"` fetch and parse static pages in a Python process. CLI and namespace batches reuse one pooled HTTP client with bounded concurrency. The stateless MCP `scrape_web` call creates a one-shot client per call.
 4. **Targeted browser work.** Task scripts use selector and CDP helpers for known targets, which avoids a full DOM scan for those operations. Lightweight and no-render policies block selected asset types. The browser still loads Chromium, Blink, and V8.
 
-The tables above show the effect. The warm lane reaches 43.555 ms p50 on `wizard` with one long-lived MCP context. The cold lane puts both OpenBrowser arms lowest on all five tasks. The Firecrawl Local batch is 2.834 ms against 13.448 ms, a 4.75x p50 result. OpenBrowser lightweight won 50 of 50 sequential scraping pairs against Firecrawl Local.
+The tables above show the effect. The warm lane reaches 54.394 ms p50 on `wizard` with one long-lived MCP context. The cold lane gives OpenBrowser MCP the lowest p50 on 2 of 5 tasks and keeps the remaining cold losses visible. The Firecrawl Local batch is 2.834 ms against 13.448 ms, a 4.75x p50 result. OpenBrowser lightweight won 50 of 50 sequential scraping pairs against Firecrawl Local.
 
 Other frameworks also reuse sessions and batch work. These lanes measure the configured combination. The page assigns no causal share to one mechanism without an ablation. The Firecrawl Local batch uses a 10 ms job-poll workflow and returns markdown pages; OpenBrowser returns selected row dictionaries. A matched single-call Firecrawl Local memory lane remains open, as do model-driven Agent and CodeAgent lanes and matched Lightpanda cold and warm lanes.
 
