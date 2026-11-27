@@ -49,9 +49,10 @@ from benchmarks.interactive.plot_common import (
 )
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_INPUT = HERE / "results" / "results-interactive-resources-2026-11-25-n5-final.summary.json"
+DEFAULT_INPUT = HERE / "results" / "results-cold-resources-seven-arm-2026-11-27-n5.summary.json"
 DEFAULT_OUTPUT = HERE.parents[1] / "docs" / "images" / "native-interactive-resources.png"
 DEFAULT_WARM_OUTPUT = HERE.parents[1] / "docs" / "images" / "native-interactive-warm-resources.png"
+DEFAULT_WARM_INPUT = HERE / "results" / "results-warm-resources-seven-arm-2026-11-27-n5.jsonl"
 TASKS = ("wizard", "modal", "download", "tabs", "auth")
 WARM_TASKS = ("wizard", "modal", "download", "tabs")
 METRICS = (
@@ -142,7 +143,7 @@ def _plot_lane(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
-    parser.add_argument("--warm-input", type=Path)
+    parser.add_argument("--warm-input", type=Path, default=DEFAULT_WARM_INPUT)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--warm-output", type=Path, default=DEFAULT_WARM_OUTPUT)
     parser.add_argument("--arms", nargs="+", default=list(CANONICAL_ARMS))

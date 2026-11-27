@@ -48,15 +48,7 @@ from benchmarks.interactive.plot_common import (
 HERE = Path(__file__).resolve().parent
 
 
-def _default_input() -> Path:
-    current = HERE / "results" / "results-warm-current.summary.json"
-    if current.exists():
-        return current
-    candidates = sorted((HERE / "results").glob("results-warm-*.summary.json"), key=lambda path: path.stat().st_mtime)
-    return candidates[-1] if candidates else current
-
-
-DEFAULT_INPUT = _default_input()
+DEFAULT_INPUT = HERE / "results" / "results-warm-seven-arm-2026-11-27-n5.summary.json"
 DEFAULT_OUTPUT = HERE.parents[1] / "docs" / "images" / "native-interactive-warm-current-p50.png"
 TASKS = ("wizard", "modal", "download", "tabs")
 
