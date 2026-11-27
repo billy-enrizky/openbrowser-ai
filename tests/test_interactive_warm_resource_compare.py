@@ -288,7 +288,7 @@ class FakeSession:
 @pytest.fixture(autouse=True)
 def _no_native_io(monkeypatch):
     def forbidden(*args, **kwargs):
-        raise AssertionError("fake test attempted native I/O")
+        pytest.fail("fake test attempted native I/O")
 
     monkeypatch.setattr(subprocess, "Popen", forbidden)
     monkeypatch.setattr(socket, "socket", forbidden)
@@ -394,6 +394,14 @@ def test_ready_arrives_before_any_task(tmp_path):
     for session in sessions:
         assert session.received[0]["type"] == "ready"
         assert session.sent[0]["type"] == "task"
+
+
+def test_fake_io_guard_cannot_be_swallowed_as_capture_uncertainty():
+    sampler = SimpleNamespace(sample=lambda: subprocess.Popen(["unused-native-guard-sentinel"]))
+    capture = warm._ResourceCapture(sampler)
+    with pytest.raises(pytest.fail.Exception, match="fake test attempted native I/O"):
+        capture.sample()
+    assert capture.error is None
 
 
 def test_downloads_directory_is_stable_and_cleaned(tmp_path):
