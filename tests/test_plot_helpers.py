@@ -88,6 +88,13 @@ def test_method_line_is_neutral_and_ignores_vendor_fields():
     assert "Vendor-Method-v9" not in line
 
 
+def test_method_line_falls_back_to_openbrowser_arm_version():
+    environment = {"arms": {"openbrowser-mcp-fast": {"version": "0.1.61.dev173+g9f630f7c6"}}}
+    line = plot.method_line(environment)
+    assert "OpenBrowser app: 0.1.61.d" in line
+    assert "not recorded" not in line
+
+
 def test_merge_groups_rejects_conflicting_cells():
     first = {"groups": [{"task": "wizard", "arm": "openbrowser-fast", "latency": {"p50_ms": 1.0}}]}
     second = {"groups": [{"task": "modal", "arm": "playwright-mcp", "latency": {"p50_ms": 2.0}}]}

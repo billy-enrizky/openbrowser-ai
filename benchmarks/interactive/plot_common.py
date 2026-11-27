@@ -183,6 +183,16 @@ def method_line(environment: Mapping[str, Any] | None) -> str:
                 if isinstance(candidate, str) and candidate:
                     app = candidate
                     break
+    if not isinstance(app, str) or not app:
+        arms = environment.get("arms")
+        if isinstance(arms, Mapping):
+            for arm_name in ("openbrowser-mcp-fast", "openbrowser-fast"):
+                arm = arms.get(arm_name)
+                if isinstance(arm, Mapping):
+                    version = arm.get("version")
+                    if isinstance(version, str) and version:
+                        app = version
+                        break
     app_label = app[:8] if isinstance(app, str) and app else "not recorded"
     return f"Method: {WARM_METHOD_LABEL} | OpenBrowser app: {app_label}"
 
