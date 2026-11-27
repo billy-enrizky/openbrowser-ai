@@ -129,7 +129,7 @@ class FakeProcess:
     def create_time(self):
         return self.created_at
 
-    def is_running(self):
+    def is_running(self) -> Any:
         return True
 
     def status(self):
@@ -1251,6 +1251,130 @@ def test_discovery_immediate_fence_distinguishes_identity_states(
         assert immediate["error_type"] == "ValueError"
 
 
+def test_discovery_malformed_running_is_unknown(monkeypatch):
+    module = resource_module()
+    after = FakeProcess(90, 2.0)
+    after.is_running = lambda: 1
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, 2.0), after],
+    )
+
+    sampler.discover_orphans()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    immediate = result["read_error_details"][0]["discovery_probe"]["immediate"]
+    assert immediate["running"] is None
+    assert immediate["error_type"] == "ValueError"
+    assert immediate["same_identity"] is True
+    assert immediate["state"] == "unknown"
+
+
+def test_discovery_wrong_factory_pid_is_unknown(monkeypatch):
+    module = resource_module()
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(91, 2.0), FakeProcess(90, 2.0)],
+    )
+
+    sampler.discover_orphans()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    probe = result["read_error_details"][0]["discovery_probe"]
+    assert probe["before"]["ctime"] is None
+    assert probe["before"]["status"] is None
+    assert probe["before"]["error_type"] == "ValueError"
+    assert probe["immediate"]["same_identity"] is None
+    assert probe["immediate"]["state"] == "unknown"
+
+
+def test_discovery_mismatched_exit_pid_is_not_authoritative(monkeypatch):
+    module = resource_module()
+    after = FakeProcess(90, 2.0)
+
+    def wrong_pid():
+        raise module.psutil.NoSuchProcess(91)
+
+    after.create_time = wrong_pid
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, 2.0), after],
+    )
+
+    sampler.discover_orphans()
+
+    result = sampler.result()
+    immediate = result["read_error_details"][0]["discovery_probe"]["immediate"]
+    assert immediate["ctime"] is None
+    assert immediate["error_type"] == "NoSuchProcess"
+    assert immediate["running"] is True
+    assert immediate["same_identity"] is None
+    assert immediate["state"] == "unknown"
+    assert result["fatal_read_errors"] == 1
+
+
+def test_discovery_authoritative_exit_stops_later_reads(monkeypatch):
+    module = resource_module()
+    after = FakeProcess(90, 2.0)
+    after.create_time = lambda: (_ for _ in ()).throw(module.psutil.NoSuchProcess(90))
+    after.status = lambda: pytest.fail("status must not run after authoritative exit")
+    after.is_running = lambda: pytest.fail("running must not run after authoritative exit")
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, 2.0), after],
+    )
+
+    sampler.discover_orphans()
+
+    result = sampler.result()
+    immediate = result["read_error_details"][0]["discovery_probe"]["immediate"]
+    assert immediate["ctime"] is None
+    assert immediate["status"] is None
+    assert immediate["running"] is False
+    assert immediate["error_type"] == "NoSuchProcess"
+    assert immediate["state"] == "gone"
+    assert result["fatal_read_errors"] == 1
+
+
+@pytest.mark.parametrize(
+    ("after_ctime", "expected_state", "expected_same_identity"),
+    [(2.0, "unknown", True), (99.0, "reused", False)],
+)
+def test_discovery_status_denied_uses_only_complete_identity_proof(
+    monkeypatch, after_ctime, expected_state, expected_same_identity
+):
+    module = resource_module()
+    after = FakeProcess(90, after_ctime)
+
+    def denied_status():
+        raise module.psutil.AccessDenied(90)
+
+    after.status = denied_status
+    after.is_running = lambda: True
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, 2.0), after],
+    )
+
+    sampler.discover_orphans()
+
+    result = sampler.result()
+    immediate = result["read_error_details"][0]["discovery_probe"]["immediate"]
+    assert immediate["running"] is True
+    assert immediate["status"] is None
+    assert immediate["error_type"] == "AccessDenied"
+    assert immediate["same_identity"] is expected_same_identity
+    assert immediate["state"] == expected_state
+    assert result["fatal_read_errors"] == 1
+
+
 def test_discovery_before_identity_denied_keeps_primary_fatal(monkeypatch):
     module = resource_module()
     sampler, _calls = discovery_probe_sampler(
@@ -1336,6 +1460,8 @@ def test_discovery_end_fence_is_linked_and_can_show_gone(monkeypatch):
         [FakeProcess(90, 2.0), FakeProcess(90, 2.0), module.psutil.NoSuchProcess(90)],
     )
     sampler.set_capture_phase("final")
+    clock = iter([100.123456789, 100.987654321])
+    monkeypatch.setattr(module.time, "monotonic", lambda: next(clock))
     sampler.discover_orphans()
     probe = sampler.result()["read_error_details"][0]["discovery_probe"]
     baseline_probe = json.loads(json.dumps(probe))
@@ -1356,7 +1482,9 @@ def test_discovery_end_fence_is_linked_and_can_show_gone(monkeypatch):
     assert fence["fence"]["status"] is None
     assert fence["fence"]["running"] is False
     assert fence["fence"]["error_type"] == "NoSuchProcess"
-    assert fence["elapsed_s"] >= 0
+    expected_elapsed = 100.987654321 - 100.123456789
+    assert fence["elapsed_s"] == pytest.approx(expected_elapsed, abs=1e-12)
+    assert fence["elapsed_s"] != round(expected_elapsed, 6)
     assert result["fatal_read_errors"] == 1
     assert result["discovery_end_fences_dropped"] == 0
     assert result["read_error_details"][0]["discovery_probe"] == baseline_probe

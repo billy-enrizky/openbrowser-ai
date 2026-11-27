@@ -150,7 +150,7 @@ class _DiscoveryEndFence:
             "pid": self.pid,
             "capture_phase": self.capture_phase,
             "sample_index": self.sample_index,
-            "elapsed_s": round(self.elapsed_s, 6),
+            "elapsed_s": self.elapsed_s,
             "same_identity": self.same_identity,
             "state": self.state,
             "fence": self.fence.as_dict(),
@@ -373,8 +373,11 @@ def _safe_errno(error: BaseException) -> int | None:
     return value if type(value) is int else None
 
 
-def _exit_error(error: BaseException) -> bool:
-    return isinstance(error, (psutil.NoSuchProcess, psutil.ZombieProcess))
+def _exit_error_for_pid(error: BaseException, pid: int) -> bool:
+    error_pid = getattr(error, "pid", None)
+    return (
+        _valid_pid(error_pid) and error_pid == pid and isinstance(error, (psutil.NoSuchProcess, psutil.ZombieProcess))
+    )
 
 
 def _discovery_cause_tag(error: BaseException) -> str:
@@ -389,11 +392,11 @@ def _identity_state(before: _IdentityProbe, after: _IdentityProbe) -> tuple[bool
     same_identity = None
     if before.ctime is not None and after.ctime is not None:
         same_identity = before.ctime == after.ctime
-    if after.running is False or after.status in {"zombie", "dead"}:
-        return same_identity, "gone"
     if same_identity is False:
         return False, "reused"
-    if same_identity is True and after.running is True:
+    if after.running is False or after.status in {"zombie", "dead"}:
+        return same_identity, "gone"
+    if same_identity is True and after.running is True and after.status is not None and after.error_type is None:
         return True, "same_alive"
     return same_identity, "unknown"
 
@@ -570,8 +573,14 @@ class ProcessTreeSampler:
         try:
             process = self._process(pid)
         except Exception as error:
-            running = False if _exit_error(error) else None
+            running = False if _exit_error_for_pid(error, pid) else None
             return _IdentityProbe(None, None, running, type(error).__name__, _safe_errno(error))
+        try:
+            actual_pid = process.pid
+        except Exception as error:
+            return _IdentityProbe(None, None, None, type(error).__name__, _safe_errno(error))
+        if not _valid_pid(actual_pid) or actual_pid != pid:
+            return _IdentityProbe(None, None, None, "ValueError", None)
         ctime = None
         status = None
         running = None
@@ -585,8 +594,8 @@ class ProcessTreeSampler:
         except Exception as error:
             error_type = type(error).__name__
             errno = _safe_errno(error)
-            if _exit_error(error):
-                running = False
+            if _exit_error_for_pid(error, pid):
+                return _IdentityProbe(None, None, False, error_type, errno)
         try:
             value = process.status()
             if not isinstance(value, str):
@@ -596,16 +605,19 @@ class ProcessTreeSampler:
             if error_type is None:
                 error_type = type(error).__name__
                 errno = _safe_errno(error)
-            if _exit_error(error):
-                running = False
+            if _exit_error_for_pid(error, pid):
+                return _IdentityProbe(ctime, None, False, error_type, errno)
         try:
-            running = bool(process.is_running())
+            value = process.is_running()
+            if type(value) is not bool:
+                raise ValueError("invalid running state")
+            running = value
         except Exception as error:
             if error_type is None:
                 error_type = type(error).__name__
                 errno = _safe_errno(error)
-            if _exit_error(error):
-                running = False
+            if _exit_error_for_pid(error, pid):
+                return _IdentityProbe(ctime, status, False, error_type, errno)
         if status in {"zombie", "dead"}:
             running = False
         return _IdentityProbe(ctime, status, running, error_type, errno)
