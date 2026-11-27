@@ -30,7 +30,7 @@ def _no_native_io(monkeypatch):
     module = resource_module()
 
     def forbidden(*args, **kwargs):
-        raise AssertionError("fake test attempted native I/O")
+        pytest.fail("fake test attempted native I/O")
 
     monkeypatch.setattr(module.psutil, "Process", forbidden)
     monkeypatch.setattr(module.psutil, "process_iter", forbidden)
@@ -38,6 +38,15 @@ def _no_native_io(monkeypatch):
     monkeypatch.setattr(module.subprocess, "run", forbidden)
     monkeypatch.setattr(socket, "socket", forbidden)
     monkeypatch.setattr(socket, "create_connection", forbidden)
+
+
+def test_native_io_guard_is_not_swallowed_by_identity_probe():
+    module = resource_module()
+    sampler = object.__new__(module.ProcessTreeSampler)
+    sampler._process = module.psutil.Process
+
+    with pytest.raises(pytest.fail.Exception):
+        sampler._probe_identity(90)
 
 
 def test_accounting_keeps_simultaneous_peaks_and_exited_child_cpu():
