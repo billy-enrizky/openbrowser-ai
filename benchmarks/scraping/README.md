@@ -4,8 +4,8 @@
 ## Contents
 
 - [1. How to read these numbers](#1-how-to-read-these-numbers)
-- [2. Current results, 2026-11-25, and reference lanes](#2-current-results-2026-11-25-and-reference-lanes)
-  - [2.1. OpenBrowser no-browser MCP scrape_web memory lane, 2026-11-25](#21-openbrowser-no-browser-mcp-scrape_web-memory-lane-2026-11-25)
+- [2. Current results, 2026-11-26, and reference lanes](#2-current-results-2026-11-26-and-reference-lanes)
+  - [2.1. OpenBrowser no-browser MCP scrape_web memory lane, 2026-11-26](#21-openbrowser-no-browser-mcp-scrape_web-memory-lane-2026-11-26)
   - [2.2. Firecrawl Local sequential, 2026-11-25, N=10](#22-firecrawl-local-sequential-2026-11-25-n10)
   - [2.3. Firecrawl Local batch, 2026-11-24, N=10](#23-firecrawl-local-batch-2026-11-24-n10)
   - [2.4. Lightpanda no-render latency, 2026-11-25, N=10](#24-lightpanda-no-render-latency-2026-11-25-n10)
@@ -28,34 +28,35 @@ Measure OpenBrowser render modes on deterministic local pages. No external netwo
 
 - Latency is lower is better ↓. Memory is lower is better ↓.
 - Latency is in milliseconds. Memory is process-tree RSS in MiB, divided by 1048576.
-- The `scrape_web` memory lane uses N=5 for one call and N=3 for 25 concurrent calls. The Firecrawl Local and Lightpanda latency lanes use N=10 per arm and task.
-- The memory lane is from 2026-11-25. The Firecrawl Local and Lightpanda reference lanes are from 2026-11-24.
+- The `scrape_web` memory lane uses N=5 for both one call and 25 concurrent calls. The Firecrawl Local and Lightpanda latency lanes use N=10 per arm and task.
+- The memory lane is from 2026-11-26. The Firecrawl Local and Lightpanda reference lanes are from 2026-11-24.
 - No AWS or cloud browser was used.
 - The brief does not report host load for these scraping lanes. Historical sections state their own recorded load where available.
 - Published Lightpanda and Firecrawl figures provide context and come from other measurement scopes.
 
-## 2. Current results, 2026-11-25, and reference lanes
+## 2. Current results, 2026-11-26, and reference lanes
 
-The 2026-11-25 MCP memory lane appears first. The Firecrawl Local and Lightpanda lanes are the latest reference runs from 2026-11-24.
+The 2026-11-26 MCP memory lane appears first. The Firecrawl Local and Lightpanda lanes are the latest reference runs from 2026-11-24.
 
-### 2.1. OpenBrowser no-browser MCP scrape_web memory lane, 2026-11-25
+### 2.1. OpenBrowser no-browser MCP scrape_web memory lane, 2026-11-26
 
 The `scrape_web` MCP tool runs without Chromium, Blink, or V8. It performs an HTTP fetch and parses the response. It does not run JavaScript, take screenshots, or use browser cookies.
 
 Lower is better for memory ↓.
 
-| Mode | Peak process-tree RSS | Browser processes | Correct results |
+| Mode | Peak process-tree RSS | Browser processes observed | Correct results |
 | --- | ---: | ---: | ---: |
-| One `scrape_web` call | 48.1 MiB median (47.55 to 50.17), N=5 | 0 | 5 of 5 |
-| 25 concurrent `scrape_web` calls | 62.4 MiB median (62.31 to 64.30), N=3 | 0 | 25 of 25 in 3 of 3 runs |
+| One `scrape_web` call | 46.188 MiB median (45.859 to 51.641, N=5) | 0 | 5 of 5 |
+| 25 concurrent `scrape_web` calls | 63.188 MiB median (60.781 to 65.250, N=5) | 0 | 25 of 25 in 5 of 5 runs |
 
-Sequential latency was about 77 to 90 ms per call after discovery in this run. The 25 concurrent calls completed in about 155 to 169 ms. Lower is better for latency ↓.
+Each of the ten observations started a fresh MCP server. All 130 calls passed the exact content, truncation, length, and HTTP-engine checks. The sampler observes the MCP server and its descendants every 5 ms. Short-lived peaks can occur between samples.
 
 Raw evidence:
 
-- [results-mcp-scrape-web-resource-2026-11-25-n5.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-mcp-scrape-web-resource-2026-11-25-n5.json)
+- [results-mcp-scrape-web-resource-2026-11-26-n5.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-mcp-scrape-web-resource-2026-11-26-n5.json)
+- [provenance](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-mcp-scrape-web-resource-2026-11-26-n5.provenance.json)
 
-Chart: [native-mcp-http-memory-2026-11-25.png](https://github.com/billy-enrizky/openbrowser-ai/blob/main/docs/images/native-mcp-http-memory-2026-11-25.png). The chart has been regenerated from the same artifact with these medians and is labeled `Lower is better ↓` for memory. It shows only OpenBrowser process-tree RSS and does not overlay Lightpanda or Firecrawl.
+Chart: [native-mcp-http-memory-2026-11-26.png](https://github.com/billy-enrizky/openbrowser-ai/blob/main/docs/images/native-mcp-http-memory-2026-11-26.png). The chart has been regenerated from the same artifact with these medians and is labeled `Lower is better ↓` for memory. It shows only OpenBrowser process-tree RSS and does not overlay Lightpanda or Firecrawl.
 
 Published context from other measurement scopes:
 
@@ -310,5 +311,5 @@ The oracle is exact for every task and runs before latency counts.
   visual-only actions while Blink layout continues. Do not claim Lightpanda-level
   memory or startup.
 - The latency lanes do not measure peak RSS or CPU. Use the resource lane and
-  the 2026-11-25 MCP memory lane for memory results, and state their process
+  the 2026-11-26 MCP memory lane for memory results, and state their process
   boundaries before comparing them.

@@ -46,7 +46,7 @@ def test_comparison_page_has_current_sections_only():
         '1. Benchmark index',
         '2. How to read this page',
         '3. Current interactive lanes, 2026-11-25',
-        '4. OpenBrowser no-browser memory, 2026-11-25',
+        '4. OpenBrowser no-browser memory, 2026-11-26',
         '5. Other native local lanes, 2026-11-24',
         '6. Why OpenBrowser is faster and more efficient',
         '7. How to choose a surface',
@@ -111,7 +111,7 @@ def test_benchmark_readmes_have_current_sections_only():
     ]
     assert _sections(scraping) == [
         '1. How to read these numbers',
-        '2. Current results, 2026-11-25, and reference lanes',
+        '2. Current results, 2026-11-26, and reference lanes',
         '3. Arms',
         '4. Tasks',
         '5. Run',
@@ -152,3 +152,43 @@ def test_current_docs_do_not_cite_removed_benchmark_scripts():
 def test_public_methodology_label_describes_the_session_lifecycle():
     for name in ('README.md', 'benchmarks/interactive/README.md', 'docs/comparison.mdx'):
         assert 'Warm-session readiness' in (ROOT / name).read_text()
+
+
+def test_http_memory_artifact_has_five_complete_observations_per_series():
+    import hashlib
+    import json
+
+    raw = ROOT / 'benchmarks/scraping/results/results-mcp-scrape-web-resource-2026-11-26-n5.json'
+    report = json.loads(raw.read_text())
+    proof = json.loads(raw.with_suffix('.provenance.json').read_text())
+    assert hashlib.sha256(raw.read_bytes()).hexdigest() == proof['raw_sha256']
+    assert proof['raw_sha256'] == 'b8126c56ef18d545af77e6c59a968dbdfc0a722313c688fddb7397eb0c38ef51'
+    assert report['valid'] is True and report['browser_started'] is False
+    assert report['samples'] == report['concurrency_samples'] == 5
+    assert report['concurrency'] == 25
+    for name, calls in [('sequential', 1), ('concurrent', 25)]:
+        assert len(report[name]) == 5
+        for row in report[name]:
+            assert row['ok'] == row['calls'] == calls
+            assert row['peak_rss_mib'] > 0
+            assert row['browser_processes_observed'] is False
+            assert row['children_at_end'] == 0
+    assert proof['source_unchanged'] is True and proof['binding_unchanged'] is True
+    assert proof['binding']['verified'] is True
+    assert proof['binding']['expected_app_digest'] == proof['binding']['actual_app_digest']
+
+
+def test_http_memory_values_match_all_public_markdown_copies():
+    import json
+    from decimal import Decimal
+    from statistics import median
+
+    path = ROOT / 'benchmarks/scraping/results/results-mcp-scrape-web-resource-2026-11-26-n5.json'
+    report = json.loads(path.read_text())
+    for name in ['README.md', 'docs/comparison.mdx', 'benchmarks/scraping/README.md']:
+        text = (ROOT / name).read_text()
+        for series in ['sequential', 'concurrent']:
+            values = [Decimal(str(row['peak_rss_mib'])) for row in report[series]]
+            expected = f'{median(values):.3f} MiB median ({min(values):.3f} to {max(values):.3f}, N=5)'
+            assert expected in text, (name, expected)
+        assert '25 of 25 in 5 of 5 runs' in text

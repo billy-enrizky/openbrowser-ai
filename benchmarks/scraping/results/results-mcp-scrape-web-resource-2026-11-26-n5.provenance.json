@@ -1,0 +1,66 @@
+{
+  "lane": "mcp-scrape-web-resource",
+  "generated_at": "2026-11-26T17:52:03Z",
+  "measurement_kind": "resource_only",
+  "valid": true,
+  "samples": 5,
+  "concurrency": 25,
+  "concurrency_samples": 5,
+  "correct_calls": {
+    "sequential": 5,
+    "concurrent": 125
+  },
+  "raw_sha256": "b8126c56ef18d545af77e6c59a968dbdfc0a722313c688fddb7397eb0c38ef51",
+  "source": {
+    "source_commit": "885f00291f635d6eeca960b983eb9b90fb7f1404",
+    "source_digest": "cc5a07d77088963093feb072369ea655c4775f66f1211de1dd738b526b960d5a",
+    "harness_digest": "193e7462f9d6d748c3033de7a9222ce41db269045613f71a7c269c751b1055af",
+    "expected_app_digest": "f38f2f353a85cbc1a2401a4d2961e3076f26384978fbdefef9dac0a3b1b2c550",
+    "configuration_digest": "5258ea564abdd34c451c804133b8417d9b2c105e483b019fee18b355ac7e92e4",
+    "python": "3.12.12",
+    "platform": "macOS-26.6-arm64-arm-64bit",
+    "psutil": "7.2.0"
+  },
+  "harness_sha256": "dd35f2ac4b1db3f9b9b3a23d20573420a15302cfd2e403066af547235726addc",
+  "binding": {
+    "verified": true,
+    "reason": "byte_identical_package",
+    "entry_sha256": "918154ae39f6a8cf29681ba53533f9ce4fefbe05c74177bcb822c6fbf714de04",
+    "backend_entry_sha": "d875cff957f3e9bfcbefe0f94751b8eeb93c813826491d3d841f05fd31944727",
+    "native_manifest_sha": "874915514494cb5cba7c493623af602c7ee04f4cfe6676fbb0ff4fd351341ef7",
+    "native_source_digest": "f3cbae874e3a535bdbdd2ec2b60a2f44d1f032350b86dcd6d062221bf4afab29",
+    "expected_app_digest": "f38f2f353a85cbc1a2401a4d2961e3076f26384978fbdefef9dac0a3b1b2c550",
+    "actual_app_digest": "f38f2f353a85cbc1a2401a4d2961e3076f26384978fbdefef9dac0a3b1b2c550",
+    "dist_version": "0.1.61.dev100+gba9a8718d",
+    "origin_matches_expected": false,
+    "target": "aarch64-apple-darwin"
+  },
+  "source_unchanged": true,
+  "binding_unchanged": true,
+  "load_before": [
+    3.92138671875,
+    4.90771484375,
+    5.56396484375
+  ],
+  "load_after": [
+    3.92138671875,
+    4.90771484375,
+    5.56396484375
+  ],
+  "sampler": {
+    "interval_seconds": 0.005,
+    "scope": "MCP server process plus observed descendants",
+    "metric": "peak process-tree RSS in MiB, bytes divided by 1048576",
+    "report_precision_mib": 0.001,
+    "limits": [
+      "Sampling can miss short-lived peaks.",
+      "Summed RSS can count shared pages more than once.",
+      "Controller and fixture server are outside the measured process tree.",
+      "Resource-instrumented wall time supplies no latency claim."
+    ]
+  },
+  "unmeasured": {
+    "cpu_seconds": null,
+    "child_footprint_bytes": null
+  }
+}
