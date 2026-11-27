@@ -775,6 +775,8 @@ def source_manifest() -> dict:
             "Includes common Python worker and task-driver overhead.",
             "Summed RSS can double-count shared pages.",
             "Sampling can miss short-lived processes and final CPU increments.",
+            "Orphan discovery excludes PID 0. On POSIX, it also excludes positively foreign effective UIDs. "
+            "Known ancestry is sampled across UIDs. Unreadable ownership remains unverified.",
             "Authoritative NoSuchProcess and ZombieProcess read errors are expected exits. An AccessDenied "
             "memory_info read may be proved by one same-identity memory_info verification; only NoSuchProcess or "
             "ZombieProcess from that verification is an exit. Other read failures require the immediate identity "

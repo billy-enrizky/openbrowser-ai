@@ -783,6 +783,7 @@ def test_source_manifest_separates_harness_and_application_content(monkeypatch, 
     assert first["source_digest"] != second["source_digest"]
     assert first["sampler_method_version"] == module.SAMPLER_METHOD_VERSION == 6
     assert first["configuration_digest"] == second["configuration_digest"]
+    assert any("effective UID" in item and "Known ancestry" in item for item in first["limitations"])
 
 
 def test_cleanup_finds_a_marked_orphan_created_as_its_parent_exits(monkeypatch):
