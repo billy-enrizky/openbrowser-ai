@@ -4,8 +4,9 @@ import os
 import re
 import subprocess
 import sys
-from importlib.metadata import entry_points
+from importlib.metadata import EntryPoint, distribution
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -161,14 +162,21 @@ def test_template_generation_creates_the_bundled_default(module, tmp_path):
     assert 'Agent' in output.read_text(encoding='utf-8')
 
 
-def test_installed_console_script_maps_to_cli_entry():
-    matches = [
-        entry
-        for entry in entry_points(group='console_scripts')
-        if entry.name == 'openbrowser-ai'
-    ]
-    assert matches
-    assert matches[0].value == 'openbrowser.cli_entry:cli'
+@pytest.mark.parametrize('layout', [None, 'pure', 'native'])
+def test_installed_console_script_maps_to_cli_entry(monkeypatch, layout):
+    manifest_name = 'extra_metadata/openbrowser-native.json'
+    if layout is not None:
+        name = 'openbrowser-ai-py' if layout == 'native' else 'openbrowser-ai'
+        metadata = SimpleNamespace(
+            entry_points=[EntryPoint(name=name, value='openbrowser.cli_entry:cli', group='console_scripts')],
+            read_text=lambda path: '{}' if layout == 'native' and path == manifest_name else None,
+        )
+        monkeypatch.setattr(sys.modules[__name__], 'distribution', lambda _name: metadata)
+    installed = distribution('openbrowser-ai')
+    native = installed.read_text(manifest_name) is not None
+    expected_name = 'openbrowser-ai-py' if native else 'openbrowser-ai'
+    scripts = sorted((entry.name, entry.value) for entry in installed.entry_points if entry.group == 'console_scripts')
+    assert scripts == [(expected_name, 'openbrowser.cli_entry:cli')]
 
 
 def test_prompt_value_init_keeps_prompt_mode(monkeypatch):
@@ -178,6 +186,7 @@ def test_prompt_value_init_keeps_prompt_mode(monkeypatch):
         result = CliRunner().invoke(main, ['-p', 'init'])
     assert result.exit_code == 0, result.output
     prompt.assert_awaited_once()
+    assert prompt.await_args is not None
     assert prompt.await_args.args[0] == 'init'
 
 
@@ -188,4 +197,5 @@ def test_prompt_value_mcp_keeps_prompt_mode(monkeypatch):
         result = CliRunner().invoke(main, ['-p', '--mcp'])
     assert result.exit_code == 0, result.output
     prompt.assert_awaited_once()
+    assert prompt.await_args is not None
     assert prompt.await_args.args[0] == '--mcp'
