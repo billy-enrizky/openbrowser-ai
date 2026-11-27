@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import io
 import json
@@ -124,7 +125,7 @@ class FakeNativeRoot:
                 {
                     "pid": 7000,
                     "created_at": 1.0,
-                    "source": "fake",
+                    "source": "popen",
                     "executable_basename": "fake",
                     "scope_digest": "0" * 64,
                 }
@@ -185,21 +186,39 @@ class FakeSampler:
             return {}
         footprints = [item["footprint"] for item in self.values]
         return {
+            "samples": len(self.values),
+            "sampler_method_version": resource_compare.SAMPLER_METHOD_VERSION,
             "peak_tree_rss_bytes": max(item["rss"] for item in self.values),
             "peak_worker_rss_bytes": 100,
             "peak_child_tree_rss_bytes": max(item["rss"] for item in self.values),
             "peak_child_footprint_bytes": max(footprints) if all(value is not None for value in footprints) else None,
             "observed_tree_cpu_seconds": max(item["cpu"] for item in self.values) + 0.5,
             "observed_child_cpu_seconds": max(item["cpu"] for item in self.values),
+            "processes": [
+                {"pid": 7000, "created_at": 1.0, "role": "child", "peak_rss_bytes": 10, "observed_cpu_seconds": 0.5}
+            ],
             "observed_child_processes": 1,
+            "observed_browser_processes": 1,
             "observed_browser_during_native_run": 1,
             "unverified_processes": self.unverified,
             "read_errors": 0,
             "fatal_read_errors": 0,
+            "read_error_details_truncated": 0,
             "footprint_status": "observed" if all(value is not None for value in footprints) else "unavailable",
             "native_service_method_version": resource_compare.NATIVE_SERVICE_METHOD_VERSION,
             "native_service_roots": (
-                [{"pid": 7000, "created_at": 1.0, "source": "fake", "observed": True}] if self.native_enrolled else []
+                [
+                    {
+                        "pid": 7000,
+                        "created_at": 1.0,
+                        "source": "popen",
+                        "executable_basename": "fake",
+                        "scope_digest": "0" * 64,
+                        "observed": True,
+                    }
+                ]
+                if self.native_enrolled
+                else []
             ),
             "native_service_roots_observed": self.native_enrolled,
             "native_controller_excluded": True if self.native_controller is not None else None,
@@ -880,30 +899,9 @@ def test_task_downloads_must_match_warmed_context(tmp_path):
 
 def test_main_returns_nonzero_for_invalid_lane(tmp_path, monkeypatch):
     output = tmp_path / "warm-resource.jsonl"
-    sample = {
-        "record_type": "sample",
-        "task": "wizard",
-        "arm": "a",
-        "sample": 0,
-        "ok": True,
-        "adapter_ok": True,
-        "oracle_ok": True,
-        "keychain_verified": True,
-        "resource_ok": True,
-        "native_service_method_version": 1,
-        "warm_native_roots_observed": True,
-    }
-    terminal = {
-        "record_type": "end",
-        "valid": True,
-        "failures": 0,
-        "observations": 1,
-        "expected_observations": 1,
-        "provenance_verified": True,
-        "cleanup_verified": True,
-        "native_service_method_version": 1,
-        "terminal": True,
-    }
+    reference_output, records, _ = run_lane(tmp_path / "reference", arms=("a",))
+    sample = records[0]
+    terminal = json.loads(reference_output.read_text().splitlines()[-1])
 
     def write_lane(records, end):
         def fake_run(arms, tasks, samples, path, **kwargs):
@@ -1068,31 +1066,15 @@ def test_terminal_counts_keychain_failure(tmp_path):
     assert terminal["valid"] is False
 
 
-def test_lane_valid_requires_every_gate():
-    records = [
-        {
-            "task": "wizard",
-            "arm": "a",
-            "sample": 0,
-            "ok": True,
-            "adapter_ok": True,
-            "oracle_ok": True,
-            "keychain_verified": True,
-            "resource_ok": True,
-            "native_service_method_version": 1,
-            "warm_native_roots_observed": True,
-        }
-    ]
-    terminal = {
-        "terminal": True,
-        "valid": True,
-        "failures": 0,
-        "observations": 1,
-        "expected_observations": 1,
-        "provenance_verified": True,
-        "cleanup_verified": True,
-        "native_service_method_version": 1,
-    }
+@pytest.fixture
+def valid_lane_bundle(tmp_path):
+    output, records, _ = run_lane(tmp_path, arms=("a",))
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    return records, terminal
+
+
+def test_lane_valid_requires_every_gate(valid_lane_bundle):
+    records, terminal = valid_lane_bundle
     assert warm.lane_valid(records, terminal) is True
     assert warm.lane_valid(records, {**terminal, "valid": False}) is False
     assert warm.lane_valid(records, {**terminal, "terminal": False}) is False
@@ -2221,3 +2203,244 @@ def test_discovery_diagnostics_follow_capture_phases_without_repairing_failure(t
         ]
         assert row["warm_final_resources"]["discovery_end_fences"] == [{"capture_phase": "final", "resolution": "gone"}]
     assert json.loads(output.read_text().splitlines()[-1])["valid"] is False
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "ok",
+        "adapter_ok",
+        "oracle_ok",
+        "keychain_verified",
+        "resource_ok",
+        "warm_native_roots_observed",
+        "warm_native_controller_excluded",
+    ],
+)
+@pytest.mark.parametrize("value", [False, None, 1, "true"])
+def test_lane_rejects_failed_row_despite_successful_footer(valid_lane_bundle, field, value):
+    records, terminal = copy.deepcopy(valid_lane_bundle)
+    records[0][field] = value
+    assert not warm.lane_valid(records, terminal)
+
+
+@pytest.mark.parametrize("container", ["row", "terminal", "baseline", "final"])
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("native_service_method_version", True),
+        ("native_service_method_version", 0),
+        ("sampler_method_version", True),
+        ("sampler_method_version", 6),
+    ],
+)
+def test_lane_rejects_wrong_or_bool_versions(valid_lane_bundle, container, field, value):
+    records, terminal = copy.deepcopy(valid_lane_bundle)
+    target = {
+        "row": records[0],
+        "terminal": terminal,
+        "baseline": records[0]["warm_baseline_resources"],
+        "final": records[0]["warm_final_resources"],
+    }[container]
+    target[field] = value
+    assert not warm.lane_valid(records, terminal)
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("warm_peak_tree_rss_bytes", None),
+        ("warm_peak_tree_rss_bytes", 0),
+        ("warm_peak_tree_rss_bytes", float("nan")),
+        ("warm_peak_tree_rss_bytes", 2**2000),
+        ("warm_peak_worker_rss_bytes", True),
+        ("warm_task_tree_cpu_delta_seconds", -1),
+        ("warm_task_tree_cpu_delta_seconds", float("inf")),
+        ("warm_task_tree_cpu_delta_seconds", None),
+        ("warm_task_tree_cpu_delta_seconds", 1.1),
+        ("warm_peak_tree_rss_bytes", 121),
+        ("warm_peak_child_footprint_bytes", 61),
+        ("warm_fatal_read_errors", 1),
+        ("warm_unverified_processes", 1),
+        ("warm_observed_child_processes", 0),
+        ("warm_observed_browser_during_native_run", 0),
+        ("warm_sampling_error", {}),
+        ("warm_cpu_delta_error", "invalid_counter"),
+        ("latency_claim_allowed", True),
+    ],
+)
+def test_lane_rejects_missing_or_inconsistent_metrics(valid_lane_bundle, field, value):
+    records, terminal = copy.deepcopy(valid_lane_bundle)
+    records[0][field] = value
+    assert not warm.lane_valid(records, terminal)
+
+
+@pytest.mark.parametrize("phase", ["baseline", "final"])
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("samples", 0),
+        ("peak_child_tree_rss_bytes", None),
+        ("peak_worker_rss_bytes", 0),
+        ("observed_child_processes", 0),
+        ("observed_browser_processes", 0),
+        ("observed_child_cpu_seconds", -1),
+        ("observed_child_cpu_seconds", True),
+        ("native_service_roots_observed", False),
+        ("native_controller_excluded", False),
+        ("native_service_roots", []),
+    ],
+)
+def test_lane_rejects_incomplete_resource_snapshots(valid_lane_bundle, phase, field, value):
+    records, terminal = copy.deepcopy(valid_lane_bundle)
+    records[0][f"warm_{phase}_resources"][field] = value
+    assert not warm.lane_valid(records, terminal)
+
+
+@pytest.mark.parametrize("phase", ["ready", "before", "after", "baseline", "final", "summary"])
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("pid", True),
+        ("pid", 7001),
+        ("created_at", True),
+        ("created_at", 2.0),
+        ("source", "unknown"),
+        ("scope_digest", "1" * 64),
+        ("executable_basename", "foreign"),
+    ],
+)
+def test_lane_rejects_spliced_or_malformed_native_proofs(valid_lane_bundle, phase, field, value):
+    records, terminal = copy.deepcopy(valid_lane_bundle)
+    row = records[0]
+    if phase == "ready":
+        target = terminal["warmups"]["a"]["native_service"]["proof"]
+    elif phase in {"before", "after"}:
+        target = row[f"native_service_{phase}"]["proof"]
+    elif phase == "summary":
+        target = row["warm_native_service_roots"][0]
+    else:
+        target = row[f"warm_{phase}_resources"]["native_service_roots"][0]
+    target[field] = value
+    assert not warm.lane_valid(records, terminal)
+
+
+@pytest.mark.parametrize("phase", ["ready", "before", "after"])
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("evidence_sha256", None),
+        ("evidence_sha256", "z" * 64),
+        ("evidence_artifact", "../escape.json"),
+        ("evidence_artifact", "/absolute.json"),
+        ("evidence_artifact", ""),
+    ],
+)
+def test_lane_requires_hash_linked_private_evidence(valid_lane_bundle, phase, field, value):
+    records, terminal = copy.deepcopy(valid_lane_bundle)
+    if phase == "ready":
+        terminal["warmups"]["a"]["native_service"][field] = value
+    else:
+        records[0][f"native_service_{phase}_{field}"] = value
+    assert not warm.lane_valid(records, terminal)
+
+
+def test_lane_accepts_unknown_footprint_and_zero_cpu(valid_lane_bundle):
+    records, terminal = copy.deepcopy(valid_lane_bundle)
+    row = records[0]
+    row.update(
+        warm_peak_child_footprint_bytes=None, warm_footprint_status="unsupported", warm_task_tree_cpu_delta_seconds=0.0
+    )
+    for phase in ("baseline", "final"):
+        row[f"warm_{phase}_resources"].update(
+            peak_child_footprint_bytes=None, footprint_status="unsupported", observed_child_cpu_seconds=1.0
+        )
+    assert warm.lane_valid(records, terminal)
+
+
+def test_lane_keeps_pending_baseline_exit_resolution_for_final_policy(valid_lane_bundle):
+    records, terminal = copy.deepcopy(valid_lane_bundle)
+    records[0]["warm_baseline_resources"].update(fatal_read_errors=1, unverified_processes=1)
+    assert warm.lane_valid(records, terminal)
+
+
+def test_lane_rejects_the_original_minimal_false_positive():
+    terminal = dict(
+        terminal=True,
+        valid=True,
+        failures=0,
+        expected_observations=1,
+        observations=1,
+        provenance_verified=True,
+        cleanup_verified=True,
+        native_service_method_version=1,
+    )
+    row = dict(
+        arm="openbrowser-fast",
+        task="wizard",
+        sample=0,
+        native_service_method_version=1,
+        warm_native_roots_observed=True,
+    )
+    assert not warm.lane_valid([row], terminal)
+
+
+@pytest.mark.parametrize(
+    "field", ["source_unchanged", "binding_unchanged", "method", "sampler_method_version", "warmups", "cleanup"]
+)
+def test_lane_rejects_missing_footer_binding(valid_lane_bundle, field):
+    records, terminal = copy.deepcopy(valid_lane_bundle)
+    terminal.pop(field)
+    assert not warm.lane_valid(records, terminal)
+
+
+@pytest.mark.parametrize("phase", ["ready", "before", "after"])
+@pytest.mark.parametrize("field, value", [("eligible", 1), ("eligible", False), ("failure", "denied"), ("proof", None)])
+def test_lane_requires_eligible_native_proof(valid_lane_bundle, phase, field, value):
+    records, terminal = copy.deepcopy(valid_lane_bundle)
+    target = terminal["warmups"]["a"]["native_service"] if phase == "ready" else records[0][f"native_service_{phase}"]
+    target[field] = value
+    assert not warm.lane_valid(records, terminal)
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("fatal_read_errors", 1),
+        ("unverified_processes", 1),
+        ("read_error_details_truncated", 1),
+        ("footprint_status", []),
+        ("samples", 1),
+    ],
+)
+def test_lane_rejects_final_fatal_or_malformed_snapshot(valid_lane_bundle, field, value):
+    records, terminal = copy.deepcopy(valid_lane_bundle)
+    records[0]["warm_final_resources"][field] = value
+    assert not warm.lane_valid(records, terminal)
+
+
+def test_lane_rejects_duplicate_plan_entries(valid_lane_bundle):
+    records, terminal = valid_lane_bundle
+    assert not warm.lane_valid(records, terminal, arms=["a", "a"], tasks=["wizard"], samples=1)
+
+
+def test_main_rejects_failed_sample_even_with_success_footer(tmp_path, monkeypatch, valid_lane_bundle):
+    records, terminal = copy.deepcopy(valid_lane_bundle)
+    records[0]["resource_ok"] = False
+
+    def fake_run(arms, tasks, samples, path, **kwargs):
+        path.write_text("\n".join(json.dumps(item) for item in [{"record_type": "run"}, *records, terminal]) + "\n")
+        return records
+
+    monkeypatch.setattr(warm, "run_warm_lane", fake_run)
+    assert (
+        warm.main(["--arms", "a", "--tasks", "wizard", "--samples", "1", "--output", str(tmp_path / "out.jsonl")]) == 1
+    )
+
+
+@pytest.mark.parametrize("phase", ["baseline", "final"])
+@pytest.mark.parametrize("value", [None, [], [{"pid": 7001, "created_at": 1.0, "role": "child"}]])
+def test_lane_requires_registered_root_in_raw_inventory(valid_lane_bundle, phase, value):
+    records, terminal = copy.deepcopy(valid_lane_bundle)
+    records[0][f"warm_{phase}_resources"]["processes"] = value
+    assert not warm.lane_valid(records, terminal)

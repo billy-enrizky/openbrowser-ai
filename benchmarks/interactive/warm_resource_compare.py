@@ -41,7 +41,7 @@ from .adapters.native_service_readers import (
     verify_native_service,
 )
 from .adapters.native_service_sources import PidRecord, ProcessCommand
-from .adapters.service_roots import ServiceIdentity
+from .adapters.service_roots import ServiceIdentity, ServiceSource
 from .engine_preflight import configured_engine_pin
 from .engine_session import EngineSession
 from .resource_compare import (
@@ -1556,6 +1556,198 @@ def run_warm_lane(
     return records
 
 
+def _finite_counter(value: object, *, positive: bool = False) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(float(value)) and (value > 0 if positive else value >= 0)
+    except (OverflowError, ValueError):
+        return False
+
+
+def _integer_counter(value: object, *, minimum: int = 0) -> bool:
+    return type(value) is int and value >= minimum
+
+
+def _sha256_value(value: object) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(char in "0123456789abcdef" for char in value)
+
+
+def _evidence_link(sha256: object, artifact: object) -> bool:
+    return (
+        _sha256_value(sha256)
+        and isinstance(artifact, str)
+        and artifact.endswith(".json")
+        and artifact not in {".json", "..json"}
+        and not any(char in artifact for char in ("/", "\\", "\x00"))
+    )
+
+
+def _native_public_proof(read: object) -> dict | None:
+    if not isinstance(read, dict) or read.get("eligible") is not True or read.get("failure") is not None:
+        return None
+    if not {"eligible", "failure", "proof"} <= set(read):
+        return None
+    proof = read.get("proof")
+    keys = {"pid", "created_at", "source", "executable_basename", "scope_digest"}
+    if not isinstance(proof, dict) or set(proof) != keys:
+        return None
+    name = proof["executable_basename"]
+    if (
+        not _integer_counter(proof["pid"], minimum=1)
+        or not _valid_service_time(proof["created_at"])
+        or proof["source"] not in tuple(source.value for source in ServiceSource)
+        or not isinstance(name, str)
+        or not name
+        or name in {".", ".."}
+        or any(char in name for char in ("/", "\\", "\x00"))
+        or not _sha256_value(proof["scope_digest"])
+    ):
+        return None
+    return proof
+
+
+def _native_snapshot_valid(snapshot: object, proof: dict, *, final: bool) -> bool:
+    if not isinstance(snapshot, dict):
+        return False
+    for key, version in (
+        ("sampler_method_version", SAMPLER_METHOD_VERSION),
+        ("native_service_method_version", NATIVE_SERVICE_METHOD_VERSION),
+    ):
+        if type(snapshot.get(key)) is not int or snapshot[key] != version:
+            return False
+    if any(
+        not _integer_counter(snapshot.get(key), minimum=1)
+        for key in ("samples", "observed_child_processes", "observed_browser_processes")
+    ):
+        return False
+    if any(
+        not _finite_counter(snapshot.get(key), positive=True)
+        for key in ("peak_child_tree_rss_bytes", "peak_worker_rss_bytes")
+    ) or not _finite_counter(snapshot.get("observed_child_cpu_seconds")):
+        return False
+    roots = snapshot.get("native_service_roots")
+    if not isinstance(roots, list) or len(roots) != 1 or not isinstance(roots[0], dict):
+        return False
+    root = roots[0]
+    if (
+        root.get("observed") is not True
+        or _native_public_proof(
+            {
+                "eligible": True,
+                "failure": None,
+                "proof": {key: value for key, value in root.items() if key != "observed"},
+            }
+        )
+        != proof
+    ):
+        return False
+    if (
+        snapshot.get("native_service_roots_observed") is not True
+        or snapshot.get("native_controller_excluded") is not True
+    ):
+        return False
+    inventory = snapshot.get("processes")
+    if not isinstance(inventory, list) or any(not isinstance(item, dict) for item in inventory):
+        return False
+    matches = [
+        item
+        for item in inventory
+        if type(item.get("pid")) is int
+        and item["pid"] == proof["pid"]
+        and _valid_service_time(item.get("created_at"))
+        and item["created_at"] == proof["created_at"]
+    ]
+    if len(matches) != 1 or matches[0].get("role") != "child":
+        return False
+    if not _finite_counter(matches[0].get("peak_rss_bytes"), positive=True) or not _finite_counter(
+        matches[0].get("observed_cpu_seconds")
+    ):
+        return False
+    if any(
+        not _integer_counter(snapshot.get(key))
+        for key in ("read_errors", "fatal_read_errors", "unverified_processes", "read_error_details_truncated")
+    ):
+        return False
+    footprint = snapshot.get("peak_child_footprint_bytes")
+    status = snapshot.get("footprint_status")
+    if status == "observed":
+        if not _finite_counter(footprint, positive=True):
+            return False
+    elif status not in ("unsupported", "unavailable") or footprint is not None:
+        return False
+    # Baseline discovery failures may have linked sampler-7 resolutions at the final barrier.
+    # The publication consumer independently checks every raw read proof and artifact hash.
+    return not final or (
+        snapshot["samples"] >= 2
+        and snapshot["fatal_read_errors"]
+        == snapshot["unverified_processes"]
+        == snapshot["read_error_details_truncated"]
+        == 0
+        and _integer_counter(snapshot.get("observed_browser_during_native_run"), minimum=1)
+    )
+
+
+def _warm_resource_row_valid(row: dict, ready: object) -> bool:
+    if any(
+        row.get(key) is not True
+        for key in (
+            "ok",
+            "adapter_ok",
+            "oracle_ok",
+            "keychain_verified",
+            "resource_ok",
+            "warm_native_roots_observed",
+            "warm_native_controller_excluded",
+        )
+    ):
+        return False
+    if row.get("record_type") != "sample" or row.get("latency_claim_allowed") is not False:
+        return False
+    if row.get("warm_sampling_error") is not None or row.get("warm_cpu_delta_error") is not None:
+        return False
+    proof = _native_public_proof(ready)
+    if (
+        proof is None
+        or not isinstance(ready, dict)
+        or not _evidence_link(ready.get("evidence_sha256"), ready.get("evidence_artifact"))
+    ):
+        return False
+    for phase in ("before", "after"):
+        if _native_public_proof(row.get(f"native_service_{phase}")) != proof:
+            return False
+        if not _evidence_link(
+            row.get(f"native_service_{phase}_evidence_sha256"), row.get(f"native_service_{phase}_evidence_artifact")
+        ):
+            return False
+    baseline, final = row.get("warm_baseline_resources"), row.get("warm_final_resources")
+    if not _native_snapshot_valid(baseline, proof, final=False) or not _native_snapshot_valid(final, proof, final=True):
+        return False
+    assert isinstance(baseline, dict) and isinstance(final, dict)
+    if final["samples"] <= baseline["samples"]:
+        return False
+    pairs = {
+        "warm_peak_tree_rss_bytes": "peak_child_tree_rss_bytes",
+        "warm_peak_worker_rss_bytes": "peak_worker_rss_bytes",
+        "warm_peak_child_footprint_bytes": "peak_child_footprint_bytes",
+        "warm_native_service_roots": "native_service_roots",
+        "warm_unverified_processes": "unverified_processes",
+        "warm_observed_child_processes": "observed_child_processes",
+        "warm_observed_browser_during_native_run": "observed_browser_during_native_run",
+        "warm_read_errors": "read_errors",
+        "warm_fatal_read_errors": "fatal_read_errors",
+        "warm_footprint_status": "footprint_status",
+    }
+    if any(type(row.get(key)) is not type(final[value]) or row[key] != final[value] for key, value in pairs.items()):
+        return False
+    delta = row.get("warm_task_tree_cpu_delta_seconds")
+    return (
+        _finite_counter(delta)
+        and final["observed_child_cpu_seconds"] >= baseline["observed_child_cpu_seconds"]
+        and delta == float(final["observed_child_cpu_seconds"]) - float(baseline["observed_child_cpu_seconds"])
+    )
+
+
 def lane_valid(
     records: list[dict],
     terminal: dict,
@@ -1592,7 +1784,18 @@ def lane_valid(
         return False
     if terminal.get("fixture_errors"):
         return False
-    if terminal.get("native_service_method_version") != NATIVE_SERVICE_METHOD_VERSION:
+    if terminal.get("record_type") != "end" or terminal.get("method") != METHOD:
+        return False
+    if any(terminal.get(key) is not True for key in ("source_unchanged", "binding_unchanged")):
+        return False
+    for key, version in (
+        ("sampler_method_version", SAMPLER_METHOD_VERSION),
+        ("native_service_method_version", NATIVE_SERVICE_METHOD_VERSION),
+    ):
+        if type(terminal.get(key)) is not int or terminal[key] != version:
+            return False
+    warmups, cleanup = terminal.get("warmups"), terminal.get("cleanup")
+    if not isinstance(warmups, dict) or not isinstance(cleanup, dict):
         return False
     seen: set[tuple[str, str, int]] = set()
     for row in records:
@@ -1607,19 +1810,33 @@ def lane_valid(
             return False
         if isinstance(sample, bool) or not isinstance(sample, int) or sample < 0:
             return False
-        if row.get("native_service_method_version") != NATIVE_SERVICE_METHOD_VERSION:
-            return False
-        if row.get("warm_native_roots_observed") is not True:
+        for name, version in (
+            ("sampler_method_version", SAMPLER_METHOD_VERSION),
+            ("native_service_method_version", NATIVE_SERVICE_METHOD_VERSION),
+        ):
+            if type(row.get(name)) is not int or row[name] != version:
+                return False
+        warmup = warmups.get(arm)
+        if not isinstance(warmup, dict) or not _warm_resource_row_valid(row, warmup.get("native_service")):
             return False
         key = (task, arm, sample)
         if key in seen:
             return False
         seen.add(key)
+    actual_arms = {arm for _, arm, _ in seen}
+    if set(warmups) != actual_arms or set(cleanup) != actual_arms:
+        return False
+    if any(not isinstance(report, dict) or report.get("verified") is not True for report in cleanup.values()):
+        return False
     plan_values = (arms, tasks, samples)
     if any(value is not None for value in plan_values):
         if arms is None or tasks is None or samples is None:
             return False
+        if not isinstance(arms, (list, tuple)) or not isinstance(tasks, (list, tuple)) or not arms or not tasks:
+            return False
         if not all(isinstance(value, str) and value for value in (*arms, *tasks)):
+            return False
+        if len(set(arms)) != len(arms) or len(set(tasks)) != len(tasks):
             return False
         if isinstance(samples, bool) or not isinstance(samples, int) or samples < 1:
             return False
