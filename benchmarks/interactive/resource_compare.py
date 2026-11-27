@@ -8,6 +8,7 @@ complete operating-system charge. Use the latency lane for timing comparisons.
 from __future__ import annotations
 
 import argparse
+import copy
 import ctypes
 import hashlib
 import json
@@ -39,6 +40,8 @@ DEFAULT_WORKDIR = Path("/tmp") if os.name != "nt" else Path(tempfile.gettempdir(
 SAMPLE_PREFIX = "r-"
 SAMPLER_METHOD_VERSION = 6
 MAX_READ_ERROR_DETAILS = 32
+MAX_DISCOVERY_END_FENCES = 32
+_CAPTURE_PHASES = frozenset({"baseline", "native_run", "final"})
 _RESOLUTION_SOURCES = frozenset({"read_exception", "identity_fence", "memory_task_fence", "discovery_scan"})
 _MEMORY_TASK_VERIFICATIONS = frozenset(
     {
@@ -102,6 +105,58 @@ class ProcessReading:
         return self.pid, self.created_at
 
 
+@dataclass(frozen=True)
+class _IdentityProbe:
+    ctime: float | None
+    status: str | None
+    running: bool | None
+    error_type: str | None
+    errno: int | None
+
+    def as_dict(self) -> dict:
+        return {
+            "ctime": self.ctime,
+            "status": self.status,
+            "running": self.running,
+            "error_type": self.error_type,
+            "errno": self.errno,
+        }
+
+
+@dataclass(frozen=True)
+class _PendingDiscoveryFailure:
+    probe_id: int
+    pid: int
+    capture_phase: str
+    sample_index: int
+    failed_at: float
+    before: _IdentityProbe
+
+
+@dataclass(frozen=True)
+class _DiscoveryEndFence:
+    probe_id: int
+    pid: int
+    capture_phase: str
+    sample_index: int
+    elapsed_s: float
+    same_identity: bool | None
+    state: str
+    fence: _IdentityProbe
+
+    def as_dict(self) -> dict:
+        return {
+            "probe_id": self.probe_id,
+            "pid": self.pid,
+            "capture_phase": self.capture_phase,
+            "sample_index": self.sample_index,
+            "elapsed_s": round(self.elapsed_s, 6),
+            "same_identity": self.same_identity,
+            "state": self.state,
+            "fence": self.fence.as_dict(),
+        }
+
+
 class ResourceLedger:
     """Accumulate only identity-fenced readings from one worker's cohort."""
 
@@ -135,6 +190,8 @@ class ResourceLedger:
         phase: str,
         sample_index: int,
         effective_uid: int | None = None,
+        discovery_probe_id: int | None = None,
+        discovery_probe: dict | None = None,
         resolution: str = "unknown",
         resolution_error: BaseException | None = None,
         resolution_source: str = "identity_fence",
@@ -168,6 +225,8 @@ class ResourceLedger:
                     "error_type": name,
                     "errno": errno_value,
                     "effective_uid": effective_uid_value,
+                    "discovery_probe_id": discovery_probe_id,
+                    "discovery_probe": copy.deepcopy(discovery_probe) if discovery_probe is not None else None,
                     "resolution": resolution,
                     "resolution_source": resolution_source,
                     "memory_task_verification": memory_task_verification,
@@ -249,7 +308,7 @@ class ResourceLedger:
             "read_error_types": dict(sorted(self.read_error_types.items())),
             "read_resolutions": dict(sorted(self.read_resolutions.items())),
             "sampler_method_version": SAMPLER_METHOD_VERSION,
-            "read_error_details": list(self.read_error_details),
+            "read_error_details": copy.deepcopy(self.read_error_details),
             "read_error_details_truncated": self.read_error_details_truncated,
             "fatal_read_identities": [
                 {"pid": pid, "created_at": created_at}
@@ -309,6 +368,36 @@ def _valid_uid(value: object) -> bool:
     return type(value) is int and value >= 0
 
 
+def _safe_errno(error: BaseException) -> int | None:
+    value = getattr(error, "errno", None)
+    return value if type(value) is int else None
+
+
+def _exit_error(error: BaseException) -> bool:
+    return isinstance(error, (psutil.NoSuchProcess, psutil.ZombieProcess))
+
+
+def _discovery_cause_tag(error: BaseException) -> str:
+    if isinstance(error, psutil.AccessDenied):
+        return "access_denied_underlying_cause_unavailable"
+    if isinstance(error, OSError):
+        return "oserror"
+    return "exception"
+
+
+def _identity_state(before: _IdentityProbe, after: _IdentityProbe) -> tuple[bool | None, str]:
+    same_identity = None
+    if before.ctime is not None and after.ctime is not None:
+        same_identity = before.ctime == after.ctime
+    if after.running is False or after.status in {"zombie", "dead"}:
+        return same_identity, "gone"
+    if same_identity is False:
+        return False, "reused"
+    if same_identity is True and after.running is True:
+        return True, "same_alive"
+    return same_identity, "unknown"
+
+
 def _exception_pid(error: BaseException) -> int | None:
     value = getattr(error, "pid", None)
     return value if _valid_pid(value) else None
@@ -342,6 +431,11 @@ class ProcessTreeSampler:
         self._marker_unverified: set[int] = set()
         self._discovery_unverified = False
         self._discovery_uid_stats = dict.fromkeys(_DISCOVERY_UID_STAT_KEYS, 0)
+        self._capture_phase = "native_run"
+        self._next_discovery_probe_id = 1
+        self._pending_discovery_failures: list[_PendingDiscoveryFailure] = []
+        self._discovery_end_fences: list[_DiscoveryEndFence] = []
+        self._discovery_end_fences_dropped = 0
         self._process = process_factory or psutil.Process
         self._footprint = footprint_reader if footprint_reader is not None else make_footprint_reader()
         try:
@@ -467,6 +561,98 @@ class ProcessTreeSampler:
             memory_task_verification=memory_task_verification,
         )
 
+    def set_capture_phase(self, phase: str) -> None:
+        if phase not in _CAPTURE_PHASES:
+            raise ValueError(f"Unsupported capture phase: {phase}")
+        self._capture_phase = phase
+
+    def _probe_identity(self, pid: int) -> _IdentityProbe:
+        try:
+            process = self._process(pid)
+        except Exception as error:
+            running = False if _exit_error(error) else None
+            return _IdentityProbe(None, None, running, type(error).__name__, _safe_errno(error))
+        ctime = None
+        status = None
+        running = None
+        error_type = None
+        errno = None
+        try:
+            value = process.create_time()
+            if not _valid_create_time(value):
+                raise ValueError("invalid create time")
+            ctime = float(value)
+        except Exception as error:
+            error_type = type(error).__name__
+            errno = _safe_errno(error)
+            if _exit_error(error):
+                running = False
+        try:
+            value = process.status()
+            if not isinstance(value, str):
+                raise ValueError("invalid process status")
+            status = value
+        except Exception as error:
+            if error_type is None:
+                error_type = type(error).__name__
+                errno = _safe_errno(error)
+            if _exit_error(error):
+                running = False
+        try:
+            running = bool(process.is_running())
+        except Exception as error:
+            if error_type is None:
+                error_type = type(error).__name__
+                errno = _safe_errno(error)
+            if _exit_error(error):
+                running = False
+        if status in {"zombie", "dead"}:
+            running = False
+        return _IdentityProbe(ctime, status, running, error_type, errno)
+
+    def _queue_discovery_end_fence(
+        self,
+        *,
+        probe_id: int,
+        pid: int,
+        before: _IdentityProbe,
+        failed_at: float,
+    ) -> None:
+        if len(self._pending_discovery_failures) >= MAX_DISCOVERY_END_FENCES:
+            self._discovery_end_fences_dropped += 1
+            return
+        self._pending_discovery_failures.append(
+            _PendingDiscoveryFailure(
+                probe_id=probe_id,
+                pid=pid,
+                capture_phase=self._capture_phase,
+                sample_index=self._ledger.samples,
+                failed_at=failed_at,
+                before=before,
+            )
+        )
+
+    def record_discovery_end_fences(self) -> None:
+        pending = tuple(self._pending_discovery_failures)
+        self._pending_discovery_failures.clear()
+        for item in pending:
+            fence = self._probe_identity(item.pid)
+            same_identity, state = _identity_state(item.before, fence)
+            record = _DiscoveryEndFence(
+                probe_id=item.probe_id,
+                pid=item.pid,
+                capture_phase=item.capture_phase,
+                sample_index=item.sample_index,
+                elapsed_s=max(0.0, time.monotonic() - item.failed_at),
+                same_identity=same_identity,
+                state=state,
+                fence=fence,
+            )
+            if len(self._discovery_end_fences) >= MAX_DISCOVERY_END_FENCES:
+                self._discovery_end_fences_dropped += 1
+                continue
+            self._discovery_end_fences.append(record)
+
     def _note_discovery_error(
         self,
         error: BaseException,
@@ -474,6 +660,8 @@ class ProcessTreeSampler:
         operation: str,
         identity: ReadIdentity | None,
         effective_uid: int | None = None,
+        discovery_probe_id: int | None = None,
+        discovery_probe: dict | None = None,
     ) -> None:
         normalized_identity = (None, None) if identity is None else identity
         pid = normalized_identity[0]
@@ -489,6 +677,8 @@ class ProcessTreeSampler:
             phase="orphan_discovery",
             sample_index=self._ledger.samples,
             effective_uid=effective_uid,
+            discovery_probe_id=discovery_probe_id,
+            discovery_probe=discovery_probe,
             resolution="unknown",
             resolution_source="discovery_scan",
         )
@@ -543,6 +733,7 @@ class ProcessTreeSampler:
                         continue
                 else:
                     self._discovery_uid_stats["unfiltered"] += 1
+                before_identity = self._probe_identity(pid)
                 operation = "cmdline"
                 try:
                     command = process.cmdline()
@@ -558,11 +749,39 @@ class ProcessTreeSampler:
                 except (psutil.NoSuchProcess, psutil.ZombieProcess):
                     continue
                 except Exception as error:
+                    if operation == "cmdline":
+                        failed_at = time.monotonic()
+                        immediate_identity = self._probe_identity(pid)
+                        same_identity, state = _identity_state(before_identity, immediate_identity)
+                        probe_id = self._next_discovery_probe_id
+                        self._next_discovery_probe_id += 1
+                        discovery_probe = {
+                            "probe_id": probe_id,
+                            "capture_phase": self._capture_phase,
+                            "cause_tag": _discovery_cause_tag(error),
+                            "before": before_identity.as_dict(),
+                            "immediate": {
+                                **immediate_identity.as_dict(),
+                                "same_identity": same_identity,
+                                "state": state,
+                            },
+                        }
+                        self._queue_discovery_end_fence(
+                            probe_id=probe_id,
+                            pid=pid,
+                            before=before_identity,
+                            failed_at=failed_at,
+                        )
+                    else:
+                        probe_id = None
+                        discovery_probe = None
                     self._note_discovery_error(
                         error,
                         operation=operation,
                         identity=(pid, None),
                         effective_uid=effective_uid,
+                        discovery_probe_id=probe_id,
+                        discovery_probe=discovery_probe,
                     )
         except Exception as error:
             self._note_discovery_error(error, operation="process_iter", identity=None)
@@ -688,6 +907,8 @@ class ProcessTreeSampler:
             "unverified_processes": observation_count,
             "cleanup_unverified_processes": cleanup_count,
             "discovery_uid_stats": dict(self._discovery_uid_stats),
+            "discovery_end_fences": [item.as_dict() for item in self._discovery_end_fences],
+            "discovery_end_fences_dropped": self._discovery_end_fences_dropped,
         }
 
 

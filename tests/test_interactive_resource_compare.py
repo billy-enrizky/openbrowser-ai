@@ -1126,6 +1126,258 @@ def test_discover_orphans_preserves_authoritative_exit_policy(monkeypatch, excep
     assert result["cleanup_unverified_processes"] == 0
 
 
+def discovery_probe_sampler(module, monkeypatch, fresh_sequence, *, pids=(90,), cmdline_error=None):
+    marker = "/tmp/resource-owned-abcdef/runs"
+    processes = []
+    for pid in pids:
+
+        def fail_cmdline(pid=pid):
+            if cmdline_error is not None:
+                raise cmdline_error
+            raise module.psutil.AccessDenied(pid)
+
+        processes.append(
+            DiscoveryProcess(
+                pid,
+                fail_cmdline,
+                lambda: pytest.fail("iterator create_time must not run"),
+                os.geteuid(),
+            )
+        )
+    monkeypatch.setattr(module.psutil, "process_iter", lambda attrs: list(processes))
+    factory_calls = []
+
+    def process_factory(pid):
+        if pid == 10:
+            return FakeProcess(10, 1.0)
+        factory_calls.append(pid)
+        if fresh_sequence:
+            value = fresh_sequence.pop(0)
+            if isinstance(value, BaseException):
+                raise value
+            return value
+        return FakeProcess(pid, 2.0)
+
+    sampler = module.ProcessTreeSampler(
+        10,
+        process_factory=process_factory,
+        footprint_reader=None,
+        footprint_supported=False,
+        ownership_marker=marker,
+    )
+    return sampler, factory_calls
+
+
+def test_discovery_probe_uses_fresh_identity_and_keeps_fatal(monkeypatch):
+    module = resource_module()
+    sampler, calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, 2.0), FakeProcess(90, 2.0)],
+    )
+    sampler.set_capture_phase("baseline")
+
+    sampler.discover_orphans()
+
+    result = sampler.result()
+    assert calls == [90, 90]
+    assert result["fatal_read_errors"] == 1
+    assert result["unverified_processes"] == 1
+    assert result["cleanup_unverified_processes"] == 1
+    detail = result["read_error_details"][0]
+    assert detail["created_at"] is None
+    probe = detail["discovery_probe"]
+    assert probe["cause_tag"] == "access_denied_underlying_cause_unavailable"
+    assert probe["capture_phase"] == "baseline"
+    assert probe["before"]["ctime"] == 2.0
+    assert probe["before"]["status"] == "running"
+    assert probe["immediate"]["ctime"] == 2.0
+    assert probe["immediate"]["same_identity"] is True
+    assert probe["immediate"]["state"] == "same_alive"
+    payload = json.dumps(result)
+    assert "EINVAL" not in payload
+    assert "EIO" not in payload
+    assert "force permission denied" not in payload
+    with pytest.raises(ValueError):
+        sampler.set_capture_phase("bogus")
+
+
+@pytest.mark.parametrize(
+    ("after_value", "expected_state", "expected_same_identity"),
+    [
+        ("gone", "gone", None),
+        ("reused", "reused", False),
+        ("malformed", "unknown", None),
+    ],
+)
+def test_discovery_immediate_fence_distinguishes_identity_states(
+    monkeypatch, after_value, expected_state, expected_same_identity
+):
+    module = resource_module()
+    if after_value == "gone":
+        after = module.psutil.NoSuchProcess(90)
+    elif after_value == "reused":
+        after = FakeProcess(90, 99.0)
+    else:
+        after = FakeProcess(90, None)
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, 2.0), after],
+    )
+
+    sampler.discover_orphans()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    immediate = result["read_error_details"][0]["discovery_probe"]["immediate"]
+    assert immediate["state"] == expected_state
+    assert immediate["same_identity"] is expected_same_identity
+    if after_value == "gone":
+        assert immediate["ctime"] is None
+        assert immediate["status"] is None
+        assert immediate["running"] is False
+    if after_value == "malformed":
+        assert immediate["ctime"] is None
+        assert immediate["error_type"] == "ValueError"
+
+
+def test_discovery_before_identity_denied_keeps_primary_fatal(monkeypatch):
+    module = resource_module()
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [module.psutil.AccessDenied(90), FakeProcess(90, 2.0)],
+    )
+
+    sampler.discover_orphans()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    assert result["unverified_processes"] == 1
+    probe = result["read_error_details"][0]["discovery_probe"]
+    assert probe["before"]["ctime"] is None
+    assert probe["before"]["status"] is None
+    assert probe["before"]["error_type"] == "AccessDenied"
+    assert probe["immediate"]["same_identity"] is None
+    assert probe["immediate"]["state"] == "unknown"
+
+
+def test_discovery_oserror_cause_tag_and_errno_are_preserved(monkeypatch):
+    module = resource_module()
+    sampler, _calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, 2.0), FakeProcess(90, 2.0)],
+        cmdline_error=OSError(0, "sysctl(KERN_PROCARGS2)"),
+    )
+
+    sampler.discover_orphans()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    detail = result["read_error_details"][0]
+    assert detail["errno"] == 0
+    assert detail["discovery_probe"]["cause_tag"] == "oserror"
+    payload = json.dumps(result)
+    assert "EINVAL" not in payload
+    assert "EIO" not in payload
+
+
+def test_diagnostic_probe_denied_does_not_change_primary_success(monkeypatch):
+    module = resource_module()
+    marker = "/tmp/resource-owned-abcdef/runs"
+    iterator_process = DiscoveryProcess(
+        90,
+        ["Chrome", f"--user-data-dir={marker}"],
+        3.0,
+        os.geteuid(),
+    )
+    monkeypatch.setattr(module.psutil, "process_iter", lambda attrs: [iterator_process])
+
+    def process_factory(pid):
+        if pid == 10:
+            return FakeProcess(10, 1.0)
+        raise module.psutil.AccessDenied(pid)
+
+    sampler = module.ProcessTreeSampler(
+        10,
+        process_factory=process_factory,
+        footprint_reader=None,
+        footprint_supported=False,
+        ownership_marker=marker,
+    )
+
+    sampler.discover_orphans()
+
+    result = sampler.result()
+    assert (90, 3.0) in sampler._known
+    assert result["read_errors"] == 0
+    assert result["fatal_read_errors"] == 0
+    assert result["unverified_processes"] == 0
+    assert result["cleanup_unverified_processes"] == 0
+    assert result["discovery_end_fences"] == []
+
+
+def test_discovery_end_fence_is_linked_and_can_show_gone(monkeypatch):
+    module = resource_module()
+    sampler, calls = discovery_probe_sampler(
+        module,
+        monkeypatch,
+        [FakeProcess(90, 2.0), FakeProcess(90, 2.0), module.psutil.NoSuchProcess(90)],
+    )
+    sampler.set_capture_phase("final")
+    sampler.discover_orphans()
+    probe = sampler.result()["read_error_details"][0]["discovery_probe"]
+    baseline_probe = json.loads(json.dumps(probe))
+    sampler.set_capture_phase("native_run")
+
+    sampler.record_discovery_end_fences()
+
+    result = sampler.result()
+    assert calls == [90, 90, 90]
+    assert len(result["discovery_end_fences"]) == 1
+    fence = result["discovery_end_fences"][0]
+    assert fence["probe_id"] == probe["probe_id"]
+    assert fence["pid"] == 90
+    assert fence["capture_phase"] == "final"
+    assert fence["state"] == "gone"
+    assert fence["same_identity"] is None
+    assert fence["fence"]["ctime"] is None
+    assert fence["fence"]["status"] is None
+    assert fence["fence"]["running"] is False
+    assert fence["fence"]["error_type"] == "NoSuchProcess"
+    assert fence["elapsed_s"] >= 0
+    assert result["fatal_read_errors"] == 1
+    assert result["discovery_end_fences_dropped"] == 0
+    assert result["read_error_details"][0]["discovery_probe"] == baseline_probe
+
+    sampler.record_discovery_end_fences()
+    assert len(sampler.result()["discovery_end_fences"]) == 1
+
+
+def test_discovery_end_fences_are_bounded_and_results_are_immutable(monkeypatch):
+    module = resource_module()
+    monkeypatch.setattr(module, "MAX_DISCOVERY_END_FENCES", 2)
+    sampler, _calls = discovery_probe_sampler(module, monkeypatch, [], pids=(90, 91, 92))
+
+    sampler.discover_orphans()
+    sampler.record_discovery_end_fences()
+    first = sampler.result()
+
+    assert len(first["discovery_end_fences"]) == 2
+    assert first["discovery_end_fences_dropped"] == 1
+    detail_probe = first["read_error_details"][0]["discovery_probe"]
+    end_state = first["discovery_end_fences"][0]["state"]
+    assert detail_probe["immediate"]["same_identity"] is True
+    assert end_state == "same_alive"
+    first["read_error_details"][0]["discovery_probe"]["immediate"]["ctime"] = 999.0
+    first["discovery_end_fences"][0]["state"] = "tampered"
+    second = sampler.result()
+    assert second["read_error_details"][0]["discovery_probe"]["immediate"]["ctime"] == 2.0
+    assert second["discovery_end_fences"][0]["state"] == end_state
+
+
 def test_cleanup_reports_discovery_oserror_without_escaping(monkeypatch):
     module = resource_module()
     marker = "/tmp/resource-owned-abcdef/runs"
