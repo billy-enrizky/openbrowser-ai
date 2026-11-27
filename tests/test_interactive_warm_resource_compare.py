@@ -610,6 +610,19 @@ def test_provenance_mismatch_withholds_verified(tmp_path, monkeypatch):
     assert terminal["valid"] is False
 
 
+def test_warm_header_keeps_warm_method_when_source_manifest_returns_cold_method(tmp_path, monkeypatch):
+    cold_method = "fresh worker plus owned descendants, through native runner cleanup"
+    monkeypatch.setattr(warm, "source_manifest", lambda: {"source_digest": "same", "method": cold_method})
+    monkeypatch.setattr(warm, "binding_snapshot", lambda arms: {"verified": True})
+    monkeypatch.setattr(warm, "arm_versions", lambda arms: {name: {"version": "x"} for name in arms})
+
+    output, _records, _ = run_lane(tmp_path)
+    header = json.loads(output.read_text().splitlines()[0])
+
+    assert header["method"] == warm.METHOD == "warm-session-resources-v2"
+    assert header["sampler_method_version"] == warm.SAMPLER_METHOD_VERSION == 7
+
+
 def test_preflight_failure_writes_terminal_footer(tmp_path, monkeypatch):
     def broken():
         raise RuntimeError("preflight failed")
@@ -633,6 +646,7 @@ def test_preflight_failure_writes_terminal_footer(tmp_path, monkeypatch):
     assert records == []
     lines = [json.loads(line) for line in output.read_text().splitlines()]
     assert lines[0]["preflight_error"] == "RuntimeError"
+    assert lines[0]["method"] == warm.METHOD == "warm-session-resources-v2"
     assert lines[0]["sampler_method_version"] == warm.SAMPLER_METHOD_VERSION == 7
     assert lines[-1]["valid"] is False
     assert lines[-1]["sampler_method_version"] == 7

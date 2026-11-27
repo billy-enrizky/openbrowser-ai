@@ -597,6 +597,8 @@ def run_warm_lane(
                     "arm_versions": arm_versions(arms),
                 }
             )
+            header["method"] = METHOD
+            header["sampler_method_version"] = SAMPLER_METHOD_VERSION
         except Exception as error:
             header["preflight_error"] = type(error).__name__
             handle.write(json.dumps(header) + "\n")
