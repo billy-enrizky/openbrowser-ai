@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import json
 import logging
+import math
 import os
 import shutil
 import stat
@@ -716,6 +717,13 @@ class LocalBrowserWatchdog(BaseWatchdog):
 	@staticmethod
 	async def _wait_for_cdp_url(port: int, timeout: float = 30) -> str:
 		"""Wait for local readiness and return the resolved browser WebSocket URL."""
+		valid_timeout = not isinstance(timeout, bool) and isinstance(timeout, (int, float))
+		try:
+			valid_timeout = valid_timeout and math.isfinite(timeout)
+		except (OverflowError, TypeError):
+			valid_timeout = False
+		if not valid_timeout:
+			raise ValueError('Browser start timeout must be a finite number')
 		loop = asyncio.get_running_loop()
 		deadline = loop.time() + timeout
 		while True:
