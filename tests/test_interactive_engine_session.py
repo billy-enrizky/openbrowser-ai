@@ -231,6 +231,20 @@ def test_auth_stamp_requires_both_the_login_and_restarted_browser(harness):
     assert harness.observations == [(harness.pin, harness.marker)]
 
 
+def test_auth_stamp_rejects_a_different_profile_after_restart(harness):
+    session = engine_session.EngineSession(harness.pin)
+    with session.task_scope():
+        browser_launch_checkpoint(harness.marker)
+    after = deepcopy(harness.valid)
+    after.proof.binding.pid = 456
+    after.proof.profile_marker = "/tmp/different-profile"
+    row = {"task": "auth", "ok": True, "error": "", "browser_version": "old"}
+    session.stamp(row, after)
+    assert row["ok"] is False
+    assert row["engine"]["verified"] is False
+    assert "auth_profile_changed" in row["error"]
+
+
 def test_auth_missing_initial_browser_proof_stays_ineligible(harness):
     session = engine_session.EngineSession(harness.pin)
     row = {"task": "auth", "ok": True, "error": "", "browser_version": "old"}

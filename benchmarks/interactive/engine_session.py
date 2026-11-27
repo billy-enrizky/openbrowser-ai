@@ -137,6 +137,12 @@ class EngineSession:
                 auth_failure = "auth_launch_proof_missing"
             elif self._browser_identity(self.launches[0]) == self._browser_identity(after):
                 auth_failure = "auth_browser_not_replaced"
+            elif (
+                self.launches[0].proof is None
+                or after.proof is None
+                or self.launches[0].proof.profile_marker != after.proof.profile_marker
+            ):
+                auth_failure = "auth_profile_changed"
             valid = valid and auth_failure is None
         if self._captured:
             valid = (
