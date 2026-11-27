@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import socket
 import subprocess
 from pathlib import Path
@@ -104,14 +105,14 @@ async def test_existing_profile_preserves_startup_preferences(launch_case):
     assert preferences.read_text() == content
 
 
-async def test_seeded_storage_state_keeps_original_startup(launch_case):
+async def test_empty_storage_seed_opens_blank_without_modifying_state(launch_case):
     case = launch_case
     case.directory.mkdir()
     state = case.directory / "storage_state.json"
     content = '{"cookies":[],"origins":[]}'
     state.write_text(content)
     await case.watchdog._launch_browser(max_retries=1)
-    assert "about:blank" not in case.spawn.await_args.args
+    assert case.spawn.await_args.args.count("about:blank") == (0 if os.name == "nt" else 1)
     assert state.read_text() == content
 
 
@@ -261,3 +262,143 @@ async def test_profile_error_retry_uses_its_own_blank_page_proof(launch_case, mo
     assert first.count("about:blank") == 1
     assert second.count("about:blank") == 1
     assert f"--user-data-dir={fallback}" in second
+
+
+@pytest.mark.parametrize("mutation", ["replace", "nonempty", "remove"])
+async def test_empty_seed_changed_after_lease_preserves_startup(launch_case, monkeypatch, mutation):
+    case = launch_case
+    case.directory.mkdir()
+    seed = case.directory / "storage_state.json"
+    content = '{"cookies":[],"origins":[]}'
+    seed.write_text(content)
+
+    def change_seed(*args):
+        if mutation == "replace":
+            seed.unlink()
+            seed.write_text(content)
+        elif mutation == "remove":
+            seed.unlink()
+        else:
+            seed.write_text('{"cookies":[{}],"origins":[]}')
+        return 0
+
+    monkeypatch.setattr(case.watchdog, "_cleanup_profile_cache", change_seed)
+    await case.watchdog._launch_browser(max_retries=1)
+    assert "about:blank" not in case.spawn.await_args.args
+
+
+async def test_empty_seed_inserted_after_lease_preserves_startup(launch_case, monkeypatch):
+    case = launch_case
+
+    def insert_seed(*args):
+        (case.directory / "storage_state.json").write_text('{"cookies":[],"origins":[]}')
+        return 0
+
+    monkeypatch.setattr(case.watchdog, "_cleanup_profile_cache", insert_seed)
+    await case.watchdog._launch_browser(max_retries=1)
+    assert "about:blank" not in case.spawn.await_args.args
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Seed change-time proof is unavailable on Windows")
+async def test_empty_seed_changed_during_final_listing_fails_launch_fence(launch_case, monkeypatch):
+    case = launch_case
+    case.directory.mkdir()
+    seed = case.directory / "storage_state.json"
+    seed.write_text('{"cookies":[],"origins":[]}')
+    original = module.os.scandir
+    events = []
+
+    def install_mutation(*args):
+        def scan(path):
+            entries = original(path)
+            if Path(path) == case.directory.resolve():
+                events.append("final_listing")
+                seed.write_text('{"cookies":[{}],"origins":[]}')
+            return entries
+
+        monkeypatch.setattr(module.os, "scandir", scan)
+        return 0
+
+    monkeypatch.setattr(case.watchdog, "_cleanup_profile_cache", install_mutation)
+    await case.watchdog._launch_browser(max_retries=1)
+    assert events == ["final_listing"]
+    assert "about:blank" not in case.spawn.await_args.args
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Seed change-time proof is unavailable on Windows")
+async def test_foreign_profile_inserted_during_seed_read_fails_launch_fence(launch_case, monkeypatch):
+    case = launch_case
+    case.directory.mkdir()
+    (case.directory / "storage_state.json").write_text('{"cookies":[],"origins":[]}')
+    original = ProfileLease.pristine_seed_unchanged
+    calls = []
+
+    def insert_after_read(lease):
+        result = original(lease)
+        calls.append("seed_read")
+        if len(calls) == 1:
+            preferences = case.directory / "Default" / "Preferences"
+            preferences.parent.mkdir()
+            preferences.write_text('{"session":{"restore_on_startup":1}}')
+        return result
+
+    monkeypatch.setattr(ProfileLease, "pristine_seed_unchanged", insert_after_read)
+    await case.watchdog._launch_browser(max_retries=1)
+    assert calls == ["seed_read"]
+    assert "about:blank" not in case.spawn.await_args.args
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Seed change-time proof is unavailable on Windows")
+async def test_seed_changed_by_final_directory_stat_disables_blank(launch_case, monkeypatch):
+    case = launch_case
+    case.directory.mkdir()
+    seed = case.directory / "storage_state.json"
+    seed.write_text('{"cookies":[],"origins":[]}')
+    original_scan = module.os.scandir
+    original_stat = Path.stat
+    closing_reads = []
+
+    def install(*args):
+        def scan(path):
+            if Path(path) == case.directory.resolve():
+
+                def changed_stat(target, *, follow_symlinks=True):
+                    result = original_stat(target, follow_symlinks=follow_symlinks)
+                    if target == case.directory and follow_symlinks is False:
+                        closing_reads.append("directory")
+                        if len(closing_reads) == 2:
+                            seed.write_text('{"cookies":[{}],"origins":[]}')
+                    return result
+
+                monkeypatch.setattr(Path, "stat", changed_stat)
+            return original_scan(path)
+
+        monkeypatch.setattr(module.os, "scandir", scan)
+        return 0
+
+    monkeypatch.setattr(case.watchdog, "_cleanup_profile_cache", install)
+    await case.watchdog._launch_browser(max_retries=1)
+    assert len(closing_reads) >= 2
+    assert "about:blank" not in case.spawn.await_args.args
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Seed change-time proof is unavailable on Windows")
+async def test_replaced_lease_directory_with_shared_seed_disables_blank(launch_case, monkeypatch):
+    case = launch_case
+    case.directory.mkdir()
+    seed = case.directory / "storage_state.json"
+    seed.write_text('{"cookies":[],"origins":[]}')
+    replacement = case.directory.with_name("replacement")
+    replacement.mkdir()
+    module.os.link(seed, replacement / seed.name)
+
+    def replace_directory(*args):
+        for name in (ProfileLease.LOCK_FILENAME, ProfileLease.METADATA_FILENAME):
+            module.shutil.copy2(case.directory / name, replacement / name)
+        case.directory.rename(case.directory.with_name("previous"))
+        replacement.rename(case.directory)
+        return 0
+
+    monkeypatch.setattr(case.watchdog, "_cleanup_profile_cache", replace_directory)
+    await case.watchdog._launch_browser(max_retries=1)
+    assert "about:blank" not in case.spawn.await_args.args

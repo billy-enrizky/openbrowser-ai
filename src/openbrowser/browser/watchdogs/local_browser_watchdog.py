@@ -218,23 +218,35 @@ class LocalBrowserWatchdog(BaseWatchdog):
 		try:
 			if lease.profile_dir != Path(user_data_dir).expanduser().resolve() or lease.profile_dir.is_symlink():
 				return False
+			verify_lease = getattr(lease, 'pristine_lease_unchanged', None)
+			if not callable(verify_lease) or verify_lease() is not True:
+				return False
+			seed_signature = getattr(lease, 'pristine_seed_signature', None)
+			expected_names = {ProfileLease.LOCK_FILENAME, ProfileLease.METADATA_FILENAME}
+			if seed_signature is not None:
+				expected_names.add(ProfileLease.STORAGE_SEED_FILENAME)
+				if not lease.pristine_seed_unchanged():
+					return False
 			before = lease.profile_dir.stat(follow_symlinks=False)
 			if not stat.S_ISDIR(before.st_mode):
 				return False
 			with os.scandir(lease.profile_dir) as entries:
 				observed = tuple(entries)
-				if {entry.name for entry in observed} != {ProfileLease.LOCK_FILENAME, ProfileLease.METADATA_FILENAME}:
+				if {entry.name for entry in observed} != expected_names:
 					return False
 				if not all(entry.is_file(follow_symlinks=False) for entry in observed):
 					return False
 			closing = lease.profile_dir.stat(follow_symlinks=False)
-			return (before.st_dev, before.st_ino, before.st_mode, before.st_mtime_ns, before.st_ctime_ns) == (
+			unchanged = (before.st_dev, before.st_ino, before.st_mode, before.st_mtime_ns, before.st_ctime_ns) == (
 				closing.st_dev,
 				closing.st_ino,
 				closing.st_mode,
 				closing.st_mtime_ns,
 				closing.st_ctime_ns,
 			)
+			if not unchanged or verify_lease(before) is not True:
+				return False
+			return seed_signature is None or lease.pristine_seed_identity_unchanged() is True
 		except (OSError, RuntimeError):
 			return False
 

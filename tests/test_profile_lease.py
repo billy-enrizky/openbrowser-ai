@@ -473,3 +473,250 @@ def test_owner_metadata_start_time_handles_missing_and_numeric_values(tmp_path: 
 	lease = ProfileLease(tmp_path / 'profile', instance_id='owner', owner_pid=12345, owner_start_time=1.5)
 	metadata = {'instance_id': 'owner', 'owner_pid': 12345, 'owner_start_time': value}
 	assert lease._metadata_belongs_to_this_lease(metadata) is expected
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='Seed change-time proof is unavailable on Windows')
+def test_empty_storage_seed_has_a_fenced_pristine_proof(tmp_path: Path):
+	profile = tmp_path / 'seeded'
+	profile.mkdir()
+	seed = profile / 'storage_state.json'
+	content = '{"cookies": [], "origins": []}'
+	seed.write_text(content)
+	lease = ProfileLease(profile, owner_pid=4321, owner_start_time=1.0)
+	lease.acquire()
+	try:
+		assert lease.profile_pristine is True
+		assert lease.pristine_seed_signature is not None
+		assert lease.pristine_seed_unchanged() is True
+		lease.write_metadata()
+		assert lease.pristine_seed_unchanged() is True
+		assert seed.read_text() == content
+	finally:
+		lease.release()
+	assert lease.pristine_seed_signature is None
+
+
+@pytest.mark.parametrize(
+	'content',
+	[
+		'{"cookies":[{}],"origins":[]}',
+		'{"cookies":[],"origins":[{}]}',
+		'{"cookies":[],"origins":[],"other":0}',
+		'invalid',
+		'[]',
+		' ' * 4097 + '{"cookies":[],"origins":[]}',
+	],
+)
+def test_nonempty_or_unrecognized_seed_retains_existing_policy(tmp_path: Path, content):
+	profile = tmp_path / 'seeded'
+	profile.mkdir()
+	(profile / 'storage_state.json').write_text(content)
+	lease = ProfileLease(profile, owner_pid=4321, owner_start_time=1.0)
+	lease.acquire()
+	try:
+		assert lease.profile_pristine is False
+	finally:
+		lease.release()
+
+
+def test_empty_seed_modified_during_lock_is_unverified(tmp_path: Path, monkeypatch):
+	profile = tmp_path / 'seeded'
+	profile.mkdir()
+	seed = profile / 'storage_state.json'
+	seed.write_text('{"cookies":[],"origins":[]}')
+	original_lock = ProfileLease._lock
+
+	def change_seed(handle):
+		seed.write_text('{ "cookies": [], "origins": [] }')
+		original_lock(handle)
+
+	monkeypatch.setattr(ProfileLease, '_lock', staticmethod(change_seed))
+	lease = ProfileLease(profile, owner_pid=4321, owner_start_time=1.0)
+	lease.acquire()
+	try:
+		assert lease.profile_pristine is False
+	finally:
+		lease.release()
+
+
+@pytest.mark.parametrize('mutation', ['replace', 'remove', 'nonempty'])
+@pytest.mark.skipif(os.name == 'nt', reason='Seed change-time proof is unavailable on Windows')
+def test_empty_seed_post_acquisition_change_fails_its_fence(tmp_path: Path, mutation):
+	profile = tmp_path / 'seeded'
+	profile.mkdir()
+	seed = profile / 'storage_state.json'
+	content = '{"cookies":[],"origins":[]}'
+	seed.write_text(content)
+	lease = ProfileLease(profile, owner_pid=4321, owner_start_time=1.0)
+	lease.acquire()
+	try:
+		assert lease.profile_pristine is True
+		if mutation == 'replace':
+			seed.unlink()
+			seed.write_text(content)
+		elif mutation == 'remove':
+			seed.unlink()
+		else:
+			seed.write_text('{"cookies":[{}],"origins":[]}')
+		assert lease.pristine_seed_unchanged() is False
+	finally:
+		lease.release()
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='Seed change-time proof is unavailable on Windows')
+def test_empty_seed_symlink_does_not_prove_pristine(tmp_path: Path):
+	profile = tmp_path / 'seeded'
+	profile.mkdir()
+	target = tmp_path / 'state.json'
+	target.write_text('{"cookies":[],"origins":[]}')
+	(profile / 'storage_state.json').symlink_to(target)
+	lease = ProfileLease(profile, owner_pid=4321, owner_start_time=1.0)
+	lease.acquire()
+	try:
+		assert lease.profile_pristine is False
+	finally:
+		lease.release()
+
+
+def test_empty_seed_read_uncertainty_stays_unverified(tmp_path: Path, monkeypatch):
+	profile = tmp_path / 'seeded'
+	profile.mkdir()
+	seed = profile / 'storage_state.json'
+	seed.write_text('{"cookies":[],"origins":[]}')
+	original = os.lstat
+
+	def deny_seed(path, *args, **kwargs):
+		if Path(path) == seed:
+			raise PermissionError('unavailable seed')
+		return original(path, *args, **kwargs)
+
+	monkeypatch.setattr(os, 'lstat', deny_seed)
+	lease = ProfileLease(profile, owner_pid=4321, owner_start_time=1.0)
+	lease.acquire()
+	try:
+		assert lease.profile_pristine is False
+	finally:
+		lease.release()
+
+
+def test_empty_seed_changed_during_read_stays_unverified(tmp_path: Path, monkeypatch):
+	profile = tmp_path / 'seeded'
+	profile.mkdir()
+	seed = profile / 'storage_state.json'
+	seed.write_text('{"cookies":[],"origins":[]}')
+	original = os.fdopen
+
+	class ChangedRead:
+		def __init__(self, handle):
+			self.handle = handle
+
+		def __enter__(self):
+			return self
+
+		def __exit__(self, *args):
+			self.handle.close()
+
+		def fileno(self):
+			return self.handle.fileno()
+
+		def read(self, size):
+			data = self.handle.read(size)
+			seed.write_text('{ "cookies": [], "origins": [] }')
+			return data
+
+	monkeypatch.setattr(os, 'fdopen', lambda *args, **kwargs: ChangedRead(original(*args, **kwargs)))
+	lease = ProfileLease(profile, owner_pid=4321, owner_start_time=1.0)
+	lease.acquire()
+	try:
+		assert lease.profile_pristine is False
+	finally:
+		lease.release()
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='Seed change-time proof is unavailable on Windows')
+def test_foreign_file_during_final_seed_read_denies_pristine(tmp_path: Path, monkeypatch):
+	profile = tmp_path / 'seeded'
+	profile.mkdir()
+	(profile / 'storage_state.json').write_text('{"cookies":[],"origins":[]}')
+	original = ProfileLease._capture_empty_storage_seed
+	calls = []
+
+	def read_then_insert(lease):
+		result = original(lease)
+		calls.append('read')
+		if len(calls) == 2:
+			(profile / 'Preferences').write_text('{"session":{"restore_on_startup":1}}')
+		return result
+
+	monkeypatch.setattr(ProfileLease, '_capture_empty_storage_seed', read_then_insert)
+	lease = ProfileLease(profile, owner_pid=4321, owner_start_time=1.0)
+	lease.acquire()
+	try:
+		assert lease.profile_pristine is False
+		assert calls == ['read', 'read']
+	finally:
+		lease.release()
+
+
+@pytest.mark.parametrize('names', [['Default'], ['storage_state.json', 'Default']])
+def test_nonpristine_capture_does_not_scan_the_directory_tail(tmp_path: Path, monkeypatch, names):
+	from contextlib import contextmanager
+	from types import SimpleNamespace
+
+	profile = tmp_path / 'profile'
+	profile.mkdir()
+
+	def entries():
+		for name in names:
+			yield SimpleNamespace(name=name)
+		raise AssertionError('Known nonpristine directories must stop before the tail')
+
+	@contextmanager
+	def scan(path):
+		yield entries()
+
+	monkeypatch.setattr(os, 'scandir', scan)
+	lease = ProfileLease(profile, owner_pid=4321, owner_start_time=1.0)
+	lease.acquire()
+	try:
+		assert lease.profile_pristine is False
+	finally:
+		lease.release()
+
+
+def test_owner_metadata_cleanup_uncertainty_invalidates_pristine_proof(tmp_path: Path, monkeypatch):
+	profile = tmp_path / 'profile'
+	lease = ProfileLease(profile, owner_pid=4321, owner_start_time=1.0)
+	lease.acquire()
+	original = Path.unlink
+
+	def fail_temporary_cleanup(path, *args, **kwargs):
+		if path.suffix == '.tmp':
+			raise PermissionError('temporary cleanup is unknown')
+		return original(path, *args, **kwargs)
+
+	monkeypatch.setattr(Path, 'unlink', fail_temporary_cleanup)
+	try:
+		assert lease.profile_pristine is True
+		lease.write_metadata()
+		assert lease.profile_pristine is False
+	finally:
+		lease.release()
+
+
+def test_seed_proof_is_unavailable_when_ctime_has_windows_birth_semantics(tmp_path: Path, monkeypatch):
+	from openbrowser.browser.watchdogs import profile_lease as module
+
+	profile = tmp_path / 'seeded'
+	profile.mkdir()
+	(profile / 'storage_state.json').write_text('{"cookies":[],"origins":[]}')
+	lease = ProfileLease(profile, owner_pid=4321, owner_start_time=1.0)
+	monkeypatch.setattr(module, 'IS_WINDOWS', True)
+	monkeypatch.setattr(ProfileLease, '_lock', staticmethod(lambda handle: None))
+	monkeypatch.setattr(ProfileLease, '_unlock', staticmethod(lambda handle: None))
+	lease.acquire()
+	try:
+		assert lease.profile_pristine is False
+		assert lease.pristine_seed_signature is None
+	finally:
+		lease.release()

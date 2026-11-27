@@ -21,6 +21,7 @@ else:
 
 
 IS_WINDOWS = os.name == 'nt'
+_SeedSignature = tuple[int, int, int, int, int, int]
 
 
 class ProfileInUseError(RuntimeError):
@@ -35,6 +36,7 @@ class ProfileInUseError(RuntimeError):
 class _PristineProfileSnapshot:
 	eligible: bool
 	directory_identity: tuple[int, int] | None
+	seed_signature: _SeedSignature | None = None
 
 
 class ProfileLease:
@@ -43,6 +45,8 @@ class ProfileLease:
 	LOCK_FILENAME = '.openbrowser-profile.lock'
 	METADATA_FILENAME = '.openbrowser-profile.json'
 	SCHEMA_VERSION = 1
+	STORAGE_SEED_FILENAME = 'storage_state.json'
+	MAX_PRISTINE_SEED_BYTES = 4096
 
 	def __init__(
 		self,
@@ -56,13 +60,13 @@ class ProfileLease:
 		self.instance_id = instance_id or uuid.uuid4().hex
 		self.owner_pid = owner_pid if owner_pid is not None else os.getpid()
 		self.owner_start_time = (
-			float(owner_start_time)
-			if owner_start_time is not None
-			else self._get_process_start_time(self.owner_pid)
+			float(owner_start_time) if owner_start_time is not None else self._get_process_start_time(self.owner_pid)
 		)
 		self._lock_handle: BinaryIO | None = None
 		self.previous_metadata: dict[str, Any] | None = None
 		self._profile_pristine = False
+		self._pristine_seed_signature: _SeedSignature | None = None
+		self._pristine_directory_identity: tuple[int, int] | None = None
 
 	@property
 	def lock_path(self) -> Path:
@@ -78,8 +82,57 @@ class ProfileLease:
 
 	@property
 	def profile_pristine(self) -> bool:
-		"""Return whether this lease proved the profile was pristine at acquisition."""
+		"""Return whether acquisition proved an empty profile or a verified empty seed."""
 		return self._profile_pristine
+
+	@property
+	def pristine_seed_signature(self) -> _SeedSignature | None:
+		"""Return the acquired empty-seed identity while its pristine proof is active."""
+		return self._pristine_seed_signature if self._profile_pristine else None
+
+	def pristine_seed_unchanged(self) -> bool:
+		"""Verify the same regular empty seed still matches the acquired proof."""
+		signature = self.pristine_seed_signature
+		return signature is not None and self._capture_empty_storage_seed() == signature
+
+	def pristine_seed_identity_unchanged(self) -> bool:
+		"""Check the closing seed identity without reading its contents again."""
+		signature = self.pristine_seed_signature
+		return signature is not None and self._seed_identity_matches(signature)
+
+	def pristine_lease_unchanged(self, expected_directory: os.stat_result | None = None) -> bool:
+		"""Fence the acquired directory and held lock before pristine-profile launch."""
+		handle = self._lock_handle
+		if not self._profile_pristine or handle is None or self._pristine_directory_identity is None:
+			return False
+		try:
+			lock = os.lstat(self.lock_path)
+			held = os.fstat(handle.fileno())
+			directory = self.profile_dir.stat(follow_symlinks=False)
+		except (OSError, ValueError):
+			return False
+		if (
+			not stat.S_ISDIR(directory.st_mode)
+			or (directory.st_dev, directory.st_ino) != self._pristine_directory_identity
+			or not stat.S_ISREG(lock.st_mode)
+			or not stat.S_ISREG(held.st_mode)
+			or (lock.st_dev, lock.st_ino) != (held.st_dev, held.st_ino)
+			or lock.st_dev != directory.st_dev
+		):
+			return False
+		return expected_directory is None or (
+			directory.st_dev,
+			directory.st_ino,
+			directory.st_mode,
+			directory.st_mtime_ns,
+			directory.st_ctime_ns,
+		) == (
+			expected_directory.st_dev,
+			expected_directory.st_ino,
+			expected_directory.st_mode,
+			expected_directory.st_mtime_ns,
+			expected_directory.st_ctime_ns,
+		)
 
 	def acquire(self) -> dict[str, Any] | None:
 		"""Acquire the profile lock and return metadata from the prior owner."""
@@ -88,6 +141,8 @@ class ProfileLease:
 			return self.previous_metadata
 
 		self._profile_pristine = False
+		self._pristine_seed_signature = None
+		self._pristine_directory_identity = None
 		snapshot = self._capture_pristine_profile_snapshot()
 		self.profile_dir.mkdir(parents=True, exist_ok=True)
 		handle = self.lock_path.open('a+b')
@@ -103,6 +158,7 @@ class ProfileLease:
 		self._lock_handle = handle
 		self.previous_metadata = self.read_metadata(self.profile_dir)
 		self._profile_pristine = self._verify_pristine_profile(snapshot, handle)
+		self._pristine_seed_signature = snapshot.seed_signature if self._profile_pristine else None
 		return self.previous_metadata
 
 	def write_metadata(self, browser: dict[str, Any] | None = None) -> None:
@@ -175,11 +231,12 @@ class ProfileLease:
 	def _capture_pristine_profile_snapshot(self) -> _PristineProfileSnapshot:
 		"""Capture directory state before creating any lease-owned files."""
 		directory_identity: tuple[int, int] | None = None
+		seed_signature: _SeedSignature | None = None
 		try:
 			directory_stat = self.profile_dir.stat()
 		except FileNotFoundError:
 			directory_exists = False
-			directory_empty = True
+			contents_pristine = True
 		except OSError:
 			return _PristineProfileSnapshot(False, None)
 		else:
@@ -188,8 +245,15 @@ class ProfileLease:
 				return _PristineProfileSnapshot(False, None)
 			directory_identity = (directory_stat.st_dev, directory_stat.st_ino)
 			try:
+				contents_pristine = False
 				with os.scandir(self.profile_dir) as entries:
-					directory_empty = next(entries, None) is None
+					iterator = iter(entries)
+					first = next(iterator, None)
+					if first is None:
+						contents_pristine = True
+					elif first.name == self.STORAGE_SEED_FILENAME and next(iterator, None) is None:
+						seed_signature = self._capture_empty_storage_seed()
+						contents_pristine = seed_signature is not None
 			except OSError:
 				return _PristineProfileSnapshot(False, directory_identity)
 
@@ -197,8 +261,47 @@ class ProfileLease:
 		metadata_exists = self._path_lexists(self.metadata_path)
 		if lock_exists is None or metadata_exists is None:
 			return _PristineProfileSnapshot(False, directory_identity)
-		eligible = (not directory_exists or directory_empty) and not lock_exists and not metadata_exists
-		return _PristineProfileSnapshot(eligible, directory_identity)
+		eligible = (not directory_exists or contents_pristine) and not lock_exists and not metadata_exists
+		return _PristineProfileSnapshot(eligible, directory_identity, seed_signature)
+
+	@staticmethod
+	def _seed_stat_signature(value: os.stat_result) -> _SeedSignature:
+		return value.st_dev, value.st_ino, value.st_mode, value.st_size, value.st_mtime_ns, value.st_ctime_ns
+
+	def _capture_empty_storage_seed(self) -> _SeedSignature | None:
+		"""Recognize a bounded, regular empty seed without changing its contents."""
+		if IS_WINDOWS:
+			# Windows ctime is creation time, so it cannot fence seed changes.
+			return None
+		path = self.profile_dir / self.STORAGE_SEED_FILENAME
+		try:
+			before = os.lstat(path)
+			if not stat.S_ISREG(before.st_mode) or before.st_size > self.MAX_PRISTINE_SEED_BYTES:
+				return None
+			signature = self._seed_stat_signature(before)
+			flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_BINARY', 0)
+			with os.fdopen(os.open(path, flags), 'rb') as handle:
+				if self._seed_stat_signature(os.fstat(handle.fileno())) != signature:
+					return None
+				data = handle.read(self.MAX_PRISTINE_SEED_BYTES + 1)
+				if len(data) > self.MAX_PRISTINE_SEED_BYTES:
+					return None
+				if self._seed_stat_signature(os.fstat(handle.fileno())) != signature:
+					return None
+			if self._seed_stat_signature(os.lstat(path)) != signature:
+				return None
+			if json.loads(data.decode('utf-8')) != {'cookies': [], 'origins': []}:
+				return None
+			return signature
+		except (OSError, ValueError, UnicodeError, RecursionError):
+			return None
+
+	def _seed_identity_matches(self, signature: _SeedSignature) -> bool:
+		try:
+			current = os.lstat(self.profile_dir / self.STORAGE_SEED_FILENAME)
+		except OSError:
+			return False
+		return stat.S_ISREG(current.st_mode) and self._seed_stat_signature(current) == signature
 
 	@staticmethod
 	def _path_lexists(path: Path) -> bool | None:
@@ -212,7 +315,8 @@ class ProfileLease:
 		return True
 
 	def _verify_pristine_profile(self, snapshot: _PristineProfileSnapshot, handle: BinaryIO) -> bool:
-		"""Confirm the locked directory still contains only this lease's lock file."""
+		"""Confirm the locked directory still matches its pristine snapshot."""
+		self._pristine_directory_identity = None
 		if not snapshot.eligible:
 			return False
 		try:
@@ -234,10 +338,21 @@ class ProfileLease:
 			return False
 		if lock_stat.st_dev != directory_stat.st_dev:
 			return False
+		expected_names = {self.LOCK_FILENAME}
+		if snapshot.seed_signature is not None:
+			expected_names.add(self.STORAGE_SEED_FILENAME)
 		try:
 			with os.scandir(self.profile_dir) as entries:
-				names = {entry.name for entry in entries}
+				names: set[str] = set()
+				for entry in entries:
+					if entry.name not in expected_names or entry.name in names:
+						return False
+					names.add(entry.name)
 		except OSError:
+			return False
+		if snapshot.seed_signature is not None and self._capture_empty_storage_seed() != snapshot.seed_signature:
+			return False
+		if names != expected_names:
 			return False
 		try:
 			final_directory_stat = self.profile_dir.stat()
@@ -249,7 +364,15 @@ class ProfileLease:
 			final_directory_stat.st_dev,
 			final_directory_stat.st_ino,
 			final_directory_stat.st_mode,
-		) != (directory_stat.st_dev, directory_stat.st_ino, directory_stat.st_mode):
+			final_directory_stat.st_mtime_ns,
+			final_directory_stat.st_ctime_ns,
+		) != (
+			directory_stat.st_dev,
+			directory_stat.st_ino,
+			directory_stat.st_mode,
+			directory_stat.st_mtime_ns,
+			directory_stat.st_ctime_ns,
+		):
 			return False
 		if (final_lock_stat.st_dev, final_lock_stat.st_ino, final_lock_stat.st_mode) != (
 			lock_stat.st_dev,
@@ -272,7 +395,10 @@ class ProfileLease:
 			return False
 		if final_lock_stat.st_dev != final_directory_stat.st_dev:
 			return False
-		return names == {self.LOCK_FILENAME}
+		if snapshot.seed_signature is not None and not self._seed_identity_matches(snapshot.seed_signature):
+			return False
+		self._pristine_directory_identity = (final_directory_stat.st_dev, final_directory_stat.st_ino)
+		return True
 
 	@classmethod
 	def read_metadata(cls, profile_dir: str | Path) -> dict[str, Any] | None:
@@ -302,7 +428,7 @@ class ProfileLease:
 				return False
 			profile_dir = str(Path(browser['profile_dir']).expanduser().resolve())
 			marker = str(browser['ownership_marker'])
-			expected_marker = f"--openbrowser-instance-id={browser['instance_id']}"
+			expected_marker = f'--openbrowser-instance-id={browser["instance_id"]}'
 			if marker != expected_marker:
 				return False
 			try:
@@ -392,7 +518,7 @@ class ProfileLease:
 			try:
 				Path(temporary_name).unlink(missing_ok=True)
 			except OSError:
-				pass
+				self._profile_pristine = False
 
 	@staticmethod
 	def _lock(handle: BinaryIO) -> None:
