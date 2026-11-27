@@ -79,9 +79,10 @@ class FakeServer:
 
 
 class FakeNativeRead:
-    def __init__(self, eligible: bool = True) -> None:
+    def __init__(self, eligible: bool = True, proof: dict | None = None) -> None:
         self.eligible = eligible
         self.failure = None
+        self.public_proof = proof
 
 
 class FakeNativeRoot:
@@ -105,17 +106,17 @@ class FakeNativeRoot:
         self._ready_eligible = ready_eligible
         self._before_eligible = before_eligible
         self._after_eligible = after_eligible
-        self.ready_read = FakeNativeRead(ready_eligible)
+        self.ready_read = FakeNativeRead(ready_eligible, self._public(ready_eligible).get("proof"))
 
     @property
     def ready_eligible(self) -> bool:
         return self._ready_eligible
 
     def verify_before(self) -> FakeNativeRead:
-        return FakeNativeRead(self._before_eligible)
+        return FakeNativeRead(self._before_eligible, self._public(self._before_eligible).get("proof"))
 
     def verify_after(self, before) -> FakeNativeRead:
-        return FakeNativeRead(self._after_eligible)
+        return FakeNativeRead(self._after_eligible, self._public(self._after_eligible).get("proof"))
 
     def _public(self, eligible: bool) -> dict:
         return {
@@ -123,11 +124,11 @@ class FakeNativeRoot:
             "failure": None if eligible else "fake_failure",
             "proof": (
                 {
-                    "pid": 7000,
+                    "pid": 7000 + int(hashlib.sha256(self.arm.encode()).hexdigest()[:4], 16),
                     "created_at": 1.0,
                     "source": "popen",
                     "executable_basename": "fake",
-                    "scope_digest": "0" * 64,
+                    "scope_digest": hashlib.sha256(self.arm.encode()).hexdigest(),
                 }
                 if eligible
                 else None
@@ -166,12 +167,14 @@ class FakeSampler:
         self.unverified = unverified
         self.native_controller: ServiceIdentity | None = None
         self.native_enrolled = False
+        self.native_proof: dict = {}
 
     def set_native_controller(self, identity: ServiceIdentity) -> None:
         self.native_controller = identity
 
     def enroll_native_service(self, read, *, controller: ServiceIdentity) -> None:
         self.native_enrolled = getattr(read, "eligible", False) is True
+        self.native_proof = getattr(read, "public_proof", None) or {}
 
     def discover_orphans(self) -> None:
         self.events.append("discover")
@@ -195,7 +198,13 @@ class FakeSampler:
             "observed_tree_cpu_seconds": max(item["cpu"] for item in self.values) + 0.5,
             "observed_child_cpu_seconds": max(item["cpu"] for item in self.values),
             "processes": [
-                {"pid": 7000, "created_at": 1.0, "role": "child", "peak_rss_bytes": 10, "observed_cpu_seconds": 0.5}
+                {
+                    "pid": self.native_proof.get("pid"),
+                    "created_at": self.native_proof.get("created_at"),
+                    "role": "child",
+                    "peak_rss_bytes": 10,
+                    "observed_cpu_seconds": 0.5,
+                }
             ],
             "observed_child_processes": 1,
             "observed_browser_processes": 1,
@@ -206,20 +215,7 @@ class FakeSampler:
             "read_error_details_truncated": 0,
             "footprint_status": "observed" if all(value is not None for value in footprints) else "unavailable",
             "native_service_method_version": resource_compare.NATIVE_SERVICE_METHOD_VERSION,
-            "native_service_roots": (
-                [
-                    {
-                        "pid": 7000,
-                        "created_at": 1.0,
-                        "source": "popen",
-                        "executable_basename": "fake",
-                        "scope_digest": "0" * 64,
-                        "observed": True,
-                    }
-                ]
-                if self.native_enrolled
-                else []
-            ),
+            "native_service_roots": [{**self.native_proof, "observed": True}] if self.native_enrolled else [],
             "native_service_roots_observed": self.native_enrolled,
             "native_controller_excluded": True if self.native_controller is not None else None,
         }
@@ -2353,7 +2349,10 @@ def test_lane_accepts_unknown_footprint_and_zero_cpu(valid_lane_bundle):
     )
     for phase in ("baseline", "final"):
         row[f"warm_{phase}_resources"].update(
-            peak_child_footprint_bytes=None, footprint_status="unsupported", observed_child_cpu_seconds=1.0
+            peak_child_footprint_bytes=None,
+            footprint_status="unsupported",
+            observed_child_cpu_seconds=1.0,
+            observed_tree_cpu_seconds=1.5,
         )
     assert warm.lane_valid(records, terminal)
 
@@ -2444,3 +2443,82 @@ def test_lane_requires_registered_root_in_raw_inventory(valid_lane_bundle, phase
     records, terminal = copy.deepcopy(valid_lane_bundle)
     records[0][f"warm_{phase}_resources"]["processes"] = value
     assert not warm.lane_valid(records, terminal)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("provenance_verified", False),
+        ("provenance_verified", None),
+        ("order", 99),
+        ("order", True),
+        ("arm_order", ["foreign"]),
+    ],
+)
+def test_lane_rejects_row_provenance_and_rotation_mutations(valid_lane_bundle, field, value):
+    records, terminal = copy.deepcopy(valid_lane_bundle)
+    records[0][field] = value
+    assert not warm.lane_valid(records, terminal)
+
+
+def test_emitted_rows_bind_preflight_provenance(tmp_path):
+    output, _records, _ = run_lane(tmp_path, arms=("a",))
+    raw = [json.loads(line) for line in output.read_text().splitlines()]
+    assert raw[1]["provenance_verified"] is True
+    assert warm.lane_valid(raw[1:-1], raw[-1])
+
+
+@pytest.mark.parametrize("phase", ["ready", "after"])
+def test_lane_rejects_reused_phase_artifact(valid_lane_bundle, phase):
+    records, terminal = copy.deepcopy(valid_lane_bundle)
+    row = records[0]
+    if phase == "ready":
+        target = terminal["warmups"]["a"]["native_service"]
+        target["evidence_artifact"] = row["native_service_before_evidence_artifact"]
+        target["evidence_sha256"] = row["native_service_before_evidence_sha256"]
+    else:
+        row["native_service_after_evidence_artifact"] = row["native_service_before_evidence_artifact"]
+        row["native_service_after_evidence_sha256"] = row["native_service_before_evidence_sha256"]
+    assert not warm.lane_valid(records, terminal)
+
+
+def test_lane_rejects_cross_arm_full_clone(tmp_path):
+    output, records, _ = run_lane(tmp_path, arms=("a", "b"))
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    assert warm.lane_valid(records, terminal, arms=["a", "b"], tasks=["wizard"], samples=1)
+    records[1] = copy.deepcopy(records[0])
+    records[1].update(arm="b", order=1)
+    terminal["warmups"]["b"] = copy.deepcopy(terminal["warmups"]["a"])
+    assert not warm.lane_valid(records, terminal, arms=["a", "b"], tasks=["wizard"], samples=1)
+
+
+def test_lane_rejects_phase_artifact_reuse_across_rows(tmp_path):
+    output, records, _ = run_lane(tmp_path, arms=("a",), samples=2)
+    terminal = json.loads(output.read_text().splitlines()[-1])
+    assert warm.lane_valid(records, terminal)
+    for key in ("native_service_before_evidence_artifact", "native_service_before_evidence_sha256"):
+        records[1][key] = records[0][key]
+    assert not warm.lane_valid(records, terminal)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("warm_worker_task_cpu_delta_seconds", 999.0),
+        ("warm_worker_task_cpu_delta_seconds", -1),
+        ("warm_worker_task_cpu_delta_seconds", float("nan")),
+        ("warm_worker_cpu_delta_error", "unknown"),
+    ],
+)
+def test_lane_rejects_inconsistent_worker_diagnostic(valid_lane_bundle, field, value):
+    records, terminal = copy.deepcopy(valid_lane_bundle)
+    records[0][field] = value
+    assert not warm.lane_valid(records, terminal)
+
+
+def test_lane_accepts_unknown_worker_diagnostic(valid_lane_bundle):
+    records, terminal = copy.deepcopy(valid_lane_bundle)
+    row = records[0]
+    row.update(warm_worker_task_cpu_delta_seconds=None, warm_worker_cpu_delta_error="invalid_counter")
+    row["warm_baseline_resources"]["observed_tree_cpu_seconds"] = None
+    assert warm.lane_valid(records, terminal)

@@ -1423,6 +1423,8 @@ def run_warm_lane(
                             "warm_footprint_status": resources.get("footprint_status"),
                             "warm_sampling_error": capture.error,
                             "resource_ok": resource_ok,
+                            "provenance_verified": before_binding.get("verified") is True,
+                            "provenance_scope": "preflight",
                             "elapsed_seconds": round(time.monotonic() - started, 6),
                             "latency_claim_allowed": False,
                             "provisional": True,
@@ -1697,10 +1699,14 @@ def _warm_resource_row_valid(row: dict, ready: object) -> bool:
             "oracle_ok",
             "keychain_verified",
             "resource_ok",
+            "provenance_verified",
             "warm_native_roots_observed",
             "warm_native_controller_excluded",
         )
     ):
+        return False
+    # The row attests preflight only; lane_valid also requires the final provenance footer.
+    if row.get("provenance_scope") != "preflight":
         return False
     if row.get("record_type") != "sample" or row.get("latency_claim_allowed") is not False:
         return False
@@ -1741,6 +1747,20 @@ def _warm_resource_row_valid(row: dict, ready: object) -> bool:
     if any(type(row.get(key)) is not type(final[value]) or row[key] != final[value] for key, value in pairs.items()):
         return False
     delta = row.get("warm_task_tree_cpu_delta_seconds")
+    worker_delta, worker_error = row.get("warm_worker_task_cpu_delta_seconds"), row.get("warm_worker_cpu_delta_error")
+    tree_counters = (baseline.get("observed_tree_cpu_seconds"), final.get("observed_tree_cpu_seconds"))
+    child_counters = (baseline["observed_child_cpu_seconds"], final["observed_child_cpu_seconds"])
+    if all(
+        _finite_counter(value) and value >= child for value, child in zip(tree_counters, child_counters, strict=True)
+    ):
+        assert isinstance(tree_counters[0], (int, float)) and isinstance(tree_counters[1], (int, float))
+        expected_worker_delta = (float(tree_counters[1]) - float(child_counters[1])) - (
+            float(tree_counters[0]) - float(child_counters[0])
+        )
+        if worker_error is not None or not _finite_counter(worker_delta) or worker_delta != expected_worker_delta:
+            return False
+    elif worker_delta is not None or worker_error != "invalid_counter":
+        return False
     return (
         _finite_counter(delta)
         and final["observed_child_cpu_seconds"] >= baseline["observed_child_cpu_seconds"]
@@ -1797,6 +1817,31 @@ def lane_valid(
     warmups, cleanup = terminal.get("warmups"), terminal.get("cleanup")
     if not isinstance(warmups, dict) or not isinstance(cleanup, dict):
         return False
+    ready_identities: set[tuple[int, int | float]] = set()
+    ready_pids: set[int] = set()
+    ready_scopes: set[str] = set()
+    artifacts: set[str] = set()
+    for warmup in warmups.values():
+        if not isinstance(warmup, dict):
+            return False
+        ready = warmup.get("native_service")
+        proof = _native_public_proof(ready)
+        if (
+            proof is None
+            or not isinstance(ready, dict)
+            or not _evidence_link(ready.get("evidence_sha256"), ready.get("evidence_artifact"))
+        ):
+            return False
+        identity = (proof["pid"], proof["created_at"])
+        if identity in ready_identities or proof["pid"] in ready_pids or proof["scope_digest"] in ready_scopes:
+            return False
+        name = ready["evidence_artifact"]
+        if name in artifacts:
+            return False
+        artifacts.add(name)
+        ready_identities.add(identity)
+        ready_pids.add(proof["pid"])
+        ready_scopes.add(proof["scope_digest"])
     seen: set[tuple[str, str, int]] = set()
     for row in records:
         if not isinstance(row, dict):
@@ -1819,6 +1864,16 @@ def lane_valid(
         warmup = warmups.get(arm)
         if not isinstance(warmup, dict) or not _warm_resource_row_valid(row, warmup.get("native_service")):
             return False
+        initial_order = list(warmups)
+        shift = sample % len(initial_order)
+        rotated = initial_order[shift:] + initial_order[:shift]
+        if row.get("arm_order") != rotated or type(row.get("order")) is not int or row["order"] != rotated.index(arm):
+            return False
+        for phase in ("before", "after"):
+            name = row[f"native_service_{phase}_evidence_artifact"]
+            if name in artifacts:
+                return False
+            artifacts.add(name)
         key = (task, arm, sample)
         if key in seen:
             return False
@@ -1837,6 +1892,8 @@ def lane_valid(
         if not all(isinstance(value, str) and value for value in (*arms, *tasks)):
             return False
         if len(set(arms)) != len(arms) or len(set(tasks)) != len(tasks):
+            return False
+        if list(arms) != list(warmups):
             return False
         if isinstance(samples, bool) or not isinstance(samples, int) or samples < 1:
             return False
