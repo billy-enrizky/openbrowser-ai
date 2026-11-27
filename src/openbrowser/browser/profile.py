@@ -129,6 +129,7 @@ CHROME_DEFAULT_ARGS = [
 	'--disable-backgrounding-occluded-windows',  # same deal, agents are often working on backgrounded browser windows
 	'--disable-back-forward-cache',  # Avoids surprises like main request not being intercepted during page.goBack().
 	'--disable-breakpad',
+	'--disable-stack-profiler',
 	'--disable-client-side-phishing-detection',
 	'--disable-component-extensions-with-background-pages',
 	'--disable-component-update',  # Avoids unneeded network activity after startup.
