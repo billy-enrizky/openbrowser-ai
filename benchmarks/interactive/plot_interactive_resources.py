@@ -61,7 +61,7 @@ METRICS = (
 )
 WARM_SOURCES = {
     "peak_child_footprint_bytes": "warm_peak_child_footprint_bytes",
-    "peak_tree_rss_bytes": "warm_peak_tree_rss_bytes",
+    "peak_child_tree_rss_bytes": "warm_peak_tree_rss_bytes",
 }
 
 
