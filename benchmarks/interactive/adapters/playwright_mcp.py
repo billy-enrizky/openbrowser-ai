@@ -25,7 +25,7 @@ from .playwright_common import (
     chrome_version,
     keychain,
     last_json,
-    result_text,
+    text_content,
     wait_for_download,
     write_browser_config,
     write_secrets,
@@ -114,22 +114,23 @@ class PlaywrightMcpArm:
         client = self._start(ctx)
         self._result.tool_calls += 1
         result = client.call_tool(name, arguments, timeout=timeout or self.timeout)
-        text = result_text(result)
+        text = text_content(result)
         self._result.stdout += text + "\n"
+        if result.get("isError", False) is not False:
+            raise RuntimeError("Playwright MCP tool returned an error")
         return text
 
     def _restart(self, ctx: RunContext) -> None:
         self._keychain_verified = None
-        if self._client is not None:
+        if self._client is None:
+            self._start(ctx)
+            return
+        self._archive_stderr(self._client)
+        try:
+            # The native server recreates its browser backend after browser_close.
+            self._call(ctx, "browser_close", {}, timeout=30)
+        finally:
             self._archive_stderr(self._client)
-            with contextlib.suppress(Exception):
-                self._call(ctx, "browser_close", {}, timeout=30)
-            self._archive_stderr(self._client)
-            with contextlib.suppress(Exception):
-                self._client.close()
-            self._archive_stderr(self._client)
-            self._client = None
-        self._start(ctx)
 
     def _ensure_keychain(self, ctx: RunContext) -> bool:
         """Verify the mock keychain once per launched browser."""

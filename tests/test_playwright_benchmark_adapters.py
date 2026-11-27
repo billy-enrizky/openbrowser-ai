@@ -34,7 +34,7 @@ from benchmarks.interactive.fixtures.server import BENCH_PASSWORD, BENCH_USER, R
 @pytest.fixture(autouse=True)
 def _no_native_io(monkeypatch):
     def forbidden(*args, **kwargs):
-        raise AssertionError("fake test attempted native I/O")
+        pytest.fail("fake test attempted native I/O")
 
     monkeypatch.setattr(subprocess, "Popen", forbidden)
     monkeypatch.setattr(socket, "socket", forbidden)
@@ -221,13 +221,15 @@ def test_mcp_auth_uses_native_secret_fill_and_restart(tmp_path, monkeypatch):
     assert result.reported.get("secret") == "bench-secret"
     first = FakeMcpClient.instances[0]
     names = [name for name, _ in first.calls]
-    assert names.count("browser_run_code_unsafe") == 2  # login, ready
+    assert names.count("browser_run_code_unsafe") == 3  # login, ready, account
     fill = next(arguments for name, arguments in first.calls if name == "browser_type")
     assert fill["text"] == SECRET_PASSWORD
     assert fill["target"] == "#password"
     assert fill["submit"] is True
-    assert len(FakeMcpClient.instances) == 2  # restart started a new server
-    assert any(name == "browser_close" for name, _ in FakeMcpClient.instances[1].calls) or first.closed is True
+    assert len(FakeMcpClient.instances) == 1
+    assert result.process_starts == 1
+    assert names.count("browser_close") == 2  # restart and final teardown
+    assert first.closed is True
 
 
 def test_mcp_warmup_payload(tmp_path, monkeypatch):
@@ -522,8 +524,12 @@ def test_mcp_restart_closes_browser_before_transport(tmp_path, monkeypatch):
     assert arm._result.tool_calls == 1  # the in-task browser_close is a real native call
     first = FakeMcpClient.instances[0]
     assert ("tool", "browser_close") in first.sequence
+    assert len(FakeMcpClient.instances) == 1
+    assert first.closed is False
+    assert arm._client is first
+    arm.cleanup(ctx)
     assert first.sequence.index(("tool", "browser_close")) < first.sequence.index(("close", ""))
-    assert len(FakeMcpClient.instances) == 2
+    assert len(FakeMcpClient.instances) == 1
 
 
 @pytest.mark.parametrize(
@@ -745,3 +751,37 @@ def test_mcp_run_without_cleanup_rejects_stderr_leak(tmp_path, monkeypatch):
     assert result.ok is False
     assert "leaked" in result.error
     assert BENCH_PASSWORD in result.stderr
+
+
+@pytest.mark.parametrize("flag", [True, None, 0, "false"])
+def test_mcp_restart_rejects_tool_error_or_malformed_error_flag(tmp_path, monkeypatch, flag):
+    ctx = make_context(tmp_path, task="auth")
+    monkeypatch.setattr(playwright_mcp, "StdioMcpClient", FakeMcpClient)
+    arm = playwright_mcp.PlaywrightMcpArm(binary="/bin/playwright-mcp")
+    client = arm._start(ctx)
+    assert isinstance(client, FakeMcpClient)
+    monkeypatch.setattr(client, "call_tool", lambda *a, **kw: {"isError": flag, "content": []})
+    with pytest.raises(RuntimeError, match="tool returned an error"):
+        arm._restart(ctx)
+    assert arm._keychain_verified is None
+    assert client.closed is False
+    assert arm._client is client
+
+
+def test_fake_io_guard_cannot_be_swallowed_by_adapter():
+    with pytest.raises(pytest.fail.Exception):
+        subprocess.Popen(["forbidden-native-program"])
+
+
+def test_mcp_tool_error_text_is_retained_and_secret_checked(tmp_path, monkeypatch):
+    class ErrorClient(FakeMcpClient):
+        def call_tool(self, name, arguments, *, timeout=None):
+            return {"isError": True, "content": [{"type": "text", "text": BENCH_PASSWORD}]}
+
+    monkeypatch.setattr(playwright_mcp, "StdioMcpClient", ErrorClient)
+    arm = playwright_mcp.PlaywrightMcpArm(binary="/bin/playwright-mcp")
+    result = arm.run(make_context(tmp_path), cleanup=False)
+    assert result.ok is False
+    assert "leaked" in result.error
+    assert BENCH_PASSWORD in result.stdout
+    assert BENCH_PASSWORD not in result.error
