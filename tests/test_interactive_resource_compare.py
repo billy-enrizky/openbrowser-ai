@@ -1703,7 +1703,7 @@ def test_authoritative_exit_does_not_call_identity_fence(error_name):
     root = FakeProcess(10, 1.0)
     sampler = fake_sampler(module, {10: root})
 
-    def fail(_identity):
+    def fail(_identity, **_kwargs):
         pytest.fail("authoritative exit must not call the identity fence")
 
     sampler._identity_resolution = fail  # type: ignore[method-assign]
@@ -1731,7 +1731,7 @@ def test_ambiguous_read_error_uses_identity_fence(error_name, operation):
     sampler = fake_sampler(module, {10: root})
     calls = []
 
-    def fence(identity):
+    def fence(identity, **_kwargs):
         calls.append(identity)
         return "alive", None
 
@@ -1885,7 +1885,7 @@ def test_memory_task_proof_pid_reuse_is_replaced():
     replacement = FakeProcess(20, 99.0)
     processes = {10: root, 20: child}
     sampler = fake_sampler(module, processes)
-    sampler._identity_resolution = lambda identity: ("alive", None)  # type: ignore[method-assign]
+    sampler._identity_resolution = lambda identity, **_kwargs: ("alive", None)  # type: ignore[method-assign]
     processes[20] = replacement
 
     sampler._note_read_error(
@@ -1913,7 +1913,7 @@ def test_memory_task_proof_malformed_time_is_fatal():
     replacement.create_time = lambda: math.nan
     processes = {10: root, 20: child}
     sampler = fake_sampler(module, processes)
-    sampler._identity_resolution = lambda identity: ("alive", None)  # type: ignore[method-assign]
+    sampler._identity_resolution = lambda identity, **_kwargs: ("alive", None)  # type: ignore[method-assign]
     processes[20] = replacement
 
     sampler._note_read_error(
@@ -1939,7 +1939,7 @@ def test_memory_task_proof_skips_other_operations():
     child = FakeProcess(20, 2.0)
     processes = {10: root, 20: child}
     sampler = fake_sampler(module, processes)
-    sampler._identity_resolution = lambda identity: ("alive", None)  # type: ignore[method-assign]
+    sampler._identity_resolution = lambda identity, **_kwargs: ("alive", None)  # type: ignore[method-assign]
     child.memory_info = lambda: pytest.fail("memory_info verification must not run for cmdline")
     sampler._note_read_error(
         module.psutil.AccessDenied(20),
@@ -1964,7 +1964,7 @@ def test_memory_task_proof_initial_pid_mismatch_skips_verification():
     child = FakeProcess(20, 2.0)
     processes = {10: root, 20: child}
     sampler = fake_sampler(module, processes)
-    sampler._identity_resolution = lambda identity: ("alive", None)  # type: ignore[method-assign]
+    sampler._identity_resolution = lambda identity, **_kwargs: ("alive", None)  # type: ignore[method-assign]
     child.memory_info = lambda: pytest.fail("memory_info verification must not run for a mismatched PID")
     sampler._note_read_error(
         module.psutil.AccessDenied(21),
@@ -3184,7 +3184,7 @@ def _raise_from(error):
 def test_sampler7_rejects_oserror_malformed_pid(monkeypatch, pid_value):
     module = resource_module()
     error = OSError(0, "sysctl(KERN_PROCARGS2)")
-    error.pid = pid_value
+    vars(error)["pid"] = pid_value
     sampler, _calls = discovery_probe_sampler(
         module,
         monkeypatch,
@@ -3387,3 +3387,532 @@ def test_sampler7_rejects_wrong_or_malformed_closing_pid(monkeypatch, closing_pi
     fence = result["discovery_end_fences"][0]
     assert fence["validated_exit"] is False
     assert fence["fence"]["error_pid_present"] is True
+
+
+PROBE_KEYS = {
+    "stage",
+    "operation",
+    "expected_pid",
+    "expected_pid_present",
+    "expected_pid_valid",
+    "expected_ctime",
+    "expected_ctime_present",
+    "expected_ctime_valid",
+    "factory_pid",
+    "factory_pid_present",
+    "factory_pid_valid",
+    "factory_pid_match",
+    "ctime",
+    "status",
+    "running",
+    "error_type",
+    "errno",
+    "error_pid",
+    "error_pid_present",
+    "error_pid_valid",
+    "error_pid_match",
+    "resolution",
+    "verification",
+}
+
+
+@pytest.mark.parametrize(
+    ("exception_name", "resolution"),
+    [("NoSuchProcess", "gone"), ("ZombieProcess", "zombie")],
+)
+def test_read_exception_serializes_original_error_pid_facts(exception_name, resolution):
+    module = resource_module()
+    sampler = fake_sampler(module, {10: FakeProcess(10, 1.0)})
+
+    sampler._note_read_error(
+        getattr(module.psutil, exception_name)(20),
+        identity=(20, 2.0),
+        operation="memory_info",
+        phase="native_run",
+        sample_index=0,
+    )
+
+    detail = sampler.result()["read_error_details"][0]
+    assert detail["resolution"] == resolution
+    assert detail["resolution_source"] == "read_exception"
+    assert detail["resolution_error_type"] == exception_name
+    assert detail["error_pid"] == 20
+    assert detail["error_pid_present"] is True
+    assert detail["error_pid_valid"] is True
+    assert detail["error_pid_match"] is True
+    assert detail["resolution_probe"] is None
+    assert detail["memory_probe"] is None
+
+
+@pytest.mark.parametrize(
+    ("present", "expected_operation", "expected_resolution"),
+    [(False, "factory", "gone"), (True, "status", "zombie")],
+)
+def test_identity_fence_serializes_existing_probe_without_extra_query(present, expected_operation, expected_resolution):
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    child = FakeProcess(20, 2.0)
+    child.state = module.psutil.STATUS_ZOMBIE if present else "running"
+    calls = []
+
+    def factory(pid):
+        if pid == 10:
+            return root
+        calls.append(pid)
+        if not present:
+            raise module.psutil.NoSuchProcess(20)
+        return child
+
+    sampler = module.ProcessTreeSampler(10, process_factory=factory, footprint_supported=False)
+    calls.clear()
+
+    sampler._note_read_error(
+        module.psutil.AccessDenied(20),
+        identity=(20, 2.0),
+        operation="memory_info",
+        phase="native_run",
+        sample_index=0,
+    )
+
+    result = sampler.result()
+    detail = result["read_error_details"][0]
+    probe = detail["resolution_probe"]
+    assert calls == [20]
+    assert result["expected_exit_races"] == 1
+    assert result["fatal_read_errors"] == 0
+    assert detail["resolution"] == expected_resolution
+    assert detail["resolution_source"] == "identity_fence"
+    assert detail["memory_task_verification"] == "not_run"
+    assert detail["error_pid"] == 20
+    assert detail["error_pid_present"] is True
+    assert detail["error_pid_valid"] is True
+    assert detail["error_pid_match"] is True
+    assert set(probe) == PROBE_KEYS
+    assert probe["stage"] == "identity"
+    assert probe["operation"] == expected_operation
+    assert probe["resolution"] == expected_resolution
+    assert probe["expected_pid"] == 20
+    assert probe["expected_pid_valid"] is True
+    assert probe["expected_ctime"] == 2.0
+    assert detail["memory_probe"] is None
+
+
+@pytest.mark.parametrize(
+    ("second_error", "verification", "resolution"),
+    [
+        (None, "success", "alive"),
+        ("NoSuchProcess", "no_such_process", "gone"),
+        ("ZombieProcess", "zombie_process", "zombie"),
+        ("AccessDenied", "access_denied", "alive"),
+        ("OSError", "oserror", "alive"),
+        ("RuntimeError", "unknown", "unknown"),
+        ("pid_mismatch", "pid_mismatch", "alive"),
+    ],
+)
+def test_memory_task_probes_serialize_all_existing_branches(second_error, verification, resolution):
+    module = resource_module()
+
+    def second():
+        if second_error is None:
+            return SimpleNamespace(rss=999)
+        if second_error == "pid_mismatch":
+            raise module.psutil.NoSuchProcess(21)
+        error = {
+            "NoSuchProcess": module.psutil.NoSuchProcess(20),
+            "ZombieProcess": module.psutil.ZombieProcess(20),
+            "AccessDenied": module.psutil.AccessDenied(20),
+            "OSError": OSError(0, "ambiguous"),
+            "RuntimeError": RuntimeError("ambiguous"),
+        }[second_error]
+        raise error
+
+    sampler, calls = memory_task_sampler(module, second)
+    sampler.sample()
+
+    result = sampler.result()
+    detail = result["read_error_details"][0]
+    identity_probe = detail["resolution_probe"]
+    memory_probe = detail["memory_probe"]
+    assert len(calls) == 2
+    assert detail["error_pid"] == 20
+    assert detail["error_pid_present"] is True
+    assert detail["error_pid_valid"] is True
+    assert detail["error_pid_match"] is True
+    assert set(identity_probe) == PROBE_KEYS
+    assert identity_probe["stage"] == "identity"
+    assert identity_probe["resolution"] == "alive"
+    assert identity_probe["factory_pid"] == 20
+    assert set(memory_probe) == PROBE_KEYS
+    assert memory_probe["stage"] == "memory"
+    assert memory_probe["operation"] == "memory_info"
+    assert memory_probe["verification"] == verification
+    assert memory_probe["resolution"] == resolution
+    assert memory_probe["factory_pid"] == 20
+    assert detail["memory_task_verification"] == verification
+
+
+@pytest.mark.parametrize(
+    ("exception_name", "resolution"),
+    [("NoSuchProcess", "gone"), ("ZombieProcess", "zombie")],
+)
+def test_memory_task_second_factory_failure_serializes_memory_probe(exception_name, resolution):
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    child = FakeProcess(20, 2.0)
+    calls = []
+
+    def factory(pid):
+        if pid == 10:
+            return root
+        calls.append(pid)
+        if len(calls) == 1:
+            return child
+        raise getattr(module.psutil, exception_name)(20)
+
+    child.memory_info = lambda: pytest.fail("memory_info must not be called after the second factory failure")
+    sampler = module.ProcessTreeSampler(10, process_factory=factory, footprint_supported=False)
+    calls.clear()
+
+    sampler._note_read_error(
+        module.psutil.AccessDenied(20),
+        identity=(20, 2.0),
+        operation="memory_info",
+        phase="native_run",
+        sample_index=0,
+    )
+
+    result = sampler.result()
+    detail = result["read_error_details"][0]
+    identity_probe = detail["resolution_probe"]
+    memory_probe = detail["memory_probe"]
+    assert calls == [20, 20]
+    assert result["fatal_read_errors"] == 0
+    assert result["expected_exit_races"] == 1
+    assert detail["resolution"] == resolution
+    assert detail["resolution_source"] == "identity_fence"
+    assert detail["memory_task_verification"] == "not_run"
+    assert identity_probe["stage"] == "identity"
+    assert identity_probe["resolution"] == "alive"
+    assert memory_probe["stage"] == "memory"
+    assert memory_probe["operation"] == "factory"
+    assert memory_probe["resolution"] == resolution
+    assert memory_probe["factory_pid_present"] is False
+    assert memory_probe["error_type"] == exception_name
+    assert memory_probe["error_pid"] == 20
+    assert memory_probe["error_pid_present"] is True
+    assert memory_probe["error_pid_valid"] is True
+    assert memory_probe["error_pid_match"] is True
+
+
+def test_factory_pid_mismatch_is_recorded_without_extra_query():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    wrong = FakeProcess(21, 2.0)
+    calls = []
+
+    def factory(pid):
+        if pid == 10:
+            return root
+        calls.append(pid)
+        return wrong
+
+    sampler = module.ProcessTreeSampler(10, process_factory=factory, footprint_supported=False)
+    calls.clear()
+
+    sampler._note_read_error(
+        OSError(0, "ambiguous"),
+        identity=(20, 2.0),
+        operation="cmdline",
+        phase="native_run",
+        sample_index=0,
+    )
+
+    result = sampler.result()
+    detail = result["read_error_details"][0]
+    probe = detail["resolution_probe"]
+    assert calls == [20]
+    assert result["fatal_read_errors"] == 1
+    assert detail["resolution_source"] == "identity_fence"
+    assert probe["factory_pid"] == 21
+    assert probe["factory_pid_present"] is True
+    assert probe["factory_pid_valid"] is True
+    assert probe["factory_pid_match"] is False
+    assert probe["expected_pid"] == 20
+    assert probe["resolution"] == "alive"
+    assert detail["memory_probe"] is None
+
+
+def test_malformed_identity_probe_is_explicit_and_has_no_factory_call():
+    module = resource_module()
+    sampler = fake_sampler(module, {10: FakeProcess(10, 1.0)})
+
+    sampler._note_read_error(
+        module.psutil.NoSuchProcess(20),
+        identity=(20, math.nan),
+        operation="memory_info",
+        phase="native_run",
+        sample_index=0,
+    )
+
+    result = sampler.result()
+    detail = result["read_error_details"][0]
+    probe = detail["resolution_probe"]
+    assert result["fatal_read_errors"] == 1
+    assert probe["stage"] == "identity"
+    assert probe["operation"] == "expected_ctime"
+    assert probe["expected_pid"] == 20
+    assert probe["expected_pid_present"] is True
+    assert probe["expected_pid_valid"] is True
+    assert probe["expected_ctime"] is None
+    assert probe["expected_ctime_present"] is True
+    assert probe["expected_ctime_valid"] is False
+    assert probe["factory_pid_present"] is False
+    assert probe["error_type"] == "ValueError"
+    assert probe["resolution"] == "unknown"
+    assert detail["memory_probe"] is None
+
+
+def test_resolution_probe_snapshot_is_immutable():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    child = FakeProcess(20, 2.0)
+    sampler = module.ProcessTreeSampler(
+        10,
+        process_factory=lambda pid: root if pid == 10 else child,
+        footprint_supported=False,
+    )
+    sampler._note_read_error(
+        module.psutil.AccessDenied(20),
+        identity=(20, 2.0),
+        operation="memory_info",
+        phase="native_run",
+        sample_index=0,
+    )
+
+    first = sampler.result()
+    first["read_error_details"][0]["resolution_probe"]["factory_pid"] = 999
+    second = sampler.result()
+    assert second["read_error_details"][0]["resolution_probe"]["factory_pid"] == 20
+
+
+@pytest.mark.parametrize(
+    ("exception_name", "resolution"),
+    [("NoSuchProcess", "gone"), ("ZombieProcess", "zombie")],
+)
+def test_memory_task_second_create_time_failure_serializes_memory_probe(exception_name, resolution):
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    child = FakeProcess(20, 2.0)
+    second = FakeProcess(20, 2.0)
+    second.create_time = _raise_from(getattr(module.psutil, exception_name)(20))
+    calls = []
+
+    def factory(pid):
+        if pid == 10:
+            return root
+        calls.append(pid)
+        return child if len(calls) == 1 else second
+
+    child.memory_info = lambda: pytest.fail("memory_info must not be called after create_time fails")
+    sampler = module.ProcessTreeSampler(10, process_factory=factory, footprint_supported=False)
+    calls.clear()
+
+    sampler._note_read_error(
+        module.psutil.AccessDenied(20),
+        identity=(20, 2.0),
+        operation="memory_info",
+        phase="native_run",
+        sample_index=0,
+    )
+
+    result = sampler.result()
+    detail = result["read_error_details"][0]
+    identity_probe = detail["resolution_probe"]
+    memory_probe = detail["memory_probe"]
+    assert calls == [20, 20]
+    assert result["fatal_read_errors"] == 0
+    assert result["expected_exit_races"] == 1
+    assert detail["resolution"] == resolution
+    assert detail["resolution_source"] == "identity_fence"
+    assert detail["memory_task_verification"] == "not_run"
+    assert identity_probe["stage"] == "identity"
+    assert identity_probe["resolution"] == "alive"
+    assert memory_probe["stage"] == "memory"
+    assert memory_probe["operation"] == "create_time"
+    assert memory_probe["resolution"] == resolution
+    assert memory_probe["factory_pid"] == 20
+    assert memory_probe["factory_pid_match"] is True
+    assert memory_probe["ctime"] is None
+    assert memory_probe["error_type"] == exception_name
+    assert memory_probe["error_pid"] == 20
+    assert memory_probe["error_pid_match"] is True
+
+
+def test_identity_resolution_preserves_raw_large_ctime_equality():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    large = 2**54 + 1
+    child = FakeProcess(20, large)
+    sampler = module.ProcessTreeSampler(
+        10,
+        process_factory=lambda pid: root if pid == 10 else child,
+        footprint_supported=False,
+    )
+
+    sampler._note_read_error(
+        OSError(0, "ambiguous"),
+        identity=(20, large),
+        operation="cmdline",
+        phase="native_run",
+        sample_index=0,
+    )
+
+    detail = sampler.result()["read_error_details"][0]
+    probe = detail["resolution_probe"]
+    assert detail["resolution"] == "alive"
+    assert sampler.result()["fatal_read_errors"] == 1
+    assert probe["expected_ctime"] == large
+    assert probe["ctime"] == large
+    assert probe["resolution"] == "alive"
+
+
+def test_memory_task_proof_preserves_raw_large_ctime_equality():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    large = 2**54 + 1
+    child = FakeProcess(20, large)
+    calls = []
+
+    def memory_info():
+        calls.append(None)
+        if len(calls) == 1:
+            raise module.psutil.AccessDenied(20)
+        return SimpleNamespace(rss=999)
+
+    child.memory_info = memory_info
+    with pytest.raises(module.psutil.AccessDenied):
+        child.memory_info()
+    sampler = module.ProcessTreeSampler(
+        10,
+        process_factory=lambda pid: root if pid == 10 else child,
+        footprint_supported=False,
+    )
+    sampler._note_read_error(
+        module.psutil.AccessDenied(20),
+        identity=(20, large),
+        operation="memory_info",
+        phase="native_run",
+        sample_index=0,
+    )
+
+    detail = sampler.result()["read_error_details"][0]
+    identity_probe = detail["resolution_probe"]
+    memory_probe = detail["memory_probe"]
+    assert len(calls) == 2
+    assert detail["resolution"] == "alive"
+    assert detail["memory_task_verification"] == "success"
+    assert identity_probe["ctime"] == large
+    assert memory_probe["ctime"] == large
+    assert memory_probe["verification"] == "success"
+
+
+def test_identity_resolution_continues_when_factory_pid_metadata_fails():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+
+    class BrokenPid:
+        def __init__(self):
+            self.calls = []
+
+        def create_time(self):
+            self.calls.append("create_time")
+            return 2.0
+
+        def is_running(self):
+            self.calls.append("is_running")
+            return True
+
+        def status(self):
+            self.calls.append("status")
+            return "running"
+
+        @property
+        def pid(self):
+            raise RuntimeError("pid metadata unavailable")
+
+    broken = BrokenPid()
+    sampler = module.ProcessTreeSampler(
+        10,
+        process_factory=lambda pid: root if pid == 10 else broken,
+        footprint_supported=False,
+    )
+
+    sampler._note_read_error(
+        OSError(0, "ambiguous"),
+        identity=(20, 2.0),
+        operation="cmdline",
+        phase="native_run",
+        sample_index=0,
+    )
+
+    detail = sampler.result()["read_error_details"][0]
+    probe = detail["resolution_probe"]
+    assert detail["resolution"] == "alive"
+    assert probe["factory_pid"] is None
+    assert probe["factory_pid_present"] is False
+    assert probe["factory_pid_valid"] is False
+    assert probe["factory_pid_match"] is None
+    assert probe["resolution"] == "alive"
+    assert broken.calls == ["is_running", "create_time", "status"]
+
+
+def test_memory_task_proof_continues_when_second_factory_pid_metadata_fails():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    child = FakeProcess(20, 2.0)
+    calls = []
+
+    class BrokenPid:
+        def __init__(self):
+            self.calls = []
+
+        def create_time(self):
+            self.calls.append("create_time")
+            return 2.0
+
+        def memory_info(self):
+            calls.append(None)
+            return SimpleNamespace(rss=999)
+
+        @property
+        def pid(self):
+            raise RuntimeError("pid metadata unavailable")
+
+    broken = BrokenPid()
+    child.memory_info = lambda: (_ for _ in ()).throw(module.psutil.AccessDenied(20))
+
+    def factory(pid):
+        if pid == 10:
+            return root
+        calls.append(pid)
+        return child if len(calls) == 1 else broken
+
+    sampler = module.ProcessTreeSampler(10, process_factory=factory, footprint_supported=False)
+    calls.clear()
+
+    sampler._note_read_error(
+        module.psutil.AccessDenied(20),
+        identity=(20, 2.0),
+        operation="memory_info",
+        phase="native_run",
+        sample_index=0,
+    )
+
+    detail = sampler.result()["read_error_details"][0]
+    memory_probe = detail["memory_probe"]
+    assert detail["resolution"] == "alive"
+    assert detail["memory_task_verification"] == "success"
+    assert memory_probe["factory_pid_present"] is False
+    assert memory_probe["operation"] == "memory_info"
+    assert memory_probe["verification"] == "success"
+    assert broken.calls == ["create_time"]

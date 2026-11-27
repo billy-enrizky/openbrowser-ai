@@ -61,6 +61,10 @@ _PROCESS_STATUSES = frozenset(
     }
 )
 _RESOLUTION_SOURCES = frozenset({"read_exception", "identity_fence", "memory_task_fence", "discovery_scan"})
+_PROBE_STAGES = frozenset({"identity", "memory"})
+_PROBE_OPERATIONS = frozenset(
+    {"expected_pid", "expected_ctime", "factory", "factory_pid", "is_running", "create_time", "status", "memory_info"}
+)
 _MEMORY_TASK_VERIFICATIONS = frozenset(
     {
         "not_run",
@@ -271,6 +275,8 @@ class ResourceLedger:
         error_pid_valid: bool = False,
         error_pid_match: bool | None = None,
         current_effective_uid: int | None = None,
+        resolution_probe: dict | None = None,
+        memory_probe: dict | None = None,
     ) -> bool:
         self.read_errors += 1
         identity = (None, None) if identity is None else identity
@@ -316,6 +322,8 @@ class ResourceLedger:
                     "memory_task_verification": memory_task_verification,
                     "resolution_error_type": resolution_error_type,
                     "resolution_errno": resolution_errno,
+                    "resolution_probe": copy.deepcopy(resolution_probe) if resolution_probe is not None else None,
+                    "memory_probe": copy.deepcopy(memory_probe) if memory_probe is not None else None,
                 }
             )
         else:
@@ -583,14 +591,79 @@ def _exception_pid_fact(error: BaseException, pid: int) -> _ExceptionPidFact:
     return _ExceptionPidFact(True, valid, value, valid and value == pid)
 
 
-def _valid_create_time(value: object) -> bool:
+def _positive_time_value(value: object) -> int | float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return False
+        return None
     try:
         number = float(value)
     except (OverflowError, TypeError, ValueError):
-        return False
-    return math.isfinite(number) and number > 0
+        return None
+    return value if math.isfinite(number) and number > 0 else None
+
+
+def _valid_create_time(value: object) -> bool:
+    return _positive_time_value(value) is not None
+
+
+def _factory_pid_fact(present: bool, raw: object, expected: object) -> _ExceptionPidFact:
+    valid = _valid_pid(raw)
+    value = raw if valid and isinstance(raw, int) else None
+    expected_valid = _valid_pid(expected)
+    expected_value = expected if expected_valid and isinstance(expected, int) else None
+    match = None if not present or not expected_valid else valid and value == expected_value
+    return _ExceptionPidFact(present, valid, value, match)
+
+
+def _probe_payload(
+    *,
+    stage: str,
+    operation: str,
+    expected_pid: object,
+    expected_ctime: object,
+    factory_fact: _ExceptionPidFact,
+    ctime: object,
+    status: object,
+    running: object,
+    error: BaseException | None,
+    resolution: str,
+    verification: str | None = None,
+) -> dict:
+    if stage not in _PROBE_STAGES or operation not in _PROBE_OPERATIONS:
+        raise ValueError("Unsupported probe stage or operation")
+    expected_pid_valid = _valid_pid(expected_pid)
+    expected_pid_value = expected_pid if expected_pid_valid and isinstance(expected_pid, int) else None
+    expected_ctime_value = _positive_time_value(expected_ctime)
+    ctime_value = _positive_time_value(ctime)
+    error_fact = (
+        _exception_pid_fact(error, expected_pid_value if expected_pid_value is not None else -1)
+        if error is not None
+        else _ExceptionPidFact(False, False, None, None)
+    )
+    return {
+        "stage": stage,
+        "operation": operation,
+        "expected_pid": expected_pid_value,
+        "expected_pid_present": expected_pid is not None,
+        "expected_pid_valid": expected_pid_valid,
+        "expected_ctime": expected_ctime_value,
+        "expected_ctime_present": expected_ctime is not None,
+        "expected_ctime_valid": expected_ctime_value is not None,
+        "factory_pid": factory_fact.value,
+        "factory_pid_present": factory_fact.present,
+        "factory_pid_valid": factory_fact.valid,
+        "factory_pid_match": factory_fact.match,
+        "ctime": ctime_value,
+        "status": status if isinstance(status, str) and status in _PROCESS_STATUSES else None,
+        "running": running if type(running) is bool else None,
+        "error_type": type(error).__name__ if error is not None else None,
+        "errno": _safe_errno(error) if error is not None else None,
+        "error_pid": error_fact.value,
+        "error_pid_present": error_fact.present,
+        "error_pid_valid": error_fact.valid,
+        "error_pid_match": error_fact.match,
+        "resolution": resolution,
+        "verification": verification,
+    }
 
 
 class ProcessTreeSampler:
@@ -634,74 +707,188 @@ class ProcessTreeSampler:
             footprint_supported=self._footprint is not None if footprint_supported is None else footprint_supported,
         )
 
-    def _identity_resolution(self, identity: tuple[int, float]) -> tuple[str, BaseException | None]:
+    def _identity_resolution(
+        self, identity: tuple[int, float], *, probe_sink: list[dict] | None = None
+    ) -> tuple[str, BaseException | None]:
         """Classify a failed read using an immediate PID, create-time, and status fence."""
         pid, expected = identity
+        factory_fact = _ExceptionPidFact(False, False, None, None)
+        ctime: int | float | None = None
+        status: str | None = None
+        running: bool | None = None
+
+        def finish(
+            resolution: str, error: BaseException | None = None, *, operation: str
+        ) -> tuple[str, BaseException | None]:
+            probe = _probe_payload(
+                stage="identity",
+                operation=operation,
+                expected_pid=pid,
+                expected_ctime=expected,
+                factory_fact=factory_fact,
+                ctime=ctime,
+                status=status,
+                running=running,
+                error=error,
+                resolution=resolution,
+            )
+            if probe_sink is not None:
+                probe_sink.append(copy.deepcopy(probe))
+            return resolution, error
+
         if not _valid_pid(pid):
-            return "unknown", ValueError("invalid identity pid")
+            return finish("unknown", ValueError("invalid identity pid"), operation="expected_pid")
         if not _valid_create_time(expected):
-            return "unknown", ValueError("invalid expected create time")
+            return finish("unknown", ValueError("invalid expected create time"), operation="expected_ctime")
         try:
             process = self._process(pid)
         except psutil.ZombieProcess as error:
-            return "zombie", error
+            return finish("zombie", error, operation="factory")
         except psutil.NoSuchProcess as error:
-            return "gone", error
+            return finish("gone", error, operation="factory")
         except (psutil.Error, OSError) as error:
-            return "unknown", error
+            return finish("unknown", error, operation="factory")
         try:
-            if not process.is_running():
-                return "gone", None
-            current = process.create_time()
-            if not _valid_create_time(current):
-                return "unknown", ValueError("invalid current create time")
-            if current != expected:
-                return "replaced", None
-            if process.status() == psutil.STATUS_ZOMBIE:
-                return "zombie", None
-            return "alive", None
+            actual_pid = process.pid
+        except Exception:
+            factory_fact = _ExceptionPidFact(False, False, None, None)
+        else:
+            factory_fact = _factory_pid_fact(True, actual_pid, pid)
+        try:
+            running_value = process.is_running()
         except psutil.ZombieProcess as error:
-            return "zombie", error
+            return finish("zombie", error, operation="is_running")
         except psutil.NoSuchProcess as error:
-            return "gone", error
+            return finish("gone", error, operation="is_running")
         except (psutil.Error, OSError) as error:
-            return "unknown", error
+            return finish("unknown", error, operation="is_running")
+        running = running_value if type(running_value) is bool else None
+        if not running_value:
+            return finish("gone", None, operation="is_running")
+        try:
+            current = process.create_time()
+        except psutil.ZombieProcess as error:
+            return finish("zombie", error, operation="create_time")
+        except psutil.NoSuchProcess as error:
+            return finish("gone", error, operation="create_time")
+        except (psutil.Error, OSError) as error:
+            return finish("unknown", error, operation="create_time")
+        if not _valid_create_time(current):
+            return finish("unknown", ValueError("invalid current create time"), operation="create_time")
+        ctime = current
+        if current != expected:
+            return finish("replaced", None, operation="create_time")
+        try:
+            status_value = process.status()
+        except psutil.ZombieProcess as error:
+            return finish("zombie", error, operation="status")
+        except psutil.NoSuchProcess as error:
+            return finish("gone", error, operation="status")
+        except (psutil.Error, OSError) as error:
+            return finish("unknown", error, operation="status")
+        status = status_value if isinstance(status_value, str) and status_value in _PROCESS_STATUSES else None
+        if status_value == psutil.STATUS_ZOMBIE:
+            return finish("zombie", None, operation="status")
+        return finish("alive", None, operation="status")
 
-    def _memory_task_proof(self, identity: tuple[int, float]) -> tuple[str, BaseException | None, str, str]:
+    def _memory_task_proof(
+        self, identity: tuple[int, float], *, probe_sink: list[dict] | None = None
+    ) -> tuple[str, BaseException | None, str, str]:
         """Run one fresh identity check and one same-operation memory read."""
-        resolution, resolution_error = self._identity_resolution(identity)
+        if probe_sink is None:
+            probe_sink = []
+        resolution, resolution_error = self._identity_resolution(identity, probe_sink=probe_sink)
         if resolution != "alive":
             return resolution, resolution_error, "identity_fence", "not_run"
+        pid, expected = identity
+        factory_fact = _ExceptionPidFact(False, False, None, None)
+        ctime: int | float | None = None
+
+        def finish(
+            resolution: str,
+            error: BaseException | None,
+            source: str,
+            verification: str,
+            *,
+            operation: str,
+            current_ctime: object = None,
+        ) -> tuple[str, BaseException | None, str, str]:
+            probe = _probe_payload(
+                stage="memory",
+                operation=operation,
+                expected_pid=pid,
+                expected_ctime=expected,
+                factory_fact=factory_fact,
+                ctime=current_ctime,
+                status=None,
+                running=None,
+                error=error,
+                resolution=resolution,
+                verification=verification,
+            )
+            probe_sink.append(copy.deepcopy(probe))
+            return resolution, error, source, verification
+
         try:
-            process = self._process(identity[0])
+            process = self._process(pid)
+        except psutil.ZombieProcess as error:
+            return finish("zombie", error, "identity_fence", "not_run", operation="factory")
+        except psutil.NoSuchProcess as error:
+            return finish("gone", error, "identity_fence", "not_run", operation="factory")
+        except (psutil.Error, OSError) as error:
+            return finish("unknown", error, "identity_fence", "unknown", operation="factory")
+        try:
+            actual_pid = process.pid
+        except Exception:
+            factory_fact = _ExceptionPidFact(False, False, None, None)
+        else:
+            factory_fact = _factory_pid_fact(True, actual_pid, pid)
+        try:
             current = process.create_time()
         except psutil.ZombieProcess as error:
-            return "zombie", error, "identity_fence", "not_run"
+            return finish("zombie", error, "identity_fence", "not_run", operation="create_time")
         except psutil.NoSuchProcess as error:
-            return "gone", error, "identity_fence", "not_run"
+            return finish("gone", error, "identity_fence", "not_run", operation="create_time")
         except (psutil.Error, OSError) as error:
-            return "unknown", error, "identity_fence", "unknown"
+            return finish("unknown", error, "identity_fence", "unknown", operation="create_time")
         if not _valid_create_time(current):
-            return "unknown", ValueError("invalid current create time"), "identity_fence", "malformed_identity"
-        if current != identity[1]:
-            return "replaced", None, "identity_fence", "pid_reused"
+            return finish(
+                "unknown",
+                ValueError("invalid current create time"),
+                "identity_fence",
+                "malformed_identity",
+                operation="create_time",
+            )
+        ctime = current
+        if current != expected:
+            return finish(
+                "replaced", None, "identity_fence", "pid_reused", operation="create_time", current_ctime=ctime
+            )
         try:
             process.memory_info()
         except psutil.ZombieProcess as error:
-            if _exception_pid(error) == identity[0]:
-                return "zombie", error, "memory_task_fence", "zombie_process"
-            return "alive", error, "memory_task_fence", "pid_mismatch"
+            verification = "zombie_process" if _exception_pid(error) == pid else "pid_mismatch"
+            resolution = "zombie" if verification == "zombie_process" else "alive"
+            return finish(
+                resolution, error, "memory_task_fence", verification, operation="memory_info", current_ctime=ctime
+            )
         except psutil.NoSuchProcess as error:
-            if _exception_pid(error) == identity[0]:
-                return "gone", error, "memory_task_fence", "no_such_process"
-            return "alive", error, "memory_task_fence", "pid_mismatch"
+            verification = "no_such_process" if _exception_pid(error) == pid else "pid_mismatch"
+            resolution = "gone" if verification == "no_such_process" else "alive"
+            return finish(
+                resolution, error, "memory_task_fence", verification, operation="memory_info", current_ctime=ctime
+            )
         except psutil.AccessDenied as error:
-            return "alive", error, "memory_task_fence", "access_denied"
+            return finish(
+                "alive", error, "memory_task_fence", "access_denied", operation="memory_info", current_ctime=ctime
+            )
         except OSError as error:
-            return "alive", error, "memory_task_fence", "oserror"
+            return finish("alive", error, "memory_task_fence", "oserror", operation="memory_info", current_ctime=ctime)
         except Exception as error:
-            return "unknown", error, "memory_task_fence", "unknown"
-        return "alive", None, "memory_task_fence", "success"
+            return finish(
+                "unknown", error, "memory_task_fence", "unknown", operation="memory_info", current_ctime=ctime
+            )
+        return finish("alive", None, "memory_task_fence", "success", operation="memory_info", current_ctime=ctime)
 
     def _note_read_error(
         self,
@@ -714,8 +901,10 @@ class ProcessTreeSampler:
     ) -> None:
         resolution_source = "identity_fence"
         memory_task_verification = "not_run"
+        probe_sink: list[dict] = []
         valid_identity = _valid_pid(identity[0]) and _valid_create_time(identity[1])
         matching_error_pid = _exception_pid(error) == identity[0]
+        error_pid_fact = _exception_pid_fact(error, identity[0] if _valid_pid(identity[0]) else -1)
         if valid_identity and matching_error_pid and isinstance(error, psutil.ZombieProcess):
             resolution, resolution_error = "zombie", error
             resolution_source = "read_exception"
@@ -729,10 +918,12 @@ class ProcessTreeSampler:
             and isinstance(error, psutil.AccessDenied)
         ):
             resolution, resolution_error, resolution_source, memory_task_verification = self._memory_task_proof(
-                identity
+                identity, probe_sink=probe_sink
             )
         else:
-            resolution, resolution_error = self._identity_resolution(identity)
+            resolution, resolution_error = self._identity_resolution(identity, probe_sink=probe_sink)
+        resolution_probe = next((probe for probe in probe_sink if probe["stage"] == "identity"), None)
+        memory_probe = next((probe for probe in probe_sink if probe["stage"] == "memory"), None)
         self._ledger.note_read_error(
             error,
             identity=identity,
@@ -743,6 +934,12 @@ class ProcessTreeSampler:
             resolution_error=resolution_error,
             resolution_source=resolution_source,
             memory_task_verification=memory_task_verification,
+            error_pid=error_pid_fact.value,
+            error_pid_present=error_pid_fact.present,
+            error_pid_valid=error_pid_fact.valid,
+            error_pid_match=error_pid_fact.match,
+            resolution_probe=resolution_probe,
+            memory_probe=memory_probe,
         )
 
     def set_capture_phase(self, phase: str) -> None:
@@ -980,7 +1177,7 @@ class ProcessTreeSampler:
     ) -> int | None:
         normalized_identity = (None, None) if identity is None else identity
         pid = normalized_identity[0]
-        pid_fact = _exception_pid_fact(error, pid if _valid_pid(pid) else -1)
+        pid_fact = _exception_pid_fact(error, pid if isinstance(pid, int) and _valid_pid(pid) else -1)
         if _valid_pid(pid):
             assert isinstance(pid, int)
             self._marker_unverified.add(pid)
