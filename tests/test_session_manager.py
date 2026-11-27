@@ -1001,6 +1001,18 @@ async def _drain_session_manager(sm: SessionManager) -> None:
         await asyncio.gather(*list(sm._event_tasks), return_exceptions=True)
 
 
+def _block_auto_attach(session):
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def wait_for_ack(*_args, **_kwargs):
+        entered.set()
+        await release.wait()
+
+    session._cdp_client_root.send.Target.setAutoAttach = AsyncMock(side_effect=wait_for_ack)
+    return entered, release
+
+
 @pytest.mark.asyncio
 class TestSessionManagerTargetAttachedObservers:
     async def test_single_slot_runs_base_pool_then_observer_once(self):
@@ -1042,7 +1054,7 @@ class TestSessionManagerTargetAttachedObservers:
 
         assert calls == ['new']
 
-    async def test_failing_observer_is_isolated_and_logs_type_only(self, caplog):
+    async def test_failing_observer_is_isolated_and_logs_type_only(self, caplog, monkeypatch):
         session, registration = _make_single_slot_session()
         sm = SessionManager(session)
         calls = []
@@ -1058,6 +1070,8 @@ class TestSessionManagerTargetAttachedObservers:
         await sm.start_monitoring()
 
         with caplog.at_level(logging.WARNING, logger='test_session_manager'):
+            monkeypatch.setattr(session.logger, 'handlers', [caplog.handler])
+            monkeypatch.setattr(session.logger, 'propagate', False)
             registration.attached_to_target(_attached_event())
             await _drain_session_manager(sm)
 
@@ -1316,3 +1330,130 @@ class TestSessionManagerTargetAttachedObservers:
 
         with pytest.raises(RuntimeError, match='closed'):
             await sm.start_monitoring()
+
+@pytest.mark.asyncio
+class TestSessionManagerAutoAttachReadiness:
+    async def test_absent_session_is_not_ready(self):
+        session, _registration = _make_single_slot_session()
+        sm = SessionManager(session)
+        await sm.start_monitoring()
+
+        assert await sm.wait_for_auto_attach('missing-session') is False
+
+    async def test_immediate_success_is_ready(self):
+        session, registration = _make_single_slot_session()
+        sm = SessionManager(session)
+        await sm.start_monitoring()
+
+        registration.attached_to_target(_attached_event())
+
+        assert await sm.wait_for_auto_attach('session-1') is True
+        assert 'session-1' in sm._auto_attach_attempts
+
+    async def test_pending_ack_blocks_until_success(self):
+        session, registration = _make_single_slot_session()
+        sm = SessionManager(session)
+        entered, release = _block_auto_attach(session)
+        await sm.start_monitoring()
+
+        registration.attached_to_target(_attached_event())
+        await asyncio.wait_for(entered.wait(), timeout=1.0)
+        waiter = asyncio.create_task(sm.wait_for_auto_attach('session-1'))
+        await asyncio.sleep(0)
+        assert waiter.done() is False
+
+        release.set()
+        assert await asyncio.wait_for(waiter, timeout=1.0) is True
+
+    async def test_native_failure_is_not_ready(self):
+        session, registration = _make_single_slot_session()
+        session._cdp_client_root.send.Target.setAutoAttach = AsyncMock(side_effect=RuntimeError('ack failed'))
+        sm = SessionManager(session)
+        await sm.start_monitoring()
+
+        registration.attached_to_target(_attached_event())
+
+        assert await sm.wait_for_auto_attach('session-1') is False
+
+    async def test_rebind_stale_context_is_not_ready(self):
+        session, registration = _make_single_slot_session()
+        sm = SessionManager(session)
+        entered, release = _block_auto_attach(session)
+        await sm.start_monitoring()
+
+        registration.attached_to_target(_attached_event())
+        await asyncio.wait_for(entered.wait(), timeout=1.0)
+        attempt = sm._auto_attach_attempts['session-1']
+        waiter = asyncio.create_task(sm.wait_for_auto_attach('session-1'))
+
+        _replace_single_slot_root(session)
+        await sm.start_monitoring()
+
+        assert await asyncio.wait_for(waiter, timeout=1.0) is False
+        assert await sm.wait_for_auto_attach('session-1') is False
+        assert sm._auto_attach_attempts == {}
+        await asyncio.sleep(0)
+        assert attempt.task.cancelled() is True
+        release.set()
+
+    async def test_detach_wakes_waiter_and_removes_attempt(self):
+        session, registration = _make_single_slot_session()
+        sm = SessionManager(session)
+        entered, release = _block_auto_attach(session)
+        await sm.start_monitoring()
+
+        registration.attached_to_target(_attached_event())
+        await asyncio.wait_for(entered.wait(), timeout=1.0)
+        attempt = sm._auto_attach_attempts['session-1']
+        waiter = asyncio.create_task(sm.wait_for_auto_attach('session-1'))
+
+        await sm._handle_target_detached({'sessionId': 'session-1', 'targetId': 'target-1'})
+
+        assert await asyncio.wait_for(waiter, timeout=1.0) is False
+        assert 'session-1' not in sm._auto_attach_attempts
+        await asyncio.sleep(0)
+        assert attempt.task.cancelled() is True
+        release.set()
+
+    @pytest.mark.parametrize('retirement', ['clear', 'cancel_pending'])
+    async def test_retirement_wakes_waiter_and_clears_attempt(self, retirement):
+        session, registration = _make_single_slot_session()
+        sm = SessionManager(session)
+        entered, release = _block_auto_attach(session)
+        await sm.start_monitoring()
+
+        registration.attached_to_target(_attached_event())
+        await asyncio.wait_for(entered.wait(), timeout=1.0)
+        attempt = sm._auto_attach_attempts['session-1']
+        waiter = asyncio.create_task(sm.wait_for_auto_attach('session-1'))
+
+        if retirement == 'clear':
+            await sm.clear()
+        else:
+            sm.cancel_pending()
+
+        assert await asyncio.wait_for(waiter, timeout=1.0) is False
+        assert sm._auto_attach_attempts == {}
+        await asyncio.sleep(0)
+        assert attempt.task.cancelled() is True
+        release.set()
+
+    async def test_caller_cancellation_does_not_cancel_manager_ack(self):
+        session, registration = _make_single_slot_session()
+        sm = SessionManager(session)
+        entered, release = _block_auto_attach(session)
+        await sm.start_monitoring()
+
+        registration.attached_to_target(_attached_event())
+        await asyncio.wait_for(entered.wait(), timeout=1.0)
+        attempt = sm._auto_attach_attempts['session-1']
+        waiter = asyncio.create_task(sm.wait_for_auto_attach('session-1'))
+        await asyncio.sleep(0)
+        waiter.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+        assert attempt.task.cancelled() is False
+
+        release.set()
+        assert await asyncio.wait_for(sm.wait_for_auto_attach('session-1'), timeout=1.0) is True

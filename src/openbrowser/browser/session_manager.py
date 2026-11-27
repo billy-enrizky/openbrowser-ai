@@ -28,6 +28,17 @@ class _AttachContext:
 	generation: int | None
 
 
+@dataclass(slots=True)
+class _AutoAttachAttempt:
+	"""One session's recursive autoattach work and completion signal."""
+
+	session_id: SessionID
+	target_id: TargetID
+	context: _AttachContext
+	outcome: asyncio.Future[bool]
+	task: asyncio.Task[Any] | None = None
+
+
 class SessionManager:
 	"""Event-driven CDP session manager.
 
@@ -63,6 +74,7 @@ class SessionManager:
 		] = {}
 		self._closed = False
 		self._attach_context: _AttachContext | None = None
+		self._auto_attach_attempts: dict[SessionID, _AutoAttachAttempt] = {}
 		self._crash_listener_registered = False
 		self._monitored_root = getattr(browser_session, '_cdp_client_root', None)
 		self._monitored_connection_generation = self._session_connection_generation()
@@ -109,6 +121,45 @@ class SessionManager:
 			raise TypeError('Target attach observer callback must be callable')
 		self._target_attached_observers[key] = callback
 
+	async def wait_for_auto_attach(self, session_id: SessionID) -> bool:
+		"""Wait for this registration's recursive autoattach acknowledgement."""
+		attempt = self._auto_attach_attempts.get(session_id)
+		if attempt is None or not self._event_context_is_current(attempt.context):
+			return False
+
+		# wait() does not cancel its awaitable when the caller is cancelled.
+		await asyncio.wait({attempt.outcome})
+		if attempt.outcome.cancelled() or not attempt.outcome.done():
+			return False
+		try:
+			acknowledged = attempt.outcome.result()
+		except Exception:
+			return False
+		if acknowledged is not True:
+			return False
+		if self._auto_attach_attempts.get(session_id) is not attempt:
+			return False
+		return self._event_context_is_current(attempt.context)
+
+	def _complete_auto_attach_attempt(self, attempt: _AutoAttachAttempt, succeeded: bool) -> None:
+		"""Publish one attempt outcome once."""
+		if not attempt.outcome.done():
+			attempt.outcome.set_result(bool(succeeded))
+
+	def _discard_auto_attach_attempt(self, session_id: SessionID) -> None:
+		"""Retire and remove one session's autoattach attempt."""
+		attempt = self._auto_attach_attempts.pop(session_id, None)
+		if attempt is None:
+			return
+		self._complete_auto_attach_attempt(attempt, False)
+		if attempt.task is not None and not attempt.task.done():
+			attempt.task.cancel()
+
+	def _retire_auto_attach_attempts(self) -> None:
+		"""Retire all tracked autoattach work before a connection context changes."""
+		for session_id in tuple(self._auto_attach_attempts):
+			self._discard_auto_attach_attempt(session_id)
+
 	def _health_machine(self) -> Any | None:
 		"""Return the session health tracker when it is the real explicit model."""
 		from openbrowser.browser.health import BrowserHealthMachine
@@ -125,6 +176,8 @@ class SessionManager:
 			raise RuntimeError('SessionManager is closed')
 		if not self.browser_session._cdp_client_root:
 			raise RuntimeError('CDP client not initialized')
+
+		self._retire_auto_attach_attempts()
 
 		# Capture cdp_client_root in closure to avoid type errors
 		cdp_client = self.browser_session._cdp_client_root
@@ -143,17 +196,21 @@ class SessionManager:
 			observers = tuple(self._target_attached_observers.items())
 
 			# Enable auto-attach for this session's children
-			async def _enable_auto_attach():
-				if not self._event_context_is_current(attach_context):
-					return
+			async def _enable_auto_attach(attempt: _AutoAttachAttempt):
+				acknowledged = False
 				try:
+					if not self._event_context_is_current(attempt.context):
+						return False
 					await cdp_client.send.Target.setAutoAttach(
 						params={'autoAttach': True, 'waitForDebuggerOnStart': False, 'flatten': True},
 						session_id=event_session_id,
 					)
+					acknowledged = True
 					self.logger.debug(
 						f'[SessionManager] Auto-attach enabled for {target_type} session {event_session_id[:8]}...'
 					)
+				except asyncio.CancelledError:
+					raise
 				except Exception as e:
 					error_str = str(e)
 					# Expected for short-lived targets (workers, temp iframes) that detach before task executes
@@ -164,9 +221,22 @@ class SessionManager:
 						)
 					else:
 						self.logger.debug(f'[SessionManager] Auto-attach failed for {target_type}: {e}')
+				finally:
+					succeeded = acknowledged and self._event_context_is_current(attempt.context)
+					self._complete_auto_attach_attempt(attempt, succeeded)
+				return acknowledged and self._event_context_is_current(attempt.context)
 
-			# Schedule auto-attach first, then pool management and observers.
-			self._schedule_task(_enable_auto_attach())
+			self._discard_auto_attach_attempt(event_session_id)
+			attempt = _AutoAttachAttempt(
+				session_id=event_session_id,
+				target_id=event['targetInfo']['targetId'],
+				context=attach_context,
+				outcome=asyncio.get_running_loop().create_future(),
+			)
+			self._auto_attach_attempts[event_session_id] = attempt
+			attempt.task = self._schedule_task(_enable_auto_attach(attempt))
+
+			# Schedule pool management and observers after auto-attach work.
 			self._schedule_task(
 				self._handle_target_attached_and_notify(event, session_id, observers, attach_context)
 			)
@@ -313,6 +383,7 @@ class SessionManager:
 		"""Cancel callback tasks without awaiting, for forced runtime reset."""
 		self._closed = True
 		self._attach_context = None
+		self._retire_auto_attach_attempts()
 		self._target_attached_observers.clear()
 		current = asyncio.current_task()
 		for task in list(self._event_tasks):
@@ -324,6 +395,7 @@ class SessionManager:
 		"""Clear all session tracking and retire tracked callbacks."""
 		self._closed = True
 		self._attach_context = None
+		self._retire_auto_attach_attempts()
 		self._target_attached_observers.clear()
 		current = asyncio.current_task()
 		tasks = {task for task in self._event_tasks if task is not current and not task.done()}
@@ -517,6 +589,7 @@ class SessionManager:
 		"""
 		session_id = event['sessionId']
 		target_id = event.get('targetId')  # May be empty
+		self._discard_auto_attach_attempt(session_id)
 
 		# If targetId not in event, look it up via session mapping
 		if not target_id:
