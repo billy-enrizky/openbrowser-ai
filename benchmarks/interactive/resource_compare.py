@@ -353,7 +353,7 @@ class ResourceLedger:
         else:
             self._fatal_identity_refcounts.pop(identity, None)
             self.fatal_read_identities.discard(identity)
-        before = ((detail.get("discovery_probe") or {}).get("before") or {})
+        before = (detail.get("discovery_probe") or {}).get("before") or {}
         self.discovery_lifecycle_resolutions.append(
             {
                 "probe_id": probe_id,
@@ -884,12 +884,16 @@ class ProcessTreeSampler:
             return False
         if item.error_pid_match is False:
             return False
-        if item.error_type == "AccessDenied":
-            if not (item.error_pid_present and item.error_pid_valid and item.error_pid_match is True):
-                return False
-        if item.error_type == "OSError" and item.error_pid_present:
-            if not item.error_pid_valid or item.error_pid_match is not True:
-                return False
+        if item.error_type == "AccessDenied" and not (
+            item.error_pid_present and item.error_pid_valid and item.error_pid_match is True
+        ):
+            return False
+        if (
+            item.error_type == "OSError"
+            and item.error_pid_present
+            and (not item.error_pid_valid or item.error_pid_match is not True)
+        ):
+            return False
         if not fence.validated_exit:
             return False
         if fence.barrier_phase != "final":
@@ -898,9 +902,7 @@ class ProcessTreeSampler:
             return False
         if fence.capture_phase != item.capture_phase:
             return False
-        if item.detail_index is None:
-            return False
-        return True
+        return item.detail_index is not None
 
     def _resolve_discovery_pid(self, pid: int) -> None:
         count = self._discovery_pid_unresolved_counts.get(pid, 0)
