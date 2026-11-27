@@ -2522,3 +2522,22 @@ def test_lane_accepts_unknown_worker_diagnostic(valid_lane_bundle):
     row.update(warm_worker_task_cpu_delta_seconds=None, warm_worker_cpu_delta_error="invalid_counter")
     row["warm_baseline_resources"]["observed_tree_cpu_seconds"] = None
     assert warm.lane_valid(records, terminal)
+
+
+@pytest.mark.parametrize("phase", ["baseline", "final"])
+@pytest.mark.parametrize("value", [-1, True, 0.0, float("nan"), float("inf"), "1.5", 2**2000])
+def test_lane_rejects_malformed_tree_cpu_instead_of_calling_it_unknown(valid_lane_bundle, phase, value):
+    records, terminal = copy.deepcopy(valid_lane_bundle)
+    row = records[0]
+    row[f"warm_{phase}_resources"]["observed_tree_cpu_seconds"] = value
+    row.update(warm_worker_task_cpu_delta_seconds=None, warm_worker_cpu_delta_error="invalid_counter")
+    assert not warm.lane_valid(records, terminal)
+
+
+@pytest.mark.parametrize("phase", ["baseline", "final"])
+def test_lane_requires_explicit_unknown_tree_cpu(valid_lane_bundle, phase):
+    records, terminal = copy.deepcopy(valid_lane_bundle)
+    row = records[0]
+    row[f"warm_{phase}_resources"].pop("observed_tree_cpu_seconds")
+    row.update(warm_worker_task_cpu_delta_seconds=None, warm_worker_cpu_delta_error="invalid_counter")
+    assert not warm.lane_valid(records, terminal)

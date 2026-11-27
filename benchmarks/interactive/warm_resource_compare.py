@@ -1628,6 +1628,11 @@ def _native_snapshot_valid(snapshot: object, proof: dict, *, final: bool) -> boo
         for key in ("peak_child_tree_rss_bytes", "peak_worker_rss_bytes")
     ) or not _finite_counter(snapshot.get("observed_child_cpu_seconds")):
         return False
+    if "observed_tree_cpu_seconds" not in snapshot:
+        return False
+    tree_cpu = snapshot["observed_tree_cpu_seconds"]
+    if tree_cpu is not None and (not _finite_counter(tree_cpu) or tree_cpu < snapshot["observed_child_cpu_seconds"]):
+        return False
     roots = snapshot.get("native_service_roots")
     if not isinstance(roots, list) or len(roots) != 1 or not isinstance(roots[0], dict):
         return False
