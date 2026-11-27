@@ -6043,13 +6043,21 @@ class BrowserSession(BaseModel):
 			# Get browser targets to find available contexts/pages
 			targets = await self._cdp_client_root.send.Target.getTargets()
 
-			# Manually attach to ALL EXISTING targets (autoAttach only fires for new ones)
-			# We attach to everything (pages, iframes, workers) for complete coverage
+			# Auto-attach publishes existing related sessions. Attach missing targets
+			# explicitly while retaining page, iframe, worker, and raw-target coverage.
 			for target in targets['targetInfos']:
 				target_id = target['targetId']
 				target_type = target.get('type', 'unknown')
 
 				try:
+					if target.get('attached') is True:
+						try:
+							existing = await attempt_manager.get_live_session_for_target(target_id)
+							if existing is not None and existing.cdp_client is attempt_root:
+								continue
+						except Exception as lookup_error:
+							self.logger.debug('Initial target session lookup failed: %s', type(lookup_error).__name__)
+
 					# Attach to target - this triggers attachedToTarget event
 					result = await self._cdp_client_root.send.Target.attachToTarget(
 						params={'targetId': target_id, 'flatten': True}
@@ -6620,8 +6628,11 @@ class BrowserSession(BaseModel):
 					_spawn(_disable_scripts(attached_session_id))
 
 			try:
-				root.register.Target.attachedToTarget(_on_attached)
-				self.logger.debug('Registered Target.attachedToTarget handler for Fetch.enable')
+				if self._session_manager is not None:
+					self._session_manager.set_target_attached_observer('fetch-policy', _on_attached)
+				else:
+					root.register.Target.attachedToTarget(_on_attached)
+				self.logger.debug('Registered target attach policy for Fetch.enable')
 			except Exception as e:
 				self.logger.debug(f'Failed to register attachedToTarget handler: {type(e).__name__}: {e}')
 		except Exception as e:
