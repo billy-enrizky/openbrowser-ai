@@ -85,7 +85,7 @@ Latency (ms) ↓ **Lower is better**. Each cell is median / p95.
 | download | 342.371 / 359.854 | 364.725 / 371.380 | 778.532 / 787.500 | 422.595 / 425.037 | 543.508 / 658.885 | 371.945 / 378.389 | 570.364 / 587.300 |
 | tabs | 78.586 / 84.018 | 114.917 / 124.138 | 1492.026 / 1497.729 | 368.715 / 389.761 | 165.507 / 228.349 | 128.525 / 129.309 | 309.912 / 313.608 |
 
-Both OpenBrowser surfaces have the lowest warm p50 on all four tasks among all seven interfaces. OpenBrowser MCP won 120 of 120 pairs against the other six interfaces. OpenBrowser CLI won 118 of 120. The two OpenBrowser CLI losses are one `modal` sample and one `tabs` sample against Playwright MCP. OpenBrowser wins 16 of 16 median and 16 of 16 p95 comparisons against the two Playwright surfaces.
+OpenBrowser MCP has the lowest warm p50 on all four tasks among all seven interfaces. OpenBrowser CLI is second on all four tasks. Against the five other interfaces, OpenBrowser MCP wins all 100 pairs and OpenBrowser CLI wins 98 of 100. The two OpenBrowser CLI losses are one `modal` sample and one `tabs` sample against Playwright MCP. The two OpenBrowser interfaces split their head-to-head pairs 20 to 0 in favor of MCP. OpenBrowser wins 16 of 16 median and 16 of 16 p95 comparisons against the two Playwright surfaces.
 
 Raw data and method provenance:
 
@@ -115,25 +115,25 @@ Cold browser child physical footprint (MiB) ↓ **Lower is better**.
 | tabs | 399.3 | 417.9 | 491.4 | 549.2 | 503.9 | 447.8 | 527.2 |
 | auth | 399.3 | 417.5 | 483.7 | 536.4 | 597.5 | 444.7 | 522.7 |
 
-Cold process-tree RSS (MiB) ↓ **Lower is better**. This is the memory score.
+Cold native child-tree RSS (MiB) ↓ **Lower is better**. This is the memory score. The benchmark worker, controller, and fixture server are outside the score.
 
 | Task | OpenBrowser MCP | OpenBrowser CLI | Chrome DevTools MCP | agent-browser CLI | browser-use CLI | Playwright MCP | Playwright CLI |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| wizard | 752.6 | 777.2 | 894.4 | 1325.5 | 1317.1 | 838.6 | 948.7 |
-| modal | 750.4 | 780.5 | 958.4 | 1328.9 | 1311.9 | 819.4 | 932.1 |
-| download | 741.7 | 767.8 | 868.9 | 1310.1 | 1095.1 | 803.3 | 897.5 |
-| tabs | 755.4 | 783.6 | 885.1 | 1317.4 | 1073.9 | 822.8 | 927.9 |
-| auth | 759.4 | 779.4 | 878.1 | 1328.7 | 1309.8 | 828.2 | 932.3 |
+| wizard | 720.4 | 746.5 | 862.7 | 1293.2 | 1281.9 | 806.5 | 918.3 |
+| modal | 718.9 | 750.1 | 926.8 | 1298.4 | 1276.8 | 788.8 | 901.7 |
+| download | 709.9 | 737.5 | 837.3 | 1279.0 | 1059.9 | 772.7 | 865.3 |
+| tabs | 723.5 | 752.5 | 853.6 | 1287.1 | 1038.9 | 792.3 | 897.7 |
+| auth | 727.4 | 749.1 | 846.4 | 1296.5 | 1273.6 | 797.7 | 902.0 |
 
-Cold observed process-tree CPU (seconds) ↓ **Lower is better**. This is a sampled lower bound.
+Cold sampled native child CPU time (seconds) ↓ **Lower is better**. This is a sampled lower bound. The benchmark worker, controller, and fixture server are outside the score.
 
 | Task | OpenBrowser MCP | OpenBrowser CLI | Chrome DevTools MCP | agent-browser CLI | browser-use CLI | Playwright MCP | Playwright CLI |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| wizard | 1.29 | 1.36 | 1.86 | 1.81 | 1.88 | 1.34 | 2.07 |
-| modal | 1.20 | 1.32 | 1.72 | 1.67 | 1.76 | 1.19 | 1.88 |
-| download | 1.19 | 1.34 | 1.50 | 1.60 | 1.53 | 1.15 | 1.93 |
-| tabs | 1.28 | 1.47 | 1.75 | 1.74 | 1.51 | 1.22 | 2.05 |
-| auth | 2.09 | 2.26 | 2.82 | 3.03 | 2.90 | 1.94 | 3.71 |
+| wizard | 1.151 | 1.239 | 1.722 | 1.644 | 1.720 | 1.199 | 1.918 |
+| modal | 1.076 | 1.202 | 1.571 | 1.517 | 1.597 | 1.068 | 1.732 |
+| download | 1.072 | 1.205 | 1.370 | 1.465 | 1.351 | 1.016 | 1.776 |
+| tabs | 1.148 | 1.327 | 1.603 | 1.589 | 1.356 | 1.081 | 1.889 |
+| auth | 1.929 | 2.115 | 2.613 | 2.842 | 2.646 | 1.785 | 3.534 |
 
 Warm browser child physical footprint (MiB) ↓ **Lower is better**.
 
@@ -162,11 +162,11 @@ Warm observed task CPU delta (seconds) ↓ **Lower is better**. This is a sample
 | download | 0.07 | 0.07 | 0.09 | 0.07 | 0.19 | 0.07 | 0.24 |
 | tabs | 0.13 | 0.13 | 0.21 | 0.18 | 0.28 | 0.17 | 0.35 |
 
-Both OpenBrowser surfaces hold the lowest median RSS on all five cold tasks and all four warm tasks. Median and maximum RSS win all 90 groups against the five non-OpenBrowser interfaces. At pair level, OpenBrowser wins 899 of 900 footprint and RSS pairs. The single loss is one warm `download` sample: OpenBrowser MCP at 634.125 MiB against Chrome DevTools MCP at 632.172 MiB. OpenBrowser MCP has lower cold RSS than OpenBrowser CLI in every pair.
+Both OpenBrowser surfaces use less median RSS than each of the five other interfaces on every cold and warm task. OpenBrowser MCP has the lowest median RSS on every task. Median and maximum RSS win all 90 groups against the five non-OpenBrowser interfaces. At pair level, OpenBrowser wins 899 of 900 footprint and RSS pairs. The single loss is one warm `download` sample: OpenBrowser MCP at 634.125 MiB against Chrome DevTools MCP at 632.172 MiB. OpenBrowser MCP has lower cold RSS than OpenBrowser CLI in every pair.
 
 CPU is a retained loss against Playwright MCP in the cold lane. The observed category split places the cold CPU difference in OpenBrowser Python client startup, import, and dispatch work, while Chrome CPU is generally lower for OpenBrowser. OpenBrowser MCP wins 7 of 25 cold CPU pairs and OpenBrowser CLI wins 0 of 25 against Playwright MCP. Against Playwright CLI, both OpenBrowser surfaces win 25 of 25 cold CPU pairs. Warm median CPU wins all 40 groups against the five non-OpenBrowser interfaces. Warm maximum CPU loses 3 groups on `download`.
 
-Raw data: [cold resources JSONL](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-resources-seven-arm-2026-11-27-n5.jsonl), [cold resource summary](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-resources-seven-arm-2026-11-27-n5.summary.json), [warm resources JSONL](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-resources-seven-arm-2026-11-27-n5.jsonl), [warm resource summary](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-resources-seven-arm-2026-11-27-n5.summary.json).
+CPU charts: [cold](https://github.com/billy-enrizky/openbrowser-ai/blob/main/docs/images/native-interactive-cold-cpu.png) and [warm](https://github.com/billy-enrizky/openbrowser-ai/blob/main/docs/images/native-interactive-warm-cpu.png). Raw data: [cold resources JSONL](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-resources-seven-arm-2026-11-27-n5.jsonl), [cold resource summary](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-resources-seven-arm-2026-11-27-n5.summary.json), [warm resources JSONL](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-resources-seven-arm-2026-11-27-n5.jsonl), [warm resource summary](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-resources-seven-arm-2026-11-27-n5.summary.json).
 
 ### 3.1. WebMCP capability lane
 
@@ -174,7 +174,7 @@ Pinned Chrome `159.0.8154.6` exposes `document.modelContext` only with `--enable
 
 ## 4. Arms
 
-These interactive figures describe the configured native workflows. OpenBrowser permits automatic local engine selection, while the other framework adapters select system Chrome explicitly. Complete executable bindings are required for a matched-engine comparison.
+These interactive figures describe the configured native workflows. Every browser interface in the 2026-11-27 lanes uses the same pinned Chrome for Testing build, revision 1255, and complete executable bindings.
 
 The harness registers seven interfaces. Native frontend selection and the explicit Python command are described in the [CLI frontend reference](https://docs.openbrowser.me/customize/integrations/native-cli). Each artifact records the installed build used for its observations.
 

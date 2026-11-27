@@ -658,7 +658,7 @@ Section 13.1 reports the current native local baseline. For a local, no-LLM comp
 
 Local deterministic fixtures, no LLM, and interleaved samples with exact oracles. The full method, raw JSONL, and host-load caveats are in [benchmarks/scraping/README.md](benchmarks/scraping/README.md) and [benchmarks/interactive/README.md](benchmarks/interactive/README.md). Build and host are recorded in each raw artifact. The figures below are the last clean tracked N=5 run.
 
-These interactive figures describe the configured native workflows. OpenBrowser permits automatic local engine selection, while the other framework adapters select system Chrome explicitly. Complete executable bindings are required for a matched-engine comparison.
+These interactive figures describe the configured native workflows. Every browser interface in the 2026-11-27 lanes uses the same pinned Chrome for Testing build, revision 1255, and complete executable bindings. Read the older scraping lanes within their recorded build scopes.
 
 Sequential scraping, N=10, OpenBrowser lightweight against Firecrawl Local `0.1.1`:
 
@@ -702,7 +702,7 @@ Warm-session readiness uses the native session workflow with OpenBrowser app `0.
 | `download` | 342.371 / 359.854 | 364.725 / 371.380 | 371.945 / 378.389 | 570.364 / 587.300 |
 | `tabs` | 78.586 / 84.018 | 114.917 / 124.138 | 128.525 / 129.309 | 309.912 / 313.608 |
 
-Both OpenBrowser surfaces have the lowest warm p50 on all four tasks among all seven interfaces. OpenBrowser MCP won 120 of 120 pairs against the other six interfaces. OpenBrowser CLI won 118 of 120, with one `modal` sample and one `tabs` sample slower than Playwright MCP. Chrome DevTools MCP, agent-browser CLI, and browser-use CLI results are in [the comparison page](https://docs.openbrowser.me/comparison).
+OpenBrowser MCP has the lowest warm p50 on all four tasks among all seven interfaces. OpenBrowser CLI is second on all four tasks. Against the five other interfaces, OpenBrowser MCP wins all 100 pairs and OpenBrowser CLI wins 98 of 100. The two OpenBrowser CLI losses are one `modal` sample and one `tabs` sample against Playwright MCP. The two OpenBrowser interfaces split their head-to-head pairs 20 to 0 in favor of MCP. Chrome DevTools MCP, agent-browser CLI, and browser-use CLI results are in [the comparison page](https://docs.openbrowser.me/comparison).
 
 [Raw data](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-seven-arm-2026-11-27-n5.jsonl) and [summary](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-warm-seven-arm-2026-11-27-n5.summary.json).
 
@@ -720,7 +720,7 @@ Against Playwright, both OpenBrowser surfaces win 63 of 100 cold pairs. OpenBrow
 
 [Raw data](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-seven-arm-2026-11-27-n5.jsonl) and [summary](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/interactive/results/results-cold-seven-arm-2026-11-27-n5.summary.json).
 
-Interactive resource lane, N=5: cold 175 observations and warm 140 observations across seven interfaces. Both OpenBrowser surfaces hold the lowest median RSS on all five cold tasks and all four warm tasks. Median and maximum RSS win all 90 groups. OpenBrowser wins 899 of 900 footprint and RSS pairs; one warm `download` sample is 1.953 MiB above Chrome DevTools MCP. Cold CPU remains a Playwright MCP loss. Every cell is N=5, and all observations passed the oracle, keychain, resource, and cleanup checks. See [the charted comparison](https://docs.openbrowser.me/comparison).
+Interactive resource lane, N=5: cold 175 observations and warm 140 observations across seven interfaces. Both OpenBrowser surfaces use less median RSS than each of the five other interfaces on every cold and warm task. OpenBrowser MCP has the lowest median RSS on every task. Median and maximum RSS win all 90 groups. OpenBrowser wins 899 of 900 footprint and RSS pairs; one warm `download` sample is 1.953 MiB above Chrome DevTools MCP. Cold CPU remains a Playwright MCP loss. Every cell is N=5, and all observations passed the oracle, keychain, resource, and cleanup checks. See [the charted comparison](https://docs.openbrowser.me/comparison).
 
 ### 13.2. Why OpenBrowser is faster and more efficient
 

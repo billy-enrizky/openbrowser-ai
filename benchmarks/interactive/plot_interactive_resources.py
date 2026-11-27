@@ -57,7 +57,7 @@ TASKS = ("wizard", "modal", "download", "tabs", "auth")
 WARM_TASKS = ("wizard", "modal", "download", "tabs")
 METRICS = (
     ("peak_child_footprint_bytes", "Browser child footprint"),
-    ("peak_tree_rss_bytes", "Process-tree RSS"),
+    ("peak_child_tree_rss_bytes", "Native child-tree RSS"),
 )
 WARM_SOURCES = {
     "peak_child_footprint_bytes": "warm_peak_child_footprint_bytes",
