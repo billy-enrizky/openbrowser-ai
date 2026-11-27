@@ -435,35 +435,26 @@ class TestOnBrowserStopEvent:
 class TestWaitForCdpUrl:
     """Tests for _wait_for_cdp_url static method."""
 
-    async def test_timeout_raises(self):
-        from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
+    async def test_timeout_raises(self, monkeypatch):
+        from openbrowser.browser import local_discovery
+        from openbrowser.browser.watchdogs import local_browser_watchdog as module
 
-        with patch("httpx.AsyncClient") as MockClient:
-            mock_client = AsyncMock()
-            mock_client.get.side_effect = ConnectionError("refused")
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = mock_client
+        async def failed_fetch(port, *, timeout):  # noqa: ASYNC109
+            raise local_discovery.LocalDiscoveryError("starting")
 
-            with pytest.raises(TimeoutError, match="did not start within"):
-                await LocalBrowserWatchdog._wait_for_cdp_url(9999, timeout=0.2)
+        monkeypatch.setattr(module.local_discovery, "fetch_loopback_version", failed_fetch)
+        with pytest.raises(TimeoutError, match="did not start within"):
+            await module.LocalBrowserWatchdog._wait_for_cdp_url(9999, timeout=0.02)
 
-    async def test_success_returns_url(self):
-        from openbrowser.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
+    async def test_success_returns_url(self, monkeypatch):
+        from openbrowser.browser.watchdogs import local_browser_watchdog as module
 
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {"webSocketDebuggerUrl": "ws://localhost:9222/devtools/browser/test"}
+        async def version_fetch(port, *, timeout):  # noqa: ASYNC109
+            return {"webSocketDebuggerUrl": "ws://localhost:9222/devtools/browser/test"}
 
-        with patch("httpx.AsyncClient") as MockClient:
-            mock_client = AsyncMock()
-            mock_client.get = AsyncMock(return_value=mock_response)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = mock_client
-
-            result = await LocalBrowserWatchdog._wait_for_cdp_url(9222)
-            assert result == "ws://localhost:9222/devtools/browser/test"
+        monkeypatch.setattr(module.local_discovery, "fetch_loopback_version", version_fetch)
+        result = await module.LocalBrowserWatchdog._wait_for_cdp_url(9222)
+        assert result == "ws://localhost:9222/devtools/browser/test"
 
 
 @pytest.mark.asyncio

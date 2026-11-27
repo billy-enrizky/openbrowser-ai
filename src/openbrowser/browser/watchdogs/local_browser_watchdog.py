@@ -6,7 +6,6 @@ import json
 import logging
 import os
 import shutil
-import ssl
 import stat
 import tempfile
 import uuid
@@ -18,6 +17,7 @@ import psutil
 from bubus import BaseEvent
 from pydantic import PrivateAttr
 
+from openbrowser.browser import local_discovery
 from openbrowser.browser.events import (
 	BrowserKillEvent,
 	BrowserLaunchEvent,
@@ -716,28 +716,27 @@ class LocalBrowserWatchdog(BaseWatchdog):
 	@staticmethod
 	async def _wait_for_cdp_url(port: int, timeout: float = 30) -> str:
 		"""Wait for local readiness and return the resolved browser WebSocket URL."""
-		import httpx
-
-		start_time = asyncio.get_event_loop().time()
-
-		# Discovery uses HTTP on loopback; keep strict TLS settings without loading CA roots.
-		control_tls = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-		async with httpx.AsyncClient(timeout=httpx.Timeout(2.0), verify=control_tls, trust_env=False) as client:
-			while asyncio.get_event_loop().time() - start_time < timeout:
-				try:
-					resp = await client.get(f'http://localhost:{port}/json/version')
-					if resp.status_code == 200:
-						version = resp.json()
-						if isinstance(version, dict):
-							endpoint = _local_debugger_endpoint(version.get('webSocketDebuggerUrl'), port)
-							if endpoint is not None:
-								return endpoint
-				except Exception:
-					# Local discovery can be incomplete while Chrome starts.
-					pass
-				await asyncio.sleep(0.02)
-
-		raise TimeoutError(f'Browser did not start within {timeout} seconds')
+		loop = asyncio.get_running_loop()
+		deadline = loop.time() + timeout
+		while True:
+			remaining = deadline - loop.time()
+			if remaining <= 0:
+				raise TimeoutError(f'Browser did not start within {timeout} seconds')
+			try:
+				version = await local_discovery.fetch_loopback_version(port, timeout=min(2.0, remaining))
+			except asyncio.CancelledError:
+				raise
+			except Exception:
+				# Local discovery can be incomplete while Chrome starts.
+				version = None
+			if isinstance(version, dict):
+				endpoint = _local_debugger_endpoint(version.get('webSocketDebuggerUrl'), port)
+				if endpoint is not None:
+					return endpoint
+			remaining = deadline - loop.time()
+			if remaining <= 0:
+				raise TimeoutError(f'Browser did not start within {timeout} seconds')
+			await asyncio.sleep(min(0.02, remaining))
 
 	@staticmethod
 	async def _cleanup_spawned_subprocess(process: asyncio.subprocess.Process) -> bool:
