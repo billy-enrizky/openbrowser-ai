@@ -1,0 +1,1399 @@
+{
+  "rows": [
+    {
+      "task": "download",
+      "arm": "agent-browser",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 1058586624,
+          "min": 868630528,
+          "max": 1155661824
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 29556736,
+          "min": 25444352,
+          "max": 34340864
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 495107408,
+          "min": 481358928,
+          "max": 538460672
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.073906311,
+          "min": 0.06522752999999959,
+          "max": 0.0769189779999997
+        }
+      }
+    },
+    {
+      "task": "download",
+      "arm": "browser-use",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 1212973056,
+          "min": 993689600,
+          "max": 1343586304
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 31326208,
+          "min": 27721728,
+          "max": 36880384
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 568426432,
+          "min": 550731184,
+          "max": 628804112
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.1892181380000002,
+          "min": 0.17577093800000032,
+          "max": 0.21941148099999985
+        }
+      }
+    },
+    {
+      "task": "download",
+      "arm": "chrome-devtools-mcp",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 902807552,
+          "min": 662880256,
+          "max": 905166848
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 28704768,
+          "min": 24494080,
+          "max": 34553856
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 513136792,
+          "min": 468339408,
+          "max": 525670120
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.09224134999999967,
+          "min": 0.08009644500000057,
+          "max": 0.14577487099999997
+        }
+      }
+    },
+    {
+      "task": "download",
+      "arm": "openbrowser-fast",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 691077120,
+          "min": 652001280,
+          "max": 699301888
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 29409280,
+          "min": 26181632,
+          "max": 34406400
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 418227152,
+          "min": 416965680,
+          "max": 422061104
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.0659389840000002,
+          "min": 0.06067980199999967,
+          "max": 0.12995377200000013
+        }
+      }
+    },
+    {
+      "task": "download",
+      "arm": "openbrowser-mcp-fast",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 683622400,
+          "min": 664928256,
+          "max": 692633600
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 28262400,
+          "min": 24674304,
+          "max": 29147136
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 414098144,
+          "min": 411607776,
+          "max": 419570256
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.06690779699999938,
+          "min": 0.06642675700000034,
+          "max": 0.07893426000000003
+        }
+      }
+    },
+    {
+      "task": "download",
+      "arm": "playwright-cli",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 882556928,
+          "min": 749158400,
+          "max": 896172032
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 29392896,
+          "min": 24985600,
+          "max": 34422784
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 473385248,
+          "min": 457327824,
+          "max": 540452592
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.24455120699999977,
+          "min": 0.2308192309999999,
+          "max": 0.25571443400000016
+        }
+      }
+    },
+    {
+      "task": "download",
+      "arm": "playwright-mcp",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 748584960,
+          "min": 690012160,
+          "max": 777371648
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 28147712,
+          "min": 24150016,
+          "max": 34291712
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 459884448,
+          "min": 458590088,
+          "max": 471402616
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.07423459599999971,
+          "min": 0.0725789429999999,
+          "max": 0.09884501199999995
+        }
+      }
+    },
+    {
+      "task": "modal",
+      "arm": "agent-browser",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 1068990464,
+          "min": 1055309824,
+          "max": 1149304832
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 29704192,
+          "min": 29032448,
+          "max": 30949376
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 500383080,
+          "min": 499203432,
+          "max": 536429056
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.11347016599999993,
+          "min": 0.10546545899999993,
+          "max": 0.14308236099999982
+        }
+      }
+    },
+    {
+      "task": "modal",
+      "arm": "browser-use",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 1303805952,
+          "min": 1239220224,
+          "max": 1356087296
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 32161792,
+          "min": 31178752,
+          "max": 36061184
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 592527656,
+          "min": 576127416,
+          "max": 633505504
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.2375601819999993,
+          "min": 0.22745606199999946,
+          "max": 0.2575225130000003
+        }
+      }
+    },
+    {
+      "task": "modal",
+      "arm": "chrome-devtools-mcp",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 904118272,
+          "min": 862060544,
+          "max": 906969088
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 28934144,
+          "min": 28524544,
+          "max": 30982144
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 519542792,
+          "min": 497390376,
+          "max": 527587048
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.16518160000000037,
+          "min": 0.15384250099999974,
+          "max": 0.19244508299999996
+        }
+      }
+    },
+    {
+      "task": "modal",
+      "arm": "openbrowser-fast",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 694550528,
+          "min": 671924224,
+          "max": 716554240
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 29507584,
+          "min": 28835840,
+          "max": 31391744
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 420979784,
+          "min": 417784616,
+          "max": 424141896
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.08110540700000035,
+          "min": 0.08030979599999988,
+          "max": 0.1189169889999997
+        }
+      }
+    },
+    {
+      "task": "modal",
+      "arm": "openbrowser-mcp-fast",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 688111616,
+          "min": 675512320,
+          "max": 702808064
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 28540928,
+          "min": 28098560,
+          "max": 29982720
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 417161976,
+          "min": 416752376,
+          "max": 423207672
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.09355447800000016,
+          "min": 0.08234007500000029,
+          "max": 0.12274064900000003
+        }
+      }
+    },
+    {
+      "task": "modal",
+      "arm": "playwright-cli",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 891535360,
+          "min": 870776832,
+          "max": 909262848
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 29442048,
+          "min": 29212672,
+          "max": 31883264
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 553904096,
+          "min": 543646800,
+          "max": 561228056
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.2752200939999998,
+          "min": 0.26363280999999983,
+          "max": 0.3166978549999999
+        }
+      }
+    },
+    {
+      "task": "modal",
+      "arm": "playwright-mcp",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 766279680,
+          "min": 738951168,
+          "max": 781451264
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 28655616,
+          "min": 27443200,
+          "max": 32014336
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 462145416,
+          "min": 454624440,
+          "max": 469174704
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.11546275600000033,
+          "min": 0.11004000000000014,
+          "max": 0.1236725729999999
+        }
+      }
+    },
+    {
+      "task": "tabs",
+      "arm": "agent-browser",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 1053360128,
+          "min": 970506240,
+          "max": 1121665024
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 29556736,
+          "min": 26427392,
+          "max": 34340864
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 524909928,
+          "min": 508868624,
+          "max": 530332600
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.17857624400000027,
+          "min": 0.17174204200000043,
+          "max": 0.20529944299999991
+        }
+      }
+    },
+    {
+      "task": "tabs",
+      "arm": "browser-use",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 1248935936,
+          "min": 1163313152,
+          "max": 1351942144
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 31866880,
+          "min": 28164096,
+          "max": 36880384
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 596148592,
+          "min": 590789824,
+          "max": 618612424
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.28082997099999973,
+          "min": 0.2700578079999998,
+          "max": 0.356914583
+        }
+      }
+    },
+    {
+      "task": "tabs",
+      "arm": "chrome-devtools-mcp",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 902889472,
+          "min": 793395200,
+          "max": 904003584
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 28704768,
+          "min": 25001984,
+          "max": 34553856
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 525620968,
+          "min": 505400808,
+          "max": 535762208
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.20558426799999996,
+          "min": 0.19150803400000083,
+          "max": 0.24758166300000006
+        }
+      }
+    },
+    {
+      "task": "tabs",
+      "arm": "openbrowser-fast",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 696713216,
+          "min": 675954688,
+          "max": 711180288
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 29507584,
+          "min": 25591808,
+          "max": 34406400
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 422535928,
+          "min": 420274936,
+          "max": 422765304
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.13376777400000006,
+          "min": 0.1220743599999996,
+          "max": 0.14748351999999976
+        }
+      }
+    },
+    {
+      "task": "tabs",
+      "arm": "openbrowser-mcp-fast",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 690028544,
+          "min": 673693696,
+          "max": 718766080
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 28803072,
+          "min": 24985600,
+          "max": 34144256
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 420389600,
+          "min": 414917344,
+          "max": 422961864
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.1276629279999999,
+          "min": 0.12363359700000043,
+          "max": 0.1578157130000002
+        }
+      }
+    },
+    {
+      "task": "tabs",
+      "arm": "playwright-cli",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 886063104,
+          "min": 839172096,
+          "max": 893894656
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 29442048,
+          "min": 25968640,
+          "max": 34422784
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 546727616,
+          "min": 532341384,
+          "max": 559245568
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.3455922009999999,
+          "min": 0.31860068399999975,
+          "max": 0.3551675759999995
+        }
+      }
+    },
+    {
+      "task": "tabs",
+      "arm": "playwright-mcp",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 772538368,
+          "min": 719486976,
+          "max": 786202624
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 28147712,
+          "min": 24707072,
+          "max": 34291712
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 473155560,
+          "min": 465585432,
+          "max": 482248848
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.16585929900000007,
+          "min": 0.15000171400000006,
+          "max": 0.17807423200000017
+        }
+      }
+    },
+    {
+      "task": "wizard",
+      "arm": "agent-browser",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 1061158912,
+          "min": 1051246592,
+          "max": 1306705920
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 29704192,
+          "min": 28737536,
+          "max": 30916608
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 509443432,
+          "min": 506477592,
+          "max": 563906248
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.22838855400000035,
+          "min": 0.21164343200000024,
+          "max": 0.27483598099999984
+        }
+      }
+    },
+    {
+      "task": "wizard",
+      "arm": "browser-use",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 1355317248,
+          "min": 1306017792,
+          "max": 1390166016
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 32161792,
+          "min": 30670848,
+          "max": 38617088
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 601933440,
+          "min": 597526168,
+          "max": 625556840
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.32498662800000044,
+          "min": 0.31995648700000023,
+          "max": 0.5925797420000001
+        }
+      }
+    },
+    {
+      "task": "wizard",
+      "arm": "chrome-devtools-mcp",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 902283264,
+          "min": 880640000,
+          "max": 909590528
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 29327360,
+          "min": 27983872,
+          "max": 31113216
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 518231040,
+          "min": 499308576,
+          "max": 528078112
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.377744565,
+          "min": 0.358502079,
+          "max": 0.49616562100000006
+        }
+      }
+    },
+    {
+      "task": "wizard",
+      "arm": "openbrowser-fast",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 700022784,
+          "min": 682475520,
+          "max": 711245824
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 29540352,
+          "min": 28704768,
+          "max": 31555584
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 421978872,
+          "min": 416785024,
+          "max": 427320056
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.132240382,
+          "min": 0.12234279199999998,
+          "max": 0.1580078920000001
+        }
+      }
+    },
+    {
+      "task": "wizard",
+      "arm": "openbrowser-mcp-fast",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 694222848,
+          "min": 678232064,
+          "max": 719208448
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 28573696,
+          "min": 28049408,
+          "max": 30687232
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 424436424,
+          "min": 417718840,
+          "max": 427418336
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.13135680100000013,
+          "min": 0.12354186499999997,
+          "max": 0.16925461200000003
+        }
+      }
+    },
+    {
+      "task": "wizard",
+      "arm": "playwright-cli",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 889094144,
+          "min": 861765632,
+          "max": 907526144
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 29376512,
+          "min": 28622848,
+          "max": 31490048
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 560293160,
+          "min": 543680072,
+          "max": 574761384
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.4271668690000001,
+          "min": 0.4151428130000001,
+          "max": 0.483503947
+        }
+      }
+    },
+    {
+      "task": "wizard",
+      "arm": "playwright-mcp",
+      "runs": 5,
+      "ok": 5,
+      "resource_ok": 5,
+      "metrics": {
+        "warm_peak_tree_rss_bytes": {
+          "count": 5,
+          "median": 775897088,
+          "min": 731643904,
+          "max": 778928128
+        },
+        "warm_peak_worker_rss_bytes": {
+          "count": 5,
+          "median": 28180480,
+          "min": 27410432,
+          "max": 31588352
+        },
+        "warm_peak_child_footprint_bytes": {
+          "count": 5,
+          "median": 472975072,
+          "min": 459834336,
+          "max": 484002056
+        },
+        "warm_task_tree_cpu_delta_seconds": {
+          "count": 5,
+          "median": 0.24908346100000034,
+          "min": 0.24538289199999985,
+          "max": 0.35361695399999993
+        }
+      }
+    }
+  ],
+  "terminal": {
+    "record_type": "end",
+    "method": "warm-session-resources-v3",
+    "sampler_method_version": 7,
+    "native_service_method_version": 1,
+    "observations": 140,
+    "expected_observations": 140,
+    "failures": 0,
+    "warmups": {
+      "openbrowser-mcp-fast": {
+        "payload": {
+          "server": "started",
+          "context_id": "78b8755f0ddf4b04a7c2b5f8aeb01358",
+          "keychain_verified": true,
+          "launch_proof_captured": true,
+          "engine": {
+            "schema": "openbrowser-session-observation-v1",
+            "status": "valid",
+            "eligible": true,
+            "lane": "matched-full-1255",
+            "revision": "1255",
+            "version": "159.0.8154.6",
+            "launcher_sha256": "cc8feb37062c287a2670c2dcb5d4de081a5fbeeb4a1a152e0ad2399b5bc6416f",
+            "engine_image_sha256": "a0a2e8854ce90268f5d9b32210cf53fc0709f4b798b3c3a96964ba3ebce4bc4b",
+            "pid": 58107,
+            "created_at": 1795816397.02111,
+            "executable_basename": "Google Chrome for Testing",
+            "keychain_verified": true,
+            "profile_digest": "13d35ed203d5e11d78171020b21576008e7f79d0d70b6aaaa812b0075bc3edac"
+          }
+        },
+        "warmup_ms": 766.6309159994853,
+        "root": "/private/tmp/w5r-a/warm-7197b1c472",
+        "downloads": "/private/tmp/w5r-a/warm-7197b1c472/downloads",
+        "marker": "/private/tmp/w5r-a/warm-7197b1c472",
+        "native_service": {
+          "eligible": true,
+          "failure": null,
+          "proof": {
+            "pid": 58106,
+            "created_at": 1795816396.736138,
+            "source": "popen",
+            "executable_basename": "python3.12",
+            "scope_digest": "75b04a7c18801ba130fc0a54f4abcfb529767711aa1f095abaa597eace19ed82"
+          },
+          "evidence_sha256": "94e4d2aeb74ff6c7796ca62f3cfa2a1ae6724ab249f1a197af6da4c7e34526a1",
+          "evidence_artifact": "native-ready-openbrowser-mcp-fast.json"
+        }
+      },
+      "openbrowser-fast": {
+        "payload": {
+          "ok": true,
+          "elapsed_ms": 612.3,
+          "url": "about:blank",
+          "keychain_verified": true,
+          "launch_proof_captured": true,
+          "engine": {
+            "schema": "openbrowser-session-observation-v1",
+            "status": "valid",
+            "eligible": true,
+            "lane": "matched-full-1255",
+            "revision": "1255",
+            "version": "159.0.8154.6",
+            "launcher_sha256": "cc8feb37062c287a2670c2dcb5d4de081a5fbeeb4a1a152e0ad2399b5bc6416f",
+            "engine_image_sha256": "a0a2e8854ce90268f5d9b32210cf53fc0709f4b798b3c3a96964ba3ebce4bc4b",
+            "pid": 58128,
+            "created_at": 1795816397.920817,
+            "executable_basename": "Google Chrome for Testing",
+            "keychain_verified": true,
+            "profile_digest": "e62a578ad49c6cfb6d7aef514c2e47c5664d09faa363d1ad3e963e6f14adfbc7"
+          }
+        },
+        "warmup_ms": 681.6281250012253,
+        "root": "/private/tmp/w5r-a/warm-9e83aed24b",
+        "downloads": "/private/tmp/w5r-a/warm-9e83aed24b/downloads",
+        "marker": "/private/tmp/w5r-a/warm-9e83aed24b",
+        "native_service": {
+          "eligible": true,
+          "failure": null,
+          "proof": {
+            "pid": 58127,
+            "created_at": 1795816397.686713,
+            "source": "pid_file",
+            "executable_basename": "python3.12",
+            "scope_digest": "3dd39fae3dcb208fd8a8395cd9e82ea45e7850ab2e16abd0b471de4171b4ad74"
+          },
+          "evidence_sha256": "d46af86ab63b6e88412c221dfb28ebada11dbb7329efb81ff7f701689e07f74c",
+          "evidence_artifact": "native-ready-openbrowser-fast.json"
+        }
+      },
+      "chrome-devtools-mcp": {
+        "payload": {
+          "ok": true,
+          "page_id": 1,
+          "browser_version": "1.13.0",
+          "keychain_verified": true,
+          "engine": {
+            "schema": "openbrowser-session-observation-v1",
+            "status": "valid",
+            "eligible": true,
+            "lane": "matched-full-1255",
+            "revision": "1255",
+            "version": "159.0.8154.6",
+            "launcher_sha256": "cc8feb37062c287a2670c2dcb5d4de081a5fbeeb4a1a152e0ad2399b5bc6416f",
+            "engine_image_sha256": "a0a2e8854ce90268f5d9b32210cf53fc0709f4b798b3c3a96964ba3ebce4bc4b",
+            "pid": 58149,
+            "created_at": 1795816398.649999,
+            "executable_basename": "Google Chrome for Testing",
+            "keychain_verified": true,
+            "profile_digest": "4a0ad3bf5e0065cf553abf2ca4d08a0d98a2915801dbd0489040928ba113d150"
+          }
+        },
+        "warmup_ms": 610.8945830001176,
+        "root": "/private/tmp/w5r-a/warm-1232fd90a2",
+        "downloads": "/private/tmp/w5r-a/warm-1232fd90a2/downloads",
+        "marker": "/private/tmp/w5r-a/warm-1232fd90a2",
+        "native_service": {
+          "eligible": true,
+          "failure": null,
+          "proof": {
+            "pid": 58146,
+            "created_at": 1795816398.403579,
+            "source": "popen",
+            "executable_basename": "node",
+            "scope_digest": "4a0ad3bf5e0065cf553abf2ca4d08a0d98a2915801dbd0489040928ba113d150"
+          },
+          "evidence_sha256": "480083065b4f517b26edccf2ae1131f5563bdaeb93865f6971e9c58c347fab1b",
+          "evidence_artifact": "native-ready-chrome-devtools-mcp.json"
+        }
+      },
+      "agent-browser": {
+        "payload": {
+          "ok": true,
+          "session": "2914fdfa1d",
+          "keychain_verified": true,
+          "engine": {
+            "schema": "openbrowser-session-observation-v1",
+            "status": "valid",
+            "eligible": true,
+            "lane": "matched-full-1255",
+            "revision": "1255",
+            "version": "159.0.8154.6",
+            "launcher_sha256": "cc8feb37062c287a2670c2dcb5d4de081a5fbeeb4a1a152e0ad2399b5bc6416f",
+            "engine_image_sha256": "a0a2e8854ce90268f5d9b32210cf53fc0709f4b798b3c3a96964ba3ebce4bc4b",
+            "pid": 58170,
+            "created_at": 1795816399.240279,
+            "executable_basename": "Google Chrome for Testing",
+            "keychain_verified": true,
+            "profile_digest": "3e8114495026dd418660454ea3e26309940713dcd936e3873534e18313e80fab"
+          }
+        },
+        "warmup_ms": 1017.615750000914,
+        "root": "/private/tmp/w5r-a/warm-fe6f4c80c6",
+        "downloads": "/private/tmp/w5r-a/warm-fe6f4c80c6/downloads",
+        "marker": "/private/tmp/w5r-a/warm-fe6f4c80c6",
+        "native_service": {
+          "eligible": true,
+          "failure": null,
+          "proof": {
+            "pid": 58166,
+            "created_at": 1795816399.133577,
+            "source": "pid_file",
+            "executable_basename": "agent-browser-darwin-arm64",
+            "scope_digest": "e7720a93526b0c20923c29710e907dfea28bf28f5d1c4ab2f9bc28730d6ee00b"
+          },
+          "evidence_sha256": "ce42a359a4139602eb0d3529587fbc587a8fa72a824e49965583dd86ce4084d4",
+          "evidence_artifact": "native-ready-agent-browser.json"
+        }
+      },
+      "browser-use": {
+        "payload": {
+          "ok": true,
+          "cdp_url": "http://127.0.0.1:50076",
+          "keychain_verified": true,
+          "execution_ready": true,
+          "adapter_version": "native-session-readiness-v4",
+          "engine": {
+            "schema": "openbrowser-session-observation-v1",
+            "status": "valid",
+            "eligible": true,
+            "lane": "matched-full-1255",
+            "revision": "1255",
+            "version": "159.0.8154.6",
+            "launcher_sha256": "cc8feb37062c287a2670c2dcb5d4de081a5fbeeb4a1a152e0ad2399b5bc6416f",
+            "engine_image_sha256": "a0a2e8854ce90268f5d9b32210cf53fc0709f4b798b3c3a96964ba3ebce4bc4b",
+            "pid": 58191,
+            "created_at": 1795816400.230267,
+            "executable_basename": "Google Chrome for Testing",
+            "keychain_verified": true,
+            "profile_digest": "6d9a304430295e9c7f04be582c1666efb8a3d79a2819db38bb77f922ab0d211f"
+          }
+        },
+        "warmup_ms": 698.1593750006141,
+        "root": "/private/tmp/w5r-a/warm-f7d7108162",
+        "downloads": "/private/tmp/w5r-a/warm-f7d7108162/downloads",
+        "marker": "/private/tmp/w5r-a/warm-f7d7108162",
+        "native_service": {
+          "eligible": true,
+          "failure": null,
+          "proof": {
+            "pid": 58212,
+            "created_at": 1795816400.71117,
+            "source": "pid_file",
+            "executable_basename": "python3.12",
+            "scope_digest": "399641e94e53db03314921996ea4b08e38fa8f951faad2afe3033dec6d9f9146"
+          },
+          "evidence_sha256": "2a896d10cc665cd4ed362efd6dafc535d83b4cfb83232539d8293a9d7969b02f",
+          "evidence_artifact": "native-ready-browser-use.json"
+        }
+      },
+      "playwright-mcp": {
+        "payload": {
+          "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/159.0.0.0 Safari/537.36",
+          "server": "playwright-mcp",
+          "package": "0.0.86",
+          "playwright": "1.66.0-alpha-2026-11-18",
+          "browser_version": "159.0.8154.6",
+          "keychain_verified": true,
+          "engine": {
+            "schema": "openbrowser-session-observation-v1",
+            "status": "valid",
+            "eligible": true,
+            "lane": "matched-full-1255",
+            "revision": "1255",
+            "version": "159.0.8154.6",
+            "launcher_sha256": "cc8feb37062c287a2670c2dcb5d4de081a5fbeeb4a1a152e0ad2399b5bc6416f",
+            "engine_image_sha256": "a0a2e8854ce90268f5d9b32210cf53fc0709f4b798b3c3a96964ba3ebce4bc4b",
+            "pid": 58216,
+            "created_at": 1795816401.213031,
+            "executable_basename": "Google Chrome for Testing",
+            "keychain_verified": true,
+            "profile_digest": "f453234dfa45a351b44d0eecb2ff3a862e48c17b28206960c12f841e319da5fa"
+          }
+        },
+        "warmup_ms": 550.0460000002931,
+        "root": "/private/tmp/w5r-a/warm-d50c3d28fd",
+        "downloads": "/private/tmp/w5r-a/warm-d50c3d28fd/downloads",
+        "marker": "/private/tmp/w5r-a/warm-d50c3d28fd",
+        "native_service": {
+          "eligible": true,
+          "failure": null,
+          "proof": {
+            "pid": 58215,
+            "created_at": 1795816401.030934,
+            "source": "popen",
+            "executable_basename": "node",
+            "scope_digest": "f453234dfa45a351b44d0eecb2ff3a862e48c17b28206960c12f841e319da5fa"
+          },
+          "evidence_sha256": "2d38734f606b244d578c711caadcb0b9d13520b6f425fb8d0e3b0016ec63430d",
+          "evidence_artifact": "native-ready-playwright-mcp.json"
+        }
+      },
+      "playwright-cli": {
+        "payload": {
+          "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/159.0.0.0 Safari/537.36",
+          "server": "playwright-cli",
+          "package": "0.1.25",
+          "playwright": "1.66.0-alpha-2026-11-18",
+          "browser_version": "159.0.8154.6",
+          "keychain_verified": true,
+          "engine": {
+            "schema": "openbrowser-session-observation-v1",
+            "status": "valid",
+            "eligible": true,
+            "lane": "matched-full-1255",
+            "revision": "1255",
+            "version": "159.0.8154.6",
+            "launcher_sha256": "cc8feb37062c287a2670c2dcb5d4de081a5fbeeb4a1a152e0ad2399b5bc6416f",
+            "engine_image_sha256": "a0a2e8854ce90268f5d9b32210cf53fc0709f4b798b3c3a96964ba3ebce4bc4b",
+            "pid": 58242,
+            "created_at": 1795816402.507923,
+            "executable_basename": "Google Chrome for Testing",
+            "keychain_verified": true,
+            "profile_digest": "2231857ea92f9fe105a629de1f6e0ca794c76e9ffa19acd9eec44a80d8330e86"
+          }
+        },
+        "warmup_ms": 1464.9252090002847,
+        "root": "/private/tmp/w5r-a/warm-5f18eb0f0b",
+        "downloads": "/private/tmp/w5r-a/warm-5f18eb0f0b/downloads",
+        "marker": "/private/tmp/w5r-a/warm-5f18eb0f0b",
+        "native_service": {
+          "eligible": true,
+          "failure": null,
+          "proof": {
+            "pid": 58241,
+            "created_at": 1795816402.340915,
+            "source": "native_status",
+            "executable_basename": "node",
+            "scope_digest": "2231857ea92f9fe105a629de1f6e0ca794c76e9ffa19acd9eec44a80d8330e86"
+          },
+          "evidence_sha256": "a151e398a49f7dff5647f3bba4faa4c1558a86170225bfd9c9cdc5b2d4e26244",
+          "evidence_artifact": "native-ready-playwright-cli.json"
+        }
+      }
+    },
+    "worker_facts": {
+      "openbrowser-mcp-fast": {
+        "pid": 58105,
+        "created_at": 1795816396.675458,
+        "error": null,
+        "artifact": "worker-identity-openbrowser-mcp-fast.json",
+        "sha256": "d1bdc6203275db514cc5abc2f2923fe9938895ff216c8b267ce5be0e2931eb8c"
+      },
+      "openbrowser-fast": {
+        "pid": 58125,
+        "created_at": 1795816397.550067,
+        "error": null,
+        "artifact": "worker-identity-openbrowser-fast.json",
+        "sha256": "c4a0001cbb9ee88ca8075fefc13df297a3031c3ce190b0359ee2a341fd2933a6"
+      },
+      "chrome-devtools-mcp": {
+        "pid": 58144,
+        "created_at": 1795816398.341,
+        "error": null,
+        "artifact": "worker-identity-chrome-devtools-mcp.json",
+        "sha256": "71022d3bd4538d83fa4d85a6e364e405c0095b21e78db0079f5d7354f209f1fd"
+      },
+      "agent-browser": {
+        "pid": 58164,
+        "created_at": 1795816399.040208,
+        "error": null,
+        "artifact": "worker-identity-agent-browser.json",
+        "sha256": "7b957cb3f9649af4ef3ff1880adb2648aa59aee445d6b8a9dce7d6284cd5e08d"
+      },
+      "browser-use": {
+        "pid": 58190,
+        "created_at": 1795816400.156138,
+        "error": null,
+        "artifact": "worker-identity-browser-use.json",
+        "sha256": "4220f9ba803529eff846d3f3c9239fc0dd653886f20a16e4eb4ce3962ee30635"
+      },
+      "playwright-mcp": {
+        "pid": 58213,
+        "created_at": 1795816400.950786,
+        "error": null,
+        "artifact": "worker-identity-playwright-mcp.json",
+        "sha256": "80c84c0d52601d994970e47d65600319381a9d16d4971569c1c8cda7bb532408"
+      },
+      "playwright-cli": {
+        "pid": 58234,
+        "created_at": 1795816401.605592,
+        "error": null,
+        "artifact": "worker-identity-playwright-cli.json",
+        "sha256": "f3eaf6e85e42b4fa1a643948332a38300308642c34b59ff65e828db5e5f4777e"
+      }
+    },
+    "worker_envelopes": {
+      "openbrowser-mcp-fast": {
+        "present": true,
+        "type": "ready",
+        "artifact": "worker-ready-openbrowser-mcp-fast.json",
+        "sha256": "d9327deb00640906fa6d0655fde4fc7fe3cc18eaba6fbee7e8afee28fecaf762"
+      },
+      "openbrowser-fast": {
+        "present": true,
+        "type": "ready",
+        "artifact": "worker-ready-openbrowser-fast.json",
+        "sha256": "d755b7caaaf74e2762eec031e39f1f3acc6d8fdf9bd4fd1f803f9f1d344e1d86"
+      },
+      "chrome-devtools-mcp": {
+        "present": true,
+        "type": "ready",
+        "artifact": "worker-ready-chrome-devtools-mcp.json",
+        "sha256": "7b757fad1f2bee3c7d6b0abffca712c6a3944348326d48c4dc29b675c08ec7a7"
+      },
+      "agent-browser": {
+        "present": true,
+        "type": "ready",
+        "artifact": "worker-ready-agent-browser.json",
+        "sha256": "b32042882966b5725738b3ef77f332acbf44e851b612a9c7da39beb3f1384a71"
+      },
+      "browser-use": {
+        "present": true,
+        "type": "ready",
+        "artifact": "worker-ready-browser-use.json",
+        "sha256": "cf6644308b2be3da5bc0f4c9d7f7472b0b967fcc0ec76d1ee39530a2cca898bd"
+      },
+      "playwright-mcp": {
+        "present": true,
+        "type": "ready",
+        "artifact": "worker-ready-playwright-mcp.json",
+        "sha256": "643859d15c7749f43f6fbbd2da2d3c25468114de6df5606ddacda4b78d7a6b7b"
+      },
+      "playwright-cli": {
+        "present": true,
+        "type": "ready",
+        "artifact": "worker-ready-playwright-cli.json",
+        "sha256": "038383af7a00958625a282f131bdec663415cbec8176f7f64c4eb42de7a8a999"
+      }
+    },
+    "cleanup": {
+      "openbrowser-mcp-fast": {
+        "initial_leftovers": 0,
+        "remaining": [],
+        "unverified_processes": 0,
+        "errors": [],
+        "verified": true,
+        "scope": "observed_identity_fenced_cohort"
+      },
+      "openbrowser-fast": {
+        "initial_leftovers": 0,
+        "remaining": [],
+        "unverified_processes": 0,
+        "errors": [],
+        "verified": true,
+        "scope": "observed_identity_fenced_cohort"
+      },
+      "chrome-devtools-mcp": {
+        "initial_leftovers": 0,
+        "remaining": [],
+        "unverified_processes": 0,
+        "errors": [],
+        "verified": true,
+        "scope": "observed_identity_fenced_cohort"
+      },
+      "agent-browser": {
+        "initial_leftovers": 0,
+        "remaining": [],
+        "unverified_processes": 0,
+        "errors": [],
+        "verified": true,
+        "scope": "observed_identity_fenced_cohort"
+      },
+      "browser-use": {
+        "initial_leftovers": 0,
+        "remaining": [],
+        "unverified_processes": 0,
+        "errors": [],
+        "verified": true,
+        "scope": "observed_identity_fenced_cohort"
+      },
+      "playwright-mcp": {
+        "initial_leftovers": 0,
+        "remaining": [],
+        "unverified_processes": 0,
+        "errors": [],
+        "verified": true,
+        "scope": "observed_identity_fenced_cohort"
+      },
+      "playwright-cli": {
+        "initial_leftovers": 0,
+        "remaining": [],
+        "unverified_processes": 0,
+        "errors": [],
+        "verified": true,
+        "scope": "observed_identity_fenced_cohort"
+      }
+    },
+    "retired_workers": {},
+    "fixture_errors": [],
+    "cleanup_verified": true,
+    "provenance_verified": true,
+    "source_unchanged": true,
+    "binding_unchanged": true,
+    "binding_after": {
+      "verified": true,
+      "reason": "byte_identical_package",
+      "entry_sha256": "320e91c7915654a8b41c98ee82c788377bcc181b72059667dcf700728e486543",
+      "backend_entry_sha": "e16cbadb804e6e35e5d989adbcc92189ac77811dea752ab8b97cc833564b1b09",
+      "native_manifest_sha": "925e9dced53b733dd6b21a3caa0c029a4813affc55438fd6006c5edfccec31a1",
+      "native_source_digest": "f3cbae874e3a535bdbdd2ec2b60a2f44d1f032350b86dcd6d062221bf4afab29",
+      "expected_app_digest": "847bbf456edf263ab18e80261e2f509f6ab7d35c485b1bafc5de5dc0b7726a01",
+      "actual_app_digest": "847bbf456edf263ab18e80261e2f509f6ab7d35c485b1bafc5de5dc0b7726a01",
+      "dist_version": "0.1.61.dev173+g9f630f7c6",
+      "origin_matches_expected": false,
+      "target": "aarch64-apple-darwin"
+    },
+    "latency_claim_allowed": false,
+    "terminal": true,
+    "valid": true
+  }
+}

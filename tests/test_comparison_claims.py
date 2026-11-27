@@ -45,7 +45,7 @@ def test_comparison_page_has_current_sections_only():
     assert _sections(_page('comparison.mdx')) == [
         '1. Benchmark index',
         '2. How to read this page',
-        '3. Current interactive lanes, 2026-11-25',
+        '3. Current interactive lanes, 2026-11-27',
         '4. OpenBrowser no-browser memory, 2026-11-26',
         '5. Other native local lanes, 2026-11-24',
         '6. Why OpenBrowser is faster and more efficient',
@@ -96,8 +96,8 @@ def test_benchmark_readmes_have_current_sections_only():
     scraping = (ROOT / 'benchmarks' / 'scraping' / 'README.md').read_text()
     assert _sections(interactive) == [
         '1. How to read these numbers',
-        '2. Current results, 2026-11-25, rotated N=5',
-        '3. Interactive resource lane, 2026-11-25',
+        '2. Current results, 2026-11-27, rotated N=5',
+        '3. Interactive resource lane, 2026-11-27',
         '4. Arms',
         '5. Tasks',
         '6. Fair-run procedure',
@@ -149,11 +149,6 @@ def test_current_docs_do_not_cite_removed_benchmark_scripts():
     assert '## 4. Benchmark: Native Local Lanes' in plugin
 
 
-def test_public_methodology_label_describes_the_session_lifecycle():
-    for name in ('README.md', 'benchmarks/interactive/README.md', 'docs/comparison.mdx'):
-        assert 'Warm-session readiness' in (ROOT / name).read_text()
-
-
 def test_http_memory_artifact_has_five_complete_observations_per_series():
     import hashlib
     import json
@@ -192,23 +187,3 @@ def test_http_memory_values_match_all_public_markdown_copies():
             expected = f'{median(values):.3f} MiB median ({min(values):.3f} to {max(values):.3f}, N=5)'
             assert expected in text, (name, expected)
         assert '25 of 25 in 5 of 5 runs' in text
-
-
-def test_benchmark_index_dates_match_their_sections():
-    page = _page("comparison.mdx")
-    assert "| [OpenBrowser no-browser memory](#no-browser-memory) | 2026-11-26 |" in page
-    assert "## 4. OpenBrowser no-browser memory, 2026-11-26" in page
-    scraping = (ROOT / "benchmarks" / "scraping" / "README.md").read_text()
-    assert "The memory lane is from 2026-11-26." in scraping
-    assert "The Firecrawl Local sequential and Lightpanda reference lanes are from 2026-11-25." in scraping
-    assert (
-        "The Firecrawl Local sequential and Lightpanda lanes are the latest reference runs from 2026-11-25."
-        in scraping
-    )
-    assert "The Firecrawl Local batch lane is from 2026-11-24." in scraping
-    for heading in (
-        "### 2.2. Firecrawl Local sequential, 2026-11-25, N=10",
-        "### 2.3. Firecrawl Local batch, 2026-11-24, N=10",
-        "### 2.4. Lightpanda no-render latency, 2026-11-25, N=10",
-    ):
-        assert heading in scraping

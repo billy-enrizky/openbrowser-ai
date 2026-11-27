@@ -10,10 +10,12 @@
   - [2.3. OpenClaw](#23-openclaw)
   - [2.4. skills.sh](#24-skillssh)
   - [2.5. Standalone MCP server (without plugin)](#25-standalone-mcp-server-without-plugin)
+  - [2.6. Native CLI frontend](#26-native-cli-frontend)
 - [3. Available Tools](#3-available-tools)
 - [4. Benchmark: Native Local Lanes](#4-benchmark-native-local-lanes)
 - [5. Native web search](#5-native-web-search)
 - [6. CLI Execute Mode](#6-cli-execute-mode)
+  - [6.1. Large responses and Python CLI](#61-large-responses-and-python-cli)
 - [7. Configuration](#7-configuration)
 - [8. Skills](#8-skills)
 - [9. Testing and Benchmarks](#9-testing-and-benchmarks)
@@ -100,7 +102,33 @@ Add to your project's `.mcp.json`:
 }
 ```
 
-The default stdio transport is the lean JSON-RPC loop. Set `OPENBROWSER_MCP_TRANSPORT=sdk` to use the MCP SDK transport instead. Invalid values exit with code 2. Local MCP needs no separate OpenAI, OpenBrowser, or MCP API key.
+The default stdio transport is the lean JSON-RPC loop. Set `OPENBROWSER_MCP_TRANSPORT=sdk` to use the MCP SDK transport instead. Invalid values exit with code 2. MCP runs through the Python CLI. On a native wheel, `openbrowser-ai --mcp` delegates to `openbrowser-ai-py --mcp`. Local MCP needs no separate OpenAI, OpenBrowser, or MCP API key.
+
+### 2.6. Native CLI frontend
+
+On macOS and Linux, the platform wheel installs a native `openbrowser-ai` launcher and the Python `openbrowser-ai-py` CLI. The pure wheel installs both commands as Python scripts. See [Native CLI frontend](https://docs.openbrowser.me/customize/integrations/native-cli) for the public reference.
+
+The native launcher handles the exact command `openbrowser-ai -c CODE`. It sends one JSON request to the daemon. Every other command form uses the Python CLI. Examples include:
+
+- `--mcp`
+- `--version` and `--help`
+- `scrape`, `web-search`, and prompt runs
+- daemon commands
+- `-c -`
+- an option before or after `-c`
+
+Keep `openbrowser-ai-py` beside `openbrowser-ai`. The native launcher uses it for every delegated command. If the Python CLI is missing, delegated commands fail with a reinstall message.
+
+Native platform wheels cover these platforms:
+
+| Platform | Wheel tag |
+| --- | --- |
+| macOS arm64, minimum 11.0 | `py3-none-macosx_11_0_arm64` |
+| macOS x86_64, minimum 10.13 | `py3-none-macosx_10_13_x86_64` |
+| Linux x86_64 | `py3-none-manylinux_2_17_x86_64` |
+| Linux aarch64 | `py3-none-manylinux_2_17_aarch64` |
+
+Windows uses the pure Python wheel. The Linux wheels contain static musl binaries and use the manylinux_2_17 tag. A source checkout, a `uv sync` environment, an editable install, and a git URL install use the Python CLI by default. To build a native wheel from source, set `OPENBROWSER_BUILD_NATIVE=1`, select a supported target, and use the Rust toolchain. Editable native builds fail.
 
 ## 3. Available Tools
 
@@ -141,13 +169,32 @@ Prefer indexed actions whenever an element index exists. Coordinate actions use 
 
 ## 4. Benchmark: Native Local Lanes
 
-Current native evidence lives in [Benchmark Comparison](https://docs.openbrowser.me/comparison). The 2026-11-25 cold and warm lanes both put OpenBrowser MCP and CLI at the lowest p50 on every task against every other framework. The interactive resource lane has the lowest child footprint, tree RSS, and CPU on every eligible pair. The sequential scraping lane won 50 of 50 pairs against Firecrawl Local, and the full arm won 49 of 50 with one static sample 0.13 ms slower.
+The 2026-11-27 interactive lanes include OpenBrowser CLI and MCP, Playwright CLI and MCP, Chrome DevTools MCP, agent-browser, and browser-use.
+All 630 observations passed their task oracles and lane checks. Each task/interface cell has N=5.
+
+The table counts OpenBrowser comparisons against both Playwright interfaces. Lower time and memory values are better.
+
+| Metric | Cold wins / comparisons | Warm wins / comparisons |
+| --- | ---: | ---: |
+| Median task time | 13 / 20 | 16 / 16 |
+| p95 task time | 12 / 20 | 16 / 16 |
+| Median peak native process-tree RSS | 20 / 20 | 16 / 16 |
+
+Seven cold median-time comparisons remain slower than Playwright MCP.
+They cover OpenBrowser CLI on modal, download, tabs, and auth, plus OpenBrowser MCP on download, tabs, and auth.
+At N=5, the harness p95 equals the maximum sample. Resource observations supply separate memory and CPU evidence.
+
+OpenBrowser reuses its daemon and MCP context between warm tasks. Code execution batches browser actions and returns text or structured values.
+Other frameworks also reuse sessions and batch actions. The measurements describe the configured interfaces, with each remaining loss visible.
+
+Read the [per-task scoreboard](../benchmarks/interactive/results/results-seven-arm-2026-11-27-n5.scoreboard.md) for the measured values.
+[Benchmark Comparison](https://docs.openbrowser.me/comparison) includes the interactive results and the separate Firecrawl Local and Lightpanda scraping lanes.
 
 ## 5. Native web search
 
 Use `openbrowser-ai web-search "your query"` to search with the package-native DDGS client without starting a browser. The command runs the package DDGS client in process. Use `--json` for a JSON array or `--urls-only` for one URL per line. Search snippets are discovery previews. Scrape and read source pages before you cite them.
 
-The canonical `web-search` command is on the current source branch. PyPI `0.1.60` exposes the same feature as `openbrowser-ai search`. To install the canonical CLI from source, run `uv tool install --force "openbrowser-ai @ git+https://github.com/billy-enrizky/openbrowser-ai.git@main"`. To run it once without changing the installed CLI, use `uvx --from git+https://github.com/billy-enrizky/openbrowser-ai.git@main openbrowser-ai web-search "OpenBrowser MCP docs"`.
+OpenBrowser 0.1.61 provides `openbrowser-ai web-search`. To install the source branch, run `uv tool install --force "openbrowser-ai @ git+https://github.com/billy-enrizky/openbrowser-ai.git@main"`. A git URL install uses the Python CLI. To run the source build once without changing the installed CLI, use `uvx --from git+https://github.com/billy-enrizky/openbrowser-ai.git@main openbrowser-ai web-search "OpenBrowser MCP docs"`.
 
 ```bash
 openbrowser-ai web-search "OpenBrowser MCP docs" --json --output web-search-results.json
@@ -170,7 +217,11 @@ openbrowser-ai -c "print(await evaluate('document.title'))"
 openbrowser-ai daemon start|ensure|stop|force-stop|status|reset|restart|list|reap|doctor
 ```
 
-Variables persist across `-c` calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity. A warm `-c` call uses a standard-library thin client, so it does not import the full CLI or agent stack. A cold call falls back to the full client and starts the daemon.
+Variables persist across `-c` calls while the daemon is running. The daemon starts automatically on first use and shuts down after 10 minutes of inactivity. On a native wheel, an exact `openbrowser-ai -c CODE` call uses the native launcher to send one JSON request to the daemon. On a pure Python install, the Python thin client sends the same request. Both paths keep variables in the daemon. A cold call starts the daemon and browser.
+
+### 6.1. Large responses and Python CLI
+
+The native launcher accepts a JSON response frame up to 8 MiB (8,388,608 bytes). The limit includes the JSON envelope. The limit excludes the terminating newline. A larger frame exits with code 1 and `daemon_response_too_large`. The code may have run. Inspect the page before you retry. Run the same code with `openbrowser-ai-py -c CODE` for the Python CLI. The Python CLI uses the same daemon and variables. `OPENBROWSER_MAX_OUTPUT` still applies.
 
 For static pages, `openbrowser-ai scrape URL1 URL2 --no-browser --jsonl` uses OpenBrowser no-browser mode. It uses a light console entry, does not import the browser or configuration stack, and starts no Chrome, Blink, or V8 process. It stays on the HTTP path. JavaScript, screenshots, and browser cookies are unavailable. Use this path for batch HTML extraction; use the default `auto` or explicit `browser` engine when a page needs JavaScript.
 
@@ -256,6 +307,12 @@ See the [interactive](../benchmarks/interactive/README.md) and [scraping](../ben
 **Browser does not launch**: Ensure Chrome or Chromium is installed and accessible from PATH.
 
 **MCP server not found**: Verify `uvx` is installed (`pip install uv`) and the MCP server starts (`uvx openbrowser-ai --mcp`).
+
+**Native launcher reports a missing Python fallback**: Reinstall `openbrowser-ai`. Keep `openbrowser-ai-py` in the same directory as the native launcher.
+
+**`daemon_response_too_large`**: Run the same code with `openbrowser-ai-py -c` or reduce the output. The code may have run. Inspect the page before you retry.
+
+**Native frontend setup**: Verify the platform wheel is installed and run the exact form `openbrowser-ai -c CODE`. Source checkouts and editable installs use the Python CLI by default.
 
 **Session timeout**: Browser sessions auto-close after 10 minutes without an `execute_code` call. `get_status` does not refresh the timer. The context remains open and the next `execute_code` call starts a fresh browser.
 

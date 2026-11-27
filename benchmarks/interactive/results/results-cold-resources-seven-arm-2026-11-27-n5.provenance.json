@@ -1,0 +1,230 @@
+{
+  "lane": "cold-resource",
+  "expected_observations": 175,
+  "observations": 175,
+  "exact_passes": 175,
+  "exit_code": 0,
+  "valid": true,
+  "plan": {
+    "arms": [
+      "openbrowser-mcp-fast",
+      "openbrowser-fast",
+      "chrome-devtools-mcp",
+      "agent-browser",
+      "browser-use",
+      "playwright-mcp",
+      "playwright-cli"
+    ],
+    "tasks": [
+      "wizard",
+      "modal",
+      "download",
+      "tabs",
+      "auth"
+    ],
+    "samples": 5,
+    "rotate_arms": true
+  },
+  "started_utc": "2026-11-27T21:34:08.079583+00:00",
+  "cleanup_verified": true,
+  "lane_timeout_seconds": 1500.0,
+  "before": {
+    "source_commit": "480fab31901877c29185058c86d6d963a2214de2",
+    "source_digest": "25dc0def311315e324fb3ea72d5429f8de54a9684cd1a0820a463f9b3d5d9af1",
+    "harness_digest": "8c67b657739011b22fddfcde6abeb0018f1bf7088cbbd748ff78ed9dd8eec0d8",
+    "expected_app_digest": "847bbf456edf263ab18e80261e2f509f6ab7d35c485b1bafc5de5dc0b7726a01",
+    "configuration_digest": "5abae29f9570bbb2dcbfaca6b2bbbdfe89001e5e30b55254dca72a001b441124",
+    "python": "3.12.12",
+    "platform": "macOS-26.6-arm64-arm-64bit",
+    "psutil": "7.2.0",
+    "mcp_transport": "package default",
+    "method": "fresh worker plus owned descendants, through native runner cleanup",
+    "sampler_method_version": 7,
+    "engine_pin": {
+      "schema": "openbrowser-engine-pin-v2",
+      "lane": "matched-full-1255",
+      "revision": "1255",
+      "version": "159.0.8154.6",
+      "platform": "darwin",
+      "machine": "arm64",
+      "launcher_sha256": "cc8feb37062c287a2670c2dcb5d4de081a5fbeeb4a1a152e0ad2399b5bc6416f",
+      "engine_image_sha256": "a0a2e8854ce90268f5d9b32210cf53fc0709f4b798b3c3a96964ba3ebce4bc4b",
+      "launcher_stat": {
+        "device": 16777234,
+        "inode": 3411550,
+        "size": 33568,
+        "mtime_ns": 1794871104255831500,
+        "ctime_ns": 1794871105431711391
+      },
+      "engine_image_stat": {
+        "device": 16777234,
+        "inode": 3412164,
+        "size": 258013376,
+        "mtime_ns": 1794871105398857934,
+        "ctime_ns": 1794871105398857934
+      },
+      "launcher_kind": "chrome-for-testing",
+      "engine_image_kind": "framework"
+    },
+    "measurement_method": "native-task-external-validation-v1",
+    "limitations": [
+      "Includes common Python worker and task-driver overhead.",
+      "Summed RSS can double-count shared pages.",
+      "Sampling can miss short-lived processes and final CPU increments.",
+      "Orphan discovery excludes PID 0. On POSIX, it also excludes positively foreign effective UIDs. Known ancestry is sampled across UIDs. Unreadable ownership remains unverified.",
+      "Authoritative NoSuchProcess and ZombieProcess read errors are expected exits. An AccessDenied memory_info read may be proved by one same-identity memory_info verification; only NoSuchProcess or ZombieProcess from that verification is an exit. Other read failures require the immediate identity fence; access failures on a live identity remain fatal.",
+      "Child footprint is null when unsupported or unavailable.",
+      "Resource-instrumented wall time is not a latency benchmark."
+    ]
+  },
+  "binding_before": {
+    "verified": true,
+    "reason": "byte_identical_package",
+    "entry_sha256": "320e91c7915654a8b41c98ee82c788377bcc181b72059667dcf700728e486543",
+    "backend_entry_sha": "e16cbadb804e6e35e5d989adbcc92189ac77811dea752ab8b97cc833564b1b09",
+    "native_manifest_sha": "925e9dced53b733dd6b21a3caa0c029a4813affc55438fd6006c5edfccec31a1",
+    "native_source_digest": "f3cbae874e3a535bdbdd2ec2b60a2f44d1f032350b86dcd6d062221bf4afab29",
+    "expected_app_digest": "847bbf456edf263ab18e80261e2f509f6ab7d35c485b1bafc5de5dc0b7726a01",
+    "actual_app_digest": "847bbf456edf263ab18e80261e2f509f6ab7d35c485b1bafc5de5dc0b7726a01",
+    "dist_version": "0.1.61.dev173+g9f630f7c6",
+    "origin_matches_expected": false,
+    "target": "aarch64-apple-darwin"
+  },
+  "source_commit": "480fab31901877c29185058c86d6d963a2214de2",
+  "source_digest": "25dc0def311315e324fb3ea72d5429f8de54a9684cd1a0820a463f9b3d5d9af1",
+  "owned_scope": "/tmp/b-3x_jbyr8",
+  "terminal_gates": {
+    "sampler_method_version": 7,
+    "terminal": true,
+    "valid": true,
+    "observations": 175,
+    "expected_observations": 175,
+    "failures": 0,
+    "provenance_verified": true,
+    "source_unchanged": true,
+    "binding_unchanged": true,
+    "cleanup_verified": true,
+    "fixture_errors": []
+  },
+  "after": {
+    "source_commit": "480fab31901877c29185058c86d6d963a2214de2",
+    "source_digest": "25dc0def311315e324fb3ea72d5429f8de54a9684cd1a0820a463f9b3d5d9af1",
+    "harness_digest": "8c67b657739011b22fddfcde6abeb0018f1bf7088cbbd748ff78ed9dd8eec0d8",
+    "expected_app_digest": "847bbf456edf263ab18e80261e2f509f6ab7d35c485b1bafc5de5dc0b7726a01",
+    "configuration_digest": "5abae29f9570bbb2dcbfaca6b2bbbdfe89001e5e30b55254dca72a001b441124",
+    "python": "3.12.12",
+    "platform": "macOS-26.6-arm64-arm-64bit",
+    "psutil": "7.2.0",
+    "mcp_transport": "package default",
+    "method": "fresh worker plus owned descendants, through native runner cleanup",
+    "sampler_method_version": 7,
+    "engine_pin": {
+      "schema": "openbrowser-engine-pin-v2",
+      "lane": "matched-full-1255",
+      "revision": "1255",
+      "version": "159.0.8154.6",
+      "platform": "darwin",
+      "machine": "arm64",
+      "launcher_sha256": "cc8feb37062c287a2670c2dcb5d4de081a5fbeeb4a1a152e0ad2399b5bc6416f",
+      "engine_image_sha256": "a0a2e8854ce90268f5d9b32210cf53fc0709f4b798b3c3a96964ba3ebce4bc4b",
+      "launcher_stat": {
+        "device": 16777234,
+        "inode": 3411550,
+        "size": 33568,
+        "mtime_ns": 1794871104255831500,
+        "ctime_ns": 1794871105431711391
+      },
+      "engine_image_stat": {
+        "device": 16777234,
+        "inode": 3412164,
+        "size": 258013376,
+        "mtime_ns": 1794871105398857934,
+        "ctime_ns": 1794871105398857934
+      },
+      "launcher_kind": "chrome-for-testing",
+      "engine_image_kind": "framework"
+    },
+    "measurement_method": "native-task-external-validation-v1",
+    "limitations": [
+      "Includes common Python worker and task-driver overhead.",
+      "Summed RSS can double-count shared pages.",
+      "Sampling can miss short-lived processes and final CPU increments.",
+      "Orphan discovery excludes PID 0. On POSIX, it also excludes positively foreign effective UIDs. Known ancestry is sampled across UIDs. Unreadable ownership remains unverified.",
+      "Authoritative NoSuchProcess and ZombieProcess read errors are expected exits. An AccessDenied memory_info read may be proved by one same-identity memory_info verification; only NoSuchProcess or ZombieProcess from that verification is an exit. Other read failures require the immediate identity fence; access failures on a live identity remain fatal.",
+      "Child footprint is null when unsupported or unavailable.",
+      "Resource-instrumented wall time is not a latency benchmark."
+    ]
+  },
+  "binding_after": {
+    "verified": true,
+    "reason": "byte_identical_package",
+    "entry_sha256": "320e91c7915654a8b41c98ee82c788377bcc181b72059667dcf700728e486543",
+    "backend_entry_sha": "e16cbadb804e6e35e5d989adbcc92189ac77811dea752ab8b97cc833564b1b09",
+    "native_manifest_sha": "925e9dced53b733dd6b21a3caa0c029a4813affc55438fd6006c5edfccec31a1",
+    "native_source_digest": "f3cbae874e3a535bdbdd2ec2b60a2f44d1f032350b86dcd6d062221bf4afab29",
+    "expected_app_digest": "847bbf456edf263ab18e80261e2f509f6ab7d35c485b1bafc5de5dc0b7726a01",
+    "actual_app_digest": "847bbf456edf263ab18e80261e2f509f6ab7d35c485b1bafc5de5dc0b7726a01",
+    "dist_version": "0.1.61.dev173+g9f630f7c6",
+    "origin_matches_expected": false,
+    "target": "aarch64-apple-darwin"
+  },
+  "source_unchanged": true,
+  "binding_unchanged": true,
+  "engine_unchanged": true,
+  "binding_verified": true,
+  "engine_verified": true,
+  "source": {
+    "source_commit": "480fab31901877c29185058c86d6d963a2214de2",
+    "source_digest": "25dc0def311315e324fb3ea72d5429f8de54a9684cd1a0820a463f9b3d5d9af1",
+    "harness_digest": "8c67b657739011b22fddfcde6abeb0018f1bf7088cbbd748ff78ed9dd8eec0d8",
+    "expected_app_digest": "847bbf456edf263ab18e80261e2f509f6ab7d35c485b1bafc5de5dc0b7726a01",
+    "configuration_digest": "5abae29f9570bbb2dcbfaca6b2bbbdfe89001e5e30b55254dca72a001b441124",
+    "python": "3.12.12",
+    "platform": "macOS-26.6-arm64-arm-64bit",
+    "psutil": "7.2.0",
+    "mcp_transport": "package default",
+    "method": "fresh worker plus owned descendants, through native runner cleanup",
+    "sampler_method_version": 7,
+    "engine_pin": {
+      "schema": "openbrowser-engine-pin-v2",
+      "lane": "matched-full-1255",
+      "revision": "1255",
+      "version": "159.0.8154.6",
+      "platform": "darwin",
+      "machine": "arm64",
+      "launcher_sha256": "cc8feb37062c287a2670c2dcb5d4de081a5fbeeb4a1a152e0ad2399b5bc6416f",
+      "engine_image_sha256": "a0a2e8854ce90268f5d9b32210cf53fc0709f4b798b3c3a96964ba3ebce4bc4b",
+      "launcher_stat": {
+        "device": 16777234,
+        "inode": 3411550,
+        "size": 33568,
+        "mtime_ns": 1794871104255831500,
+        "ctime_ns": 1794871105431711391
+      },
+      "engine_image_stat": {
+        "device": 16777234,
+        "inode": 3412164,
+        "size": 258013376,
+        "mtime_ns": 1794871105398857934,
+        "ctime_ns": 1794871105398857934
+      },
+      "launcher_kind": "chrome-for-testing",
+      "engine_image_kind": "framework"
+    },
+    "measurement_method": "native-task-external-validation-v1",
+    "limitations": [
+      "Includes common Python worker and task-driver overhead.",
+      "Summed RSS can double-count shared pages.",
+      "Sampling can miss short-lived processes and final CPU increments.",
+      "Orphan discovery excludes PID 0. On POSIX, it also excludes positively foreign effective UIDs. Known ancestry is sampled across UIDs. Unreadable ownership remains unverified.",
+      "Authoritative NoSuchProcess and ZombieProcess read errors are expected exits. An AccessDenied memory_info read may be proved by one same-identity memory_info verification; only NoSuchProcess or ZombieProcess from that verification is an exit. Other read failures require the immediate identity fence; access failures on a live identity remain fatal.",
+      "Child footprint is null when unsupported or unavailable.",
+      "Resource-instrumented wall time is not a latency benchmark."
+    ]
+  },
+  "application": {
+    "binding_verified": true
+  },
+  "raw_sha256": "178ba1dee6956c164b663ac660ae4f0dd5982d2383c17cfcc8bb4e205ab80892",
+  "ended_utc": "2026-11-27T21:40:32.943704+00:00"
+}
