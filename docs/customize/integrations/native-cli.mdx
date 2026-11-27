@@ -1,0 +1,94 @@
+---
+title: "CLI frontends"
+description: "Choose the native or Python frontend and recover from large responses"
+icon: "terminal"
+---
+
+{/* toc:start */}
+## Contents
+
+- [1. Available frontends](#1-available-frontends)
+- [2. Native call path](#2-native-call-path)
+- [3. Output limit and recovery](#3-output-limit-and-recovery)
+- [4. Source and editable installs](#4-source-and-editable-installs)
+- [5. Platform wheels](#5-platform-wheels)
+- [6. Verify the installed commands](#6-verify-the-installed-commands)
+
+{/* toc:end */}
+
+## 1. Available frontends
+
+This page describes OpenBrowser 0.1.61 and later. Use `openbrowser-ai` for normal CLI work. Compatible platform wheels include a native frontend and the `openbrowser-ai-py` Python backend. The pure Python wheel exposes both commands through Python.
+
+The daemon owns the browser, code execution, and persistent variables. The frontend sends commands to that daemon.
+
+## 2. Native call path
+
+On a supported native wheel, the exact form `openbrowser-ai -c CODE` can send a warm code call directly to the existing daemon. A connection failure hands startup to the Python backend before the request is sent.
+
+Other command forms use the Python backend. These include `-c -`, options before `-c`, `--mcp`, `--version`, `--help`, `scrape`, `web-search`, prompt runs, and daemon commands. MCP continues to use the Python server and its selected stdio transport.
+
+```bash
+# Start the daemon and browser.
+openbrowser-ai warm
+
+# Use the installed frontend for a warm code call.
+openbrowser-ai -c "print(await evaluate('document.title'))"
+
+# Select the Python client explicitly.
+openbrowser-ai-py -c "print(await evaluate('document.title'))"
+```
+
+## 3. Output limit and recovery
+
+The native client accepts a JSON response of at most 8 MiB, or 8,388,608 bytes. The limit includes the JSON envelope and excludes the terminating newline. `OPENBROWSER_MAX_OUTPUT` separately controls the daemon's output-character limit.
+
+If a response exceeds the native limit, the client returns `daemon_response_too_large`. The code may have already executed. The client ends the call without repeating the request.
+
+<Warning>
+Run `openbrowser-ai daemon status` and inspect the page before retrying. Use `openbrowser-ai-py -c CODE` for an intentional new call that needs a larger response, or reduce the printed output. Request-send and response failures also require this check.
+</Warning>
+
+## 4. Source and editable installs
+
+Source and editable installs use the Python frontend by default. A warm plain `-c` call uses the standard-library thin client. Native editable builds are rejected.
+
+The release CI uses Rust 1.100.0. A native wheel build needs a Rust toolchain and the standard library for the selected target. Linux builds use `x86_64-unknown-linux-musl` or `aarch64-unknown-linux-musl`. `OPENBROWSER_NATIVE_TARGET` selects a supported target explicitly.
+
+```bash
+# Run from the repository root with the target's Rust standard library installed.
+env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS OPENBROWSER_BUILD_NATIVE=1 uv build --wheel
+```
+
+The build validates the compiled architecture and platform constraints. It records source hashes, compiler identity, and the native binary hash in package metadata. Keep `RUSTFLAGS` and `CARGO_ENCODED_RUSTFLAGS` unset for this build.
+
+## 5. Platform wheels
+
+| Platform | Native frontend wheel tag |
+| --- | --- |
+| macOS arm64 | `macosx_11_0_arm64` |
+| macOS x86_64 | `macosx_10_13_x86_64` |
+| Linux x86_64 | `manylinux_2_17_x86_64` |
+| Linux aarch64 | `manylinux_2_17_aarch64` |
+| Windows and other compatible platforms | Pure Python wheel |
+
+These tags describe the native frontend. Python and browser dependencies have their own requirements. Linux native binaries use static musl and pass the matching manylinux2014 installation checks.
+
+PyPI installers select a compatible wheel. A Git source URL builds the Python frontend unless native wheel building is enabled explicitly.
+
+## 6. Verify the installed commands
+
+Both version commands print the same package version without starting a browser:
+
+```bash
+openbrowser-ai --version
+openbrowser-ai-py --version
+```
+
+On macOS or Linux, inspect the installed entry without executing a browser task:
+
+```bash
+file -L "$(command -v openbrowser-ai)"
+```
+
+A native frontend is a Mach-O or ELF executable. The backup command remains available for transport diagnostics and large responses.

@@ -1,0 +1,1115 @@
+{
+  "n": 5,
+  "rows": [
+    {
+      "lane": "cold",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 699.861041,
+      "playwright": 941.536625,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 1146.867167,
+      "playwright": 949.03625,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_native_rss",
+      "openbrowser": 755433472,
+      "playwright": 845692928,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 699.861041,
+      "playwright": 1732.261584,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 1146.867167,
+      "playwright": 1853.460917,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_native_rss",
+      "openbrowser": 755433472,
+      "playwright": 962920448,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 795.955458,
+      "playwright": 941.536625,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 824.244042,
+      "playwright": 949.03625,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_native_rss",
+      "openbrowser": 782712832,
+      "playwright": 845692928,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 795.955458,
+      "playwright": 1732.261584,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 824.244042,
+      "playwright": 1853.460917,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_native_rss",
+      "openbrowser": 782712832,
+      "playwright": 962920448,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 823.093499,
+      "playwright": 850.733,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 841.968833,
+      "playwright": 934.007126,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_native_rss",
+      "openbrowser": 753844224,
+      "playwright": 827146240,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 823.093499,
+      "playwright": 1709.789832,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 841.968833,
+      "playwright": 1727.923208,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_native_rss",
+      "openbrowser": 753844224,
+      "playwright": 945455104,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 945.111792,
+      "playwright": 850.733,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 970.386166,
+      "playwright": 934.007126,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_native_rss",
+      "openbrowser": 786563072,
+      "playwright": 827146240,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 945.111792,
+      "playwright": 1709.789832,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 970.386166,
+      "playwright": 1727.923208,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_native_rss",
+      "openbrowser": 786563072,
+      "playwright": 945455104,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 978.478541,
+      "playwright": 938.339667,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 1036.389375,
+      "playwright": 951.258793,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_native_rss",
+      "openbrowser": 744423424,
+      "playwright": 810254336,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 978.478541,
+      "playwright": 1738.421333,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 1036.389375,
+      "playwright": 1783.139083,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_native_rss",
+      "openbrowser": 744423424,
+      "playwright": 907345920,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 1075.754208,
+      "playwright": 938.339667,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 1105.993707,
+      "playwright": 951.258793,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_native_rss",
+      "openbrowser": 773324800,
+      "playwright": 810254336,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 1075.754208,
+      "playwright": 1738.421333,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 1105.993707,
+      "playwright": 1783.139083,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_native_rss",
+      "openbrowser": 773324800,
+      "playwright": 907345920,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 722.223876,
+      "playwright": 669.40575,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 768.954917,
+      "playwright": 691.611583,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_native_rss",
+      "openbrowser": 758628352,
+      "playwright": 830816256,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 722.223876,
+      "playwright": 1491.716668,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 768.954917,
+      "playwright": 1561.706042,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_native_rss",
+      "openbrowser": 758628352,
+      "playwright": 941260800,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 812.648292,
+      "playwright": 669.40575,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 814.742542,
+      "playwright": 691.611583,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_native_rss",
+      "openbrowser": 789020672,
+      "playwright": 830816256,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 812.648292,
+      "playwright": 1491.716668,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 814.742542,
+      "playwright": 1561.706042,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_native_rss",
+      "openbrowser": 789020672,
+      "playwright": 941260800,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "auth",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 1140.786624,
+      "playwright": 1038.181959,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "auth",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 1188.648082,
+      "playwright": 1078.800082,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "auth",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_native_rss",
+      "openbrowser": 762740736,
+      "playwright": 836419584,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "auth",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 1140.786624,
+      "playwright": 2889.771626,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "auth",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 1188.648082,
+      "playwright": 2955.748291,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "auth",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_native_rss",
+      "openbrowser": 762740736,
+      "playwright": 945799168,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "auth",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 1365.921916,
+      "playwright": 1038.181959,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "auth",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 1452.703459,
+      "playwright": 1078.800082,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "auth",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_native_rss",
+      "openbrowser": 785481728,
+      "playwright": 836419584,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "auth",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 1365.921916,
+      "playwright": 2889.771626,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "auth",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 1452.703459,
+      "playwright": 2955.748291,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "auth",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_native_rss",
+      "openbrowser": 785481728,
+      "playwright": 945799168,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 54.393667,
+      "playwright": 359.00875,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 85.799584,
+      "playwright": 380.117166,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_native_rss",
+      "openbrowser": 694222848,
+      "playwright": 775897088,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 54.393667,
+      "playwright": 561.216417,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 85.799584,
+      "playwright": 565.045917,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_native_rss",
+      "openbrowser": 694222848,
+      "playwright": 889094144,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 93.173625,
+      "playwright": 359.00875,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 109.642959,
+      "playwright": 380.117166,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_native_rss",
+      "openbrowser": 700022784,
+      "playwright": 775897088,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 93.173625,
+      "playwright": 561.216417,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 109.642959,
+      "playwright": 565.045917,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_native_rss",
+      "openbrowser": 700022784,
+      "playwright": 889094144,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 204.732707,
+      "playwright": 282.959667,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 216.365958,
+      "playwright": 288.477208,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_native_rss",
+      "openbrowser": 688111616,
+      "playwright": 766279680,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 204.732707,
+      "playwright": 479.469541,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 216.365958,
+      "playwright": 498.992084,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_native_rss",
+      "openbrowser": 688111616,
+      "playwright": 891535360,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 237.042333,
+      "playwright": 282.959667,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 249.271583,
+      "playwright": 288.477208,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_native_rss",
+      "openbrowser": 694550528,
+      "playwright": 766279680,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 237.042333,
+      "playwright": 479.469541,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 249.271583,
+      "playwright": 498.992084,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_native_rss",
+      "openbrowser": 694550528,
+      "playwright": 891535360,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 342.370876,
+      "playwright": 371.94525,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 359.854,
+      "playwright": 378.389208,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_native_rss",
+      "openbrowser": 683622400,
+      "playwright": 748584960,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 342.370876,
+      "playwright": 570.3635,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 359.854,
+      "playwright": 587.300333,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_native_rss",
+      "openbrowser": 683622400,
+      "playwright": 882556928,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 364.724874,
+      "playwright": 371.94525,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 371.379917,
+      "playwright": 378.389208,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_native_rss",
+      "openbrowser": 691077120,
+      "playwright": 748584960,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 364.724874,
+      "playwright": 570.3635,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 371.379917,
+      "playwright": 587.300333,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_native_rss",
+      "openbrowser": 691077120,
+      "playwright": 882556928,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 78.586208,
+      "playwright": 128.525083,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 84.018083,
+      "playwright": 129.3085,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_native_rss",
+      "openbrowser": 690028544,
+      "playwright": 772538368,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 78.586208,
+      "playwright": 309.912416,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 84.018083,
+      "playwright": 313.607583,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_native_rss",
+      "openbrowser": 690028544,
+      "playwright": 886063104,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 114.91725,
+      "playwright": 128.525083,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 124.137874,
+      "playwright": 129.3085,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_native_rss",
+      "openbrowser": 696713216,
+      "playwright": 772538368,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 114.91725,
+      "playwright": 309.912416,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 124.137874,
+      "playwright": 313.607583,
+      "win": true
+    },
+    {
+      "lane": "warm",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_native_rss",
+      "openbrowser": 696713216,
+      "playwright": 886063104,
+      "win": true
+    }
+  ],
+  "p95_definition": "nearest rank; N=5 p95 equals max",
+  "memory_definition": "sampled peak native child-tree RSS; worker excluded in both lanes",
+  "cold": {
+    "median_time": {
+      "wins": 13,
+      "losses_or_ties": 7
+    },
+    "p95_time": {
+      "wins": 12,
+      "losses_or_ties": 8
+    },
+    "median_native_rss": {
+      "wins": 20,
+      "losses_or_ties": 0
+    }
+  },
+  "warm": {
+    "median_time": {
+      "wins": 16,
+      "losses_or_ties": 0
+    },
+    "p95_time": {
+      "wins": 16,
+      "losses_or_ties": 0
+    },
+    "median_native_rss": {
+      "wins": 16,
+      "losses_or_ties": 0
+    }
+  }
+}

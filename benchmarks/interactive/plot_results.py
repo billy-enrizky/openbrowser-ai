@@ -2,133 +2,123 @@
 
 Run with matplotlib installed outside the base package:
     uv run --with matplotlib python benchmarks/interactive/plot_results.py
+
+The method line uses the neutral warm-session label from ``arms.py``. A vendor
+adapter field never appears in the published chart. Missing required arms stay
+visible as ``n/a`` cells and legend entries.
 """
+
+# ruff: noqa: E402
+# pyright: reportMissingImports=false
 
 from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from benchmarks.interactive.arms import CANONICAL_ARMS
+from benchmarks.interactive.plot_common import (
+    INTERACTIVE_TASK_LABELS,
+    apply_rc,
+    bar_layout,
+    caption,
+    draw_grouped_bars,
+    figure_legend,
+    format_ms,
+    interactive_styles,
+    method_line,
+    save_figure,
+    style_axes,
+    summary_counts,
+    summary_latency_values,
+    top_margin,
+)
+
 HERE = Path(__file__).resolve().parent
-DEFAULT_INPUT = HERE / "results" / "results-warm-five-arm-readiness-v2-2026-11-25-n5.summary.json"
+
+
+DEFAULT_INPUT = HERE / "results" / "results-warm-seven-arm-2026-11-27-n5.summary.json"
 DEFAULT_OUTPUT = HERE.parents[1] / "docs" / "images" / "native-interactive-warm-current-p50.png"
 TASKS = ("wizard", "modal", "download", "tabs")
-ARMS = (
-    ("openbrowser-mcp-fast", "OpenBrowser MCP", "#0f6270"),
-    ("openbrowser-fast", "OpenBrowser CLI", "#58a69f"),
-    ("chrome-devtools-mcp", "chrome-devtools-mcp", "#c2852a"),
-    ("agent-browser", "agent-browser", "#4f7f5b"),
-    ("browser-use", "browser-use", "#8871b4"),
-)
-TEXT = "#171717"
-MUTED = "#6b7280"
-GRID = "#e5e7eb"
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--arms", nargs="+", default=list(CANONICAL_ARMS))
     args = parser.parse_args()
 
-    report = json.loads(args.input.read_text(encoding="utf-8"))
-    rows = {(row["task"], row["arm"]): row for row in report["rows"]}
-    arms = tuple(arm for arm in ARMS if all((task, arm[0]) in rows for task in TASKS))
-    if not arms:
-        raise SystemExit("No complete arm is present in the summary")
-    samples = report["environment"]["samples"]
+    payload = json.loads(args.input.read_text(encoding="utf-8"))
+    if isinstance(payload, dict):
+        rows = payload.get("rows", [])
+        environment = payload.get("environment") or {}
+    else:
+        rows = payload
+        environment = {}
+    styles = interactive_styles(tuple(args.arms))
+    values = summary_latency_values(rows, TASKS, styles, field="warm_p50_ms")
+    runs, eligible, total, ok_samples, total_samples = summary_counts(rows, TASKS, styles, value_key="warm_p50_ms")
+    layout = bar_layout(len(styles))
 
-    plt.rcParams.update(
-        {
-            "font.family": "DejaVu Sans",
-            "font.size": 12,
-            "axes.edgecolor": GRID,
-            "axes.labelcolor": MUTED,
-            "text.color": TEXT,
-            "xtick.color": MUTED,
-            "ytick.color": TEXT,
-        }
-    )
-    fig, ax = plt.subplots(figsize=(14, 9), dpi=180)
+    apply_rc()
+    fig, ax = plt.subplots(figsize=(15, 10), dpi=180)
     fig.patch.set_facecolor("#ffffff")
     ax.set_facecolor("#ffffff")
 
-    bar_height = 0.16
-    offsets = [index - (len(arms) - 1) / 2 for index in range(len(arms))]
+    draw_grouped_bars(
+        ax,
+        tasks=TASKS,
+        styles=styles,
+        values=values,
+        layout=layout,
+        formatter=format_ms,
+    )
     positions = list(range(len(TASKS)))
-    for offset, (arm, label, color) in zip(offsets, arms, strict=True):
-        values = [rows[(task, arm)]["warm_p50_ms"] for task in TASKS]
-        y = [position + offset * bar_height for position in positions]
-        bars = ax.barh(y, values, height=bar_height, color=color, label=label, zorder=3)
-        for bar, value in zip(bars, values, strict=True):
-            ax.text(
-                value + 30,
-                bar.get_y() + bar.get_height() / 2,
-                f"{value:.3f}",
-                va="center",
-                ha="left",
-                fontsize=10.5,
-                color=TEXT,
-                zorder=4,
-            )
-
-    ax.set_yticks(positions, [task.capitalize() for task in TASKS], fontsize=14)
+    ax.set_yticks(positions, [INTERACTIVE_TASK_LABELS[task] for task in TASKS], fontsize=14)
     ax.invert_yaxis()
-    ax.set_xlabel("p50 wall-clock latency (ms) \u2193 Lower is better", labelpad=12)
-    ax.grid(axis="x", color=GRID, linewidth=1, zorder=0)
-    ax.set_axisbelow(True)
-    for side in ("top", "right", "left"):
-        ax.spines[side].set_visible(False)
-    ax.tick_params(axis="y", length=0)
-    ax.tick_params(axis="x", length=0, pad=8)
+    ax.set_xlabel("Task time, p50 (ms) \u2193 Lower is better", fontsize=13)
+    style_axes(ax)
 
     fig.suptitle(
-        "Interactive browsing, warm v2 p50 \u2193 Lower is better",
+        "Interactive browsing, warm session: task time \u2193 Lower is better",
         x=0.06,
         y=0.99,
         ha="left",
         va="top",
-        fontsize=24,
+        fontsize=23,
         fontweight="bold",
-        color=TEXT,
     )
+    note = (
+        f"{ok_samples}/{total_samples} samples correct. "
+        "Each arm starts once and uses a fresh fixture per task. Rotated arm order on a shared host."
+    )
+    header_text = caption(runs, eligible_cells=eligible, total_cells=total, note=note)
+    header_text += "\n" + method_line(environment)
     fig.text(
         0.06,
-        0.94,
-        f"N={samples} per arm and task. Each arm starts once and uses a fresh fixture per task. "
-        "Rotated arm order on a shared host.",
+        0.947,
+        header_text,
         ha="left",
         va="top",
-        fontsize=12.5,
-        color=MUTED,
+        fontsize=11,
+        color="#6b7280",
+        wrap=True,
     )
-    environment = report["environment"]
-    method = (
-        environment.get("adapter_version")
-        or (environment.get("arms", {}).get("browser-use", {}).get("warmup_payload", {}).get("adapter_version"))
-        or "not recorded"
-    )
-    app = environment.get("application_digest")
-    app_label = app[:8] if isinstance(app, str) else "not recorded"
-    fig.text(0.06, 0.90, f"Method: {method} | OpenBrowser app: {app_label}", fontsize=11, color=MUTED)
-    ax.set_xlim(0, max(row["warm_p50_ms"] for row in rows.values()) * 1.20)
-    ax.legend(
-        loc="upper center",
-        bbox_to_anchor=(0.5, 1.05),
-        ncol=len(arms),
-        frameon=False,
-        fontsize=12.5,
-        handlelength=1.2,
-    )
-    fig.subplots_adjust(left=0.14, right=0.97, top=0.8, bottom=0.14)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(args.output, facecolor="#ffffff", bbox_inches="tight")
+    figure_legend(fig, styles, layout, y=0.865)
+    fig.subplots_adjust(left=0.16, right=0.97, top=top_margin(layout, base=0.805), bottom=0.13)
+    save_figure(fig, args.output)
     plt.close(fig)
     print(args.output)
     return 0

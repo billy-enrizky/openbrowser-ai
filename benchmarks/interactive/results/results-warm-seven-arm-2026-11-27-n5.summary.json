@@ -1,0 +1,482 @@
+{
+  "environment": {
+    "methodology": "native-session-readiness-v4",
+    "methodology_label": "Warm-session readiness",
+    "cold_results": null,
+    "tasks": [
+      "wizard",
+      "modal",
+      "download",
+      "tabs"
+    ],
+    "samples": 5,
+    "rotate_arms": true,
+    "load_before": [
+      4.705,
+      4.282,
+      4.488
+    ],
+    "load_after": [
+      2.818,
+      3.58,
+      4.16
+    ],
+    "arms": {
+      "openbrowser-mcp-fast": {
+        "platform": "macOS-26.6-arm64-arm-64bit",
+        "machine": "arm64",
+        "binary": "working copy",
+        "version": "0.1.61.dev173+g9f630f7c6",
+        "warmup_ms": 1036.489,
+        "warmup_payload": {
+          "server": "started",
+          "context_id": "4d28ae8e6a31423d87fe8627ff8869e9",
+          "keychain_verified": true,
+          "launch_proof_captured": true,
+          "engine": {
+            "schema": "openbrowser-session-observation-v1",
+            "status": "valid",
+            "eligible": true,
+            "lane": "matched-full-1255",
+            "revision": "1255",
+            "version": "159.0.8154.6",
+            "launcher_sha256": "cc8feb37062c287a2670c2dcb5d4de081a5fbeeb4a1a152e0ad2399b5bc6416f",
+            "engine_image_sha256": "a0a2e8854ce90268f5d9b32210cf53fc0709f4b798b3c3a96964ba3ebce4bc4b",
+            "pid": 56495,
+            "created_at": 1795816238.904454,
+            "executable_basename": "Google Chrome for Testing",
+            "keychain_verified": true,
+            "profile_digest": "d410c792e178d12359cac3dda20fb9429431737eb83901f6d865bdb6fa58d63d"
+          }
+        }
+      },
+      "openbrowser-fast": {
+        "platform": "macOS-26.6-arm64-arm-64bit",
+        "machine": "arm64",
+        "binary": "working copy",
+        "version": "0.1.61.dev173+g9f630f7c6",
+        "warmup_ms": 769.305,
+        "warmup_payload": {
+          "ok": true,
+          "elapsed_ms": 685.7,
+          "url": "about:blank",
+          "keychain_verified": true,
+          "launch_proof_captured": true,
+          "engine": {
+            "schema": "openbrowser-session-observation-v1",
+            "status": "valid",
+            "eligible": true,
+            "lane": "matched-full-1255",
+            "revision": "1255",
+            "version": "159.0.8154.6",
+            "launcher_sha256": "cc8feb37062c287a2670c2dcb5d4de081a5fbeeb4a1a152e0ad2399b5bc6416f",
+            "engine_image_sha256": "a0a2e8854ce90268f5d9b32210cf53fc0709f4b798b3c3a96964ba3ebce4bc4b",
+            "pid": 56523,
+            "created_at": 1795816240.027099,
+            "executable_basename": "Google Chrome for Testing",
+            "keychain_verified": true,
+            "profile_digest": "6c96b2eebec7d210ba6a3418f050c86823c1b59fbdd45cfd6c773ca81c8db12d"
+          }
+        }
+      },
+      "chrome-devtools-mcp": {
+        "platform": "macOS-26.6-arm64-arm-64bit",
+        "machine": "arm64",
+        "binary": "$HOME/.cache/openbrowser-interactive-bench/npm/node_modules/.bin/chrome-devtools-mcp",
+        "version": "1.13.0",
+        "warmup_ms": 759.437,
+        "warmup_payload": {
+          "ok": true,
+          "page_id": 1,
+          "browser_version": "1.13.0",
+          "keychain_verified": true,
+          "engine": {
+            "schema": "openbrowser-session-observation-v1",
+            "status": "valid",
+            "eligible": true,
+            "lane": "matched-full-1255",
+            "revision": "1255",
+            "version": "159.0.8154.6",
+            "launcher_sha256": "cc8feb37062c287a2670c2dcb5d4de081a5fbeeb4a1a152e0ad2399b5bc6416f",
+            "engine_image_sha256": "a0a2e8854ce90268f5d9b32210cf53fc0709f4b798b3c3a96964ba3ebce4bc4b",
+            "pid": 56546,
+            "created_at": 1795816240.925233,
+            "executable_basename": "Google Chrome for Testing",
+            "keychain_verified": true,
+            "profile_digest": "b0f96d319d463649cc90d03730467cc94279294955744a685ae3ba1b4b0fc875"
+          }
+        }
+      },
+      "agent-browser": {
+        "platform": "macOS-26.6-arm64-arm-64bit",
+        "machine": "arm64",
+        "binary": "$HOME/.cache/openbrowser-interactive-bench/npm/node_modules/.bin/agent-browser",
+        "version": "agent-browser 0.43.0",
+        "warmup_ms": 1086.785,
+        "warmup_payload": {
+          "ok": true,
+          "session": "w2c2f8f1e3d",
+          "keychain_verified": true,
+          "engine": {
+            "schema": "openbrowser-session-observation-v1",
+            "status": "valid",
+            "eligible": true,
+            "lane": "matched-full-1255",
+            "revision": "1255",
+            "version": "159.0.8154.6",
+            "launcher_sha256": "cc8feb37062c287a2670c2dcb5d4de081a5fbeeb4a1a152e0ad2399b5bc6416f",
+            "engine_image_sha256": "a0a2e8854ce90268f5d9b32210cf53fc0709f4b798b3c3a96964ba3ebce4bc4b",
+            "pid": 56563,
+            "created_at": 1795816241.472866,
+            "executable_basename": "Google Chrome for Testing",
+            "keychain_verified": true,
+            "profile_digest": "87cea6acc31a3cdb13dda12066d9ec1fd01a14259371f9cda447b0e6de988027"
+          }
+        }
+      },
+      "browser-use": {
+        "platform": "macOS-26.6-arm64-arm-64bit",
+        "machine": "arm64",
+        "binary": "$HOME/.cache/openbrowser-interactive-bench/browser-use-venv/bin/browser-use",
+        "version": "browser-use 1.0.8 (browser-harness 0.1.13)",
+        "warmup_ms": 734.333,
+        "warmup_payload": {
+          "ok": true,
+          "cdp_url": "http://127.0.0.1:65417",
+          "keychain_verified": true,
+          "execution_ready": true,
+          "adapter_version": "native-session-readiness-v4",
+          "engine": {
+            "schema": "openbrowser-session-observation-v1",
+            "status": "valid",
+            "eligible": true,
+            "lane": "matched-full-1255",
+            "revision": "1255",
+            "version": "159.0.8154.6",
+            "launcher_sha256": "cc8feb37062c287a2670c2dcb5d4de081a5fbeeb4a1a152e0ad2399b5bc6416f",
+            "engine_image_sha256": "a0a2e8854ce90268f5d9b32210cf53fc0709f4b798b3c3a96964ba3ebce4bc4b",
+            "pid": 56591,
+            "created_at": 1795816242.458807,
+            "executable_basename": "Google Chrome for Testing",
+            "keychain_verified": true,
+            "profile_digest": "de90708af5a3aa262349fdb905242530b99e17fce539ebced3267037385005c8"
+          }
+        }
+      },
+      "playwright-mcp": {
+        "platform": "macOS-26.6-arm64-arm-64bit",
+        "machine": "arm64",
+        "binary": "$HOME/.cache/openbrowser-interactive-bench/playwright-native-0.0.86-0.1.25/node_modules/.bin/playwright-mcp",
+        "version": "159.0.8154.6",
+        "warmup_ms": 583.493,
+        "warmup_payload": {
+          "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/159.0.0.0 Safari/537.36",
+          "server": "playwright-mcp",
+          "package": "0.0.86",
+          "playwright": "1.66.0-alpha-2026-11-18",
+          "browser_version": "159.0.8154.6",
+          "keychain_verified": true,
+          "engine": {
+            "schema": "openbrowser-session-observation-v1",
+            "status": "valid",
+            "eligible": true,
+            "lane": "matched-full-1255",
+            "revision": "1255",
+            "version": "159.0.8154.6",
+            "launcher_sha256": "cc8feb37062c287a2670c2dcb5d4de081a5fbeeb4a1a152e0ad2399b5bc6416f",
+            "engine_image_sha256": "a0a2e8854ce90268f5d9b32210cf53fc0709f4b798b3c3a96964ba3ebce4bc4b",
+            "pid": 56620,
+            "created_at": 1795816243.499182,
+            "executable_basename": "Google Chrome for Testing",
+            "keychain_verified": true,
+            "profile_digest": "d2a83ea98418c043575d5c112dc4a3d4ff44c87dd1a54456b9b92c8660777ba2"
+          }
+        }
+      },
+      "playwright-cli": {
+        "platform": "macOS-26.6-arm64-arm-64bit",
+        "machine": "arm64",
+        "binary": "$HOME/.cache/openbrowser-interactive-bench/playwright-native-0.0.86-0.1.25/node_modules/.bin/playwright-cli",
+        "version": "159.0.8154.6",
+        "warmup_ms": 1479.126,
+        "warmup_payload": {
+          "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/159.0.0.0 Safari/537.36",
+          "server": "playwright-cli",
+          "package": "0.1.25",
+          "playwright": "1.66.0-alpha-2026-11-18",
+          "browser_version": "159.0.8154.6",
+          "keychain_verified": true,
+          "engine": {
+            "schema": "openbrowser-session-observation-v1",
+            "status": "valid",
+            "eligible": true,
+            "lane": "matched-full-1255",
+            "revision": "1255",
+            "version": "159.0.8154.6",
+            "launcher_sha256": "cc8feb37062c287a2670c2dcb5d4de081a5fbeeb4a1a152e0ad2399b5bc6416f",
+            "engine_image_sha256": "a0a2e8854ce90268f5d9b32210cf53fc0709f4b798b3c3a96964ba3ebce4bc4b",
+            "pid": 56640,
+            "created_at": 1795816244.779664,
+            "executable_basename": "Google Chrome for Testing",
+            "keychain_verified": true,
+            "profile_digest": "6e4b3bfb168cdd664583bb164fadb81d25a768dc90dcb8e5284a7055265e9836"
+          }
+        }
+      }
+    }
+  },
+  "rows": [
+    {
+      "task": "wizard",
+      "arm": "openbrowser-mcp-fast",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 54.393667,
+      "warm_p95_ms": 85.799584,
+      "errors": []
+    },
+    {
+      "task": "wizard",
+      "arm": "openbrowser-fast",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 93.173625,
+      "warm_p95_ms": 109.642959,
+      "errors": []
+    },
+    {
+      "task": "wizard",
+      "arm": "chrome-devtools-mcp",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 3507.587875,
+      "warm_p95_ms": 3521.351375,
+      "errors": []
+    },
+    {
+      "task": "wizard",
+      "arm": "agent-browser",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 445.017333,
+      "warm_p95_ms": 451.558916,
+      "errors": []
+    },
+    {
+      "task": "wizard",
+      "arm": "browser-use",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 522.912875,
+      "warm_p95_ms": 631.406917,
+      "errors": []
+    },
+    {
+      "task": "wizard",
+      "arm": "playwright-mcp",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 359.00875,
+      "warm_p95_ms": 380.117166,
+      "errors": []
+    },
+    {
+      "task": "wizard",
+      "arm": "playwright-cli",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 561.216417,
+      "warm_p95_ms": 565.045917,
+      "errors": []
+    },
+    {
+      "task": "modal",
+      "arm": "openbrowser-mcp-fast",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 204.732707,
+      "warm_p95_ms": 216.365958,
+      "errors": []
+    },
+    {
+      "task": "modal",
+      "arm": "openbrowser-fast",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 237.042333,
+      "warm_p95_ms": 249.271583,
+      "errors": []
+    },
+    {
+      "task": "modal",
+      "arm": "chrome-devtools-mcp",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 2770.595208,
+      "warm_p95_ms": 2778.483625,
+      "errors": []
+    },
+    {
+      "task": "modal",
+      "arm": "agent-browser",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 1180.606334,
+      "warm_p95_ms": 1191.85925,
+      "errors": []
+    },
+    {
+      "task": "modal",
+      "arm": "browser-use",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 1346.81975,
+      "warm_p95_ms": 1437.019625,
+      "errors": []
+    },
+    {
+      "task": "modal",
+      "arm": "playwright-mcp",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 282.959667,
+      "warm_p95_ms": 288.477208,
+      "errors": []
+    },
+    {
+      "task": "modal",
+      "arm": "playwright-cli",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 479.469541,
+      "warm_p95_ms": 498.992084,
+      "errors": []
+    },
+    {
+      "task": "download",
+      "arm": "openbrowser-mcp-fast",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 342.370876,
+      "warm_p95_ms": 359.854,
+      "errors": []
+    },
+    {
+      "task": "download",
+      "arm": "openbrowser-fast",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 364.724874,
+      "warm_p95_ms": 371.379917,
+      "errors": []
+    },
+    {
+      "task": "download",
+      "arm": "chrome-devtools-mcp",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 778.531667,
+      "warm_p95_ms": 787.500084,
+      "errors": []
+    },
+    {
+      "task": "download",
+      "arm": "agent-browser",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 422.595458,
+      "warm_p95_ms": 425.036834,
+      "errors": []
+    },
+    {
+      "task": "download",
+      "arm": "browser-use",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 543.508333,
+      "warm_p95_ms": 658.885167,
+      "errors": []
+    },
+    {
+      "task": "download",
+      "arm": "playwright-mcp",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 371.94525,
+      "warm_p95_ms": 378.389208,
+      "errors": []
+    },
+    {
+      "task": "download",
+      "arm": "playwright-cli",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 570.3635,
+      "warm_p95_ms": 587.300333,
+      "errors": []
+    },
+    {
+      "task": "tabs",
+      "arm": "openbrowser-mcp-fast",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 78.586208,
+      "warm_p95_ms": 84.018083,
+      "errors": []
+    },
+    {
+      "task": "tabs",
+      "arm": "openbrowser-fast",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 114.91725,
+      "warm_p95_ms": 124.137874,
+      "errors": []
+    },
+    {
+      "task": "tabs",
+      "arm": "chrome-devtools-mcp",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 1492.026166,
+      "warm_p95_ms": 1497.728625,
+      "errors": []
+    },
+    {
+      "task": "tabs",
+      "arm": "agent-browser",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 368.715376,
+      "warm_p95_ms": 389.760958,
+      "errors": []
+    },
+    {
+      "task": "tabs",
+      "arm": "browser-use",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 165.507416,
+      "warm_p95_ms": 228.348875,
+      "errors": []
+    },
+    {
+      "task": "tabs",
+      "arm": "playwright-mcp",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 128.525083,
+      "warm_p95_ms": 129.3085,
+      "errors": []
+    },
+    {
+      "task": "tabs",
+      "arm": "playwright-cli",
+      "runs": 5,
+      "ok": 5,
+      "warm_p50_ms": 309.912416,
+      "warm_p95_ms": 313.607583,
+      "errors": []
+    }
+  ]
+}

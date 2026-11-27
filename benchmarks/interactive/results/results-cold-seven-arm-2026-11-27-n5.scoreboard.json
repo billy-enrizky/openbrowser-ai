@@ -1,0 +1,617 @@
+{
+  "rows": [
+    {
+      "lane": "cold",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 699.861041,
+      "playwright": 941.536625,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 1146.867167,
+      "playwright": 949.03625,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_peak_tree_rss",
+      "openbrowser": 789168128,
+      "playwright": 879312896,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 699.861041,
+      "playwright": 1732.261584,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 1146.867167,
+      "playwright": 1853.460917,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_peak_tree_rss",
+      "openbrowser": 789168128,
+      "playwright": 994820096,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 795.955458,
+      "playwright": 941.536625,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 824.244042,
+      "playwright": 949.03625,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_peak_tree_rss",
+      "openbrowser": 814907392,
+      "playwright": 879312896,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 795.955458,
+      "playwright": 1732.261584,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 824.244042,
+      "playwright": 1853.460917,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "wizard",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_peak_tree_rss",
+      "openbrowser": 814907392,
+      "playwright": 994820096,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 823.093499,
+      "playwright": 850.733,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 841.968833,
+      "playwright": 934.007126,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_peak_tree_rss",
+      "openbrowser": 786825216,
+      "playwright": 859226112,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 823.093499,
+      "playwright": 1709.789832,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 841.968833,
+      "playwright": 1727.923208,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_peak_tree_rss",
+      "openbrowser": 786825216,
+      "playwright": 977371136,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 945.111792,
+      "playwright": 850.733,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 970.386166,
+      "playwright": 934.007126,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_peak_tree_rss",
+      "openbrowser": 818413568,
+      "playwright": 859226112,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 945.111792,
+      "playwright": 1709.789832,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 970.386166,
+      "playwright": 1727.923208,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "modal",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_peak_tree_rss",
+      "openbrowser": 818413568,
+      "playwright": 977371136,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 978.478541,
+      "playwright": 938.339667,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 1036.389375,
+      "playwright": 951.258793,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_peak_tree_rss",
+      "openbrowser": 777764864,
+      "playwright": 842301440,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 978.478541,
+      "playwright": 1738.421333,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 1036.389375,
+      "playwright": 1783.139083,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_peak_tree_rss",
+      "openbrowser": 777764864,
+      "playwright": 941080576,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 1075.754208,
+      "playwright": 938.339667,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 1105.993707,
+      "playwright": 951.258793,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_peak_tree_rss",
+      "openbrowser": 805076992,
+      "playwright": 842301440,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 1075.754208,
+      "playwright": 1738.421333,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 1105.993707,
+      "playwright": 1783.139083,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "download",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_peak_tree_rss",
+      "openbrowser": 805076992,
+      "playwright": 941080576,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 722.223876,
+      "playwright": 669.40575,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 768.954917,
+      "playwright": 691.611583,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_peak_tree_rss",
+      "openbrowser": 792117248,
+      "playwright": 862765056,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 722.223876,
+      "playwright": 1491.716668,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 768.954917,
+      "playwright": 1561.706042,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_peak_tree_rss",
+      "openbrowser": 792117248,
+      "playwright": 972980224,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 812.648292,
+      "playwright": 669.40575,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 814.742542,
+      "playwright": 691.611583,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_peak_tree_rss",
+      "openbrowser": 821624832,
+      "playwright": 862765056,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 812.648292,
+      "playwright": 1491.716668,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 814.742542,
+      "playwright": 1561.706042,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "tabs",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_peak_tree_rss",
+      "openbrowser": 821624832,
+      "playwright": 972980224,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "auth",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 1140.786624,
+      "playwright": 1038.181959,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "auth",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 1188.648082,
+      "playwright": 1078.800082,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "auth",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_peak_tree_rss",
+      "openbrowser": 796311552,
+      "playwright": 868384768,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "auth",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 1140.786624,
+      "playwright": 2889.771626,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "auth",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 1188.648082,
+      "playwright": 2955.748291,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "auth",
+      "openbrowser_arm": "openbrowser-mcp-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_peak_tree_rss",
+      "openbrowser": 796311552,
+      "playwright": 977633280,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "auth",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_time",
+      "openbrowser": 1365.921916,
+      "playwright": 1038.181959,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "auth",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "p95_time",
+      "openbrowser": 1452.703459,
+      "playwright": 1078.800082,
+      "win": false
+    },
+    {
+      "lane": "cold",
+      "task": "auth",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-mcp",
+      "metric": "median_peak_tree_rss",
+      "openbrowser": 817217536,
+      "playwright": 868384768,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "auth",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_time",
+      "openbrowser": 1365.921916,
+      "playwright": 2889.771626,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "auth",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "p95_time",
+      "openbrowser": 1452.703459,
+      "playwright": 2955.748291,
+      "win": true
+    },
+    {
+      "lane": "cold",
+      "task": "auth",
+      "openbrowser_arm": "openbrowser-fast",
+      "playwright_arm": "playwright-cli",
+      "metric": "median_peak_tree_rss",
+      "openbrowser": 817217536,
+      "playwright": 977633280,
+      "win": true
+    }
+  ],
+  "wins": {
+    "median_time": 13,
+    "p95_time": 12,
+    "median_peak_tree_rss": 20
+  },
+  "losses_or_ties": {
+    "median_time": 7,
+    "p95_time": 8,
+    "median_peak_tree_rss": 0
+  },
+  "n": 5,
+  "p95_definition": "nearest rank for N=5 equals max",
+  "memory_scope": "sampled peak process-tree RSS, including benchmark worker; raw child-only RSS retained separately"
+}

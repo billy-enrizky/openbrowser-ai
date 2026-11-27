@@ -1,11 +1,13 @@
 {
-  "generated_at": "2026-11-25T15:33:52.058014+00:00",
+  "generated_at": "2026-11-27T21:34:07.725629+00:00",
   "arms": [
-    "openbrowser-fast",
     "openbrowser-mcp-fast",
+    "openbrowser-fast",
     "chrome-devtools-mcp",
     "agent-browser",
-    "browser-use"
+    "browser-use",
+    "playwright-mcp",
+    "playwright-cli"
   ],
   "tasks": [
     "wizard",
@@ -18,14 +20,14 @@
   "warmups": 0,
   "rotate_arms": true,
   "load_before": [
-    6.57,
-    4.896,
-    4.404
+    4.082,
+    4.409,
+    4.002
   ],
   "load_after": [
-    6.729,
-    6.016,
-    4.994
+    3.808,
+    3.759,
+    3.809
   ],
   "mcp_transport": "lean",
   "playwright_browsers_path_available": true
