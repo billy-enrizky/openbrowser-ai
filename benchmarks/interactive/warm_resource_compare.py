@@ -840,6 +840,8 @@ def run_warm_lane(
                             "arm_order": list(entry.order),
                             "oracle_ok": oracle.ok,
                             "oracle_detail": oracle.detail,
+                            "warm_baseline_resources": baseline or None,
+                            "warm_final_resources": resources or None,
                             "warm_peak_tree_rss_bytes": rss,
                             "warm_peak_child_footprint_bytes": resources.get("peak_child_footprint_bytes"),
                             "warm_task_tree_cpu_delta_seconds": cpu_delta,

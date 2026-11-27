@@ -1538,3 +1538,57 @@ def test_unverified_retirement_cleanup_aborts_before_other_native_tasks(tmp_path
     assert terminal["aborted"] is True
     assert terminal["valid"] is False
     assert terminal["retired_workers"]["a"]["cleanup"]["verified"] is False
+
+
+def test_raw_warm_rows_retain_complete_resource_snapshots(tmp_path):
+    baseline = {
+        "sampler_method_version": 6,
+        "samples": 1,
+        "peak_tree_rss_bytes": 100,
+        "peak_child_footprint_bytes": 50,
+        "observed_tree_cpu_seconds": 1.0,
+        "observed_child_processes": 1,
+        "observed_browser_during_native_run": 1,
+        "unverified_processes": 0,
+        "read_errors": 0,
+        "fatal_read_errors": 0,
+        "footprint_status": "observed",
+        "read_error_details": [],
+        "read_error_details_truncated": 0,
+        "fatal_read_identities": [],
+        "discovery_uid_stats": {"same_uid": 2, "foreign_uid": 1, "unknown_uid": 0},
+        "processes": [{"pid": 7000, "created_at": 2.0, "role": "child", "observed_cpu_seconds": 1.0}],
+    }
+    final = {
+        **baseline,
+        "samples": 2,
+        "observed_tree_cpu_seconds": 2.0,
+        "unverified_processes": 1,
+        "read_errors": 1,
+        "fatal_read_errors": 1,
+        "read_error_details": [
+            {
+                "pid": 7001,
+                "created_at": None,
+                "operation": "cmdline",
+                "phase": "orphan_discovery",
+                "error_type": "OSError",
+                "errno": 0,
+                "effective_uid": 501,
+                "resolution": "unknown",
+                "resolution_source": "discovery_scan",
+            }
+        ],
+        "fatal_read_identities": [{"pid": 7001, "created_at": None}],
+        "discovery_uid_stats": {"same_uid": 2, "foreign_uid": 1, "unknown_uid": 1},
+        "processes": [{"pid": 7000, "created_at": 2.0, "role": "child", "observed_cpu_seconds": 2.0}],
+    }
+    output, records, _ = run_lane(
+        tmp_path, arms=("a",), sampler_factory=lambda pid, marker: ScriptedResultSampler([baseline, final])
+    )
+    raw = [json.loads(line) for line in output.read_text().splitlines()]
+    assert records[0]["ok"] is records[0]["oracle_ok"] is True
+    assert records[0]["resource_ok"] is False
+    assert raw[1]["warm_baseline_resources"] == baseline
+    assert raw[1]["warm_final_resources"] == final
+    assert raw[-1]["failures"] == 1 and raw[-1]["valid"] is False
