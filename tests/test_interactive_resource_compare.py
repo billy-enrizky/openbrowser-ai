@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import json
 import math
+import os
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -144,12 +145,16 @@ class FakeProcess:
     def cpu_times(self):
         return SimpleNamespace(user=self.cpu, system=0.0)
 
+    def uids(self):
+        return SimpleNamespace(effective=getattr(os, "geteuid", lambda: 0)())
+
 
 class DiscoveryProcess:
-    def __init__(self, pid, command, created_at: Any = 1.0):
+    def __init__(self, pid, command, created_at: Any = 1.0, uids_value: Any = None):
         self.pid = pid
         self._command = command
         self._created_at = created_at
+        self._uids_value = uids_value
 
     def cmdline(self):
         if callable(self._command):
@@ -160,6 +165,16 @@ class DiscoveryProcess:
         if callable(self._created_at):
             return self._created_at()
         return self._created_at
+
+    def uids(self):
+        value = self._uids_value
+        if value is None:
+            return SimpleNamespace(effective=getattr(os, "geteuid", lambda: 0)())
+        if callable(value):
+            return value()
+        if isinstance(value, int):
+            return SimpleNamespace(effective=value)
+        return value
 
 
 def fake_sampler(module, processes, root=10, marker=None):
@@ -875,6 +890,7 @@ def test_discover_orphans_records_cmdline_oserror_with_known_pid(monkeypatch):
     assert detail["pid"] == 20
     assert detail["created_at"] is None
     assert detail["operation"] == "cmdline"
+    assert detail["effective_uid"] == os.geteuid()
     assert detail["resolution"] == "unknown"
     assert detail["resolution_source"] == "discovery_scan"
 
@@ -901,6 +917,7 @@ def test_discover_orphans_records_owned_create_time_failure(monkeypatch):
     assert detail["pid"] == 30
     assert detail["created_at"] is None
     assert detail["operation"] == "create_time"
+    assert detail["effective_uid"] == os.geteuid()
     assert detail["resolution"] == "unknown"
     assert detail["resolution_source"] == "discovery_scan"
 
@@ -922,13 +939,175 @@ def test_discover_orphans_accepts_only_marker_matches(monkeypatch):
     assert result["fatal_read_errors"] == 0
     assert result["unverified_processes"] == 0
     assert result["cleanup_unverified_processes"] == 0
+    assert result["discovery_uid_stats"]["same_uid"] == 2
+
+
+def test_discover_orphans_skips_exact_integer_pid_zero(monkeypatch):
+    module = resource_module()
+    marker = "/tmp/resource-owned-abcdef/runs"
+    sampler = fake_sampler(module, {}, root=10, marker=marker)
+    process = DiscoveryProcess(
+        0,
+        lambda: pytest.fail("pid zero must not read cmdline"),
+        lambda: pytest.fail("pid zero must not read create_time"),
+        lambda: pytest.fail("pid zero must not read uids"),
+    )
+    monkeypatch.setattr(module.psutil, "process_iter", lambda attrs: [process])
+
+    sampler.discover_orphans()
+
+    result = sampler.result()
+    assert result["read_errors"] == 0
+    assert result["fatal_read_errors"] == 0
+    assert result["discovery_uid_stats"]["pid_zero_skipped"] == 1
+    assert all(pid != 0 for pid, _ in sampler._known)
+
+
+@pytest.mark.parametrize("pid", [False, -1, None, 0.0])
+def test_discover_orphans_rejects_malformed_pid(monkeypatch, pid):
+    module = resource_module()
+    marker = "/tmp/resource-owned-abcdef/runs"
+    sampler = fake_sampler(module, {}, root=10, marker=marker)
+    process = DiscoveryProcess(
+        pid,
+        lambda: pytest.fail("malformed pid must not read cmdline"),
+        lambda: pytest.fail("malformed pid must not read create_time"),
+        lambda: pytest.fail("malformed pid must not read uids"),
+    )
+    monkeypatch.setattr(module.psutil, "process_iter", lambda attrs: [process])
+
+    sampler.discover_orphans()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    assert result["unverified_processes"] == 1
+    assert result["discovery_uid_stats"]["invalid_pid"] == 1
+    detail = result["read_error_details"][0]
+    assert detail["operation"] == "pid"
+    assert detail["pid"] is None
+    assert detail["created_at"] is None
+    assert detail["effective_uid"] is None
+
+
+def test_discover_orphans_skips_foreign_uid_before_cmdline(monkeypatch):
+    module = resource_module()
+    marker = "/tmp/resource-owned-abcdef/runs"
+    sampler = fake_sampler(module, {}, root=10, marker=marker)
+    process = DiscoveryProcess(
+        60,
+        lambda: pytest.fail("foreign uid must not read cmdline"),
+        lambda: pytest.fail("foreign uid must not read create_time"),
+        os.geteuid() + 1,
+    )
+    monkeypatch.setattr(module.psutil, "process_iter", lambda attrs: [process])
+
+    sampler.discover_orphans()
+
+    result = sampler.result()
+    assert result["read_errors"] == 0
+    assert result["fatal_read_errors"] == 0
+    assert result["discovery_uid_stats"]["foreign_uid"] == 1
+    assert all(pid != 60 for pid, _ in sampler._known)
 
 
 @pytest.mark.parametrize(
-    ("exception_name", "expect_unverified"),
-    [("AccessDenied", True), ("NoSuchProcess", False), ("ZombieProcess", False)],
+    ("uids_value", "error_type"),
+    [
+        (lambda: (_ for _ in ()).throw(OSError(0, "uid unavailable")), "OSError"),
+        (SimpleNamespace(effective=None), "ValueError"),
+        (SimpleNamespace(effective="501"), "ValueError"),
+    ],
 )
-def test_discover_orphans_preserves_handled_exception_policy(monkeypatch, exception_name, expect_unverified):
+def test_discover_orphans_unknown_uid_is_fatal(monkeypatch, uids_value, error_type):
+    module = resource_module()
+    marker = "/tmp/resource-owned-abcdef/runs"
+    sampler = fake_sampler(module, {}, root=10, marker=marker)
+    process = DiscoveryProcess(
+        70,
+        lambda: pytest.fail("unknown uid must not read cmdline"),
+        lambda: pytest.fail("unknown uid must not read create_time"),
+        uids_value,
+    )
+    monkeypatch.setattr(module.psutil, "process_iter", lambda attrs: [process])
+
+    sampler.discover_orphans()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    assert result["discovery_uid_stats"]["unknown_uid"] == 1
+    detail = result["read_error_details"][0]
+    assert detail["operation"] == "uids"
+    assert detail["pid"] == 70
+    assert detail["created_at"] is None
+    assert detail["effective_uid"] is None
+    assert detail["error_type"] == error_type
+
+
+def test_discover_orphans_keeps_conservative_policy_off_posix(monkeypatch):
+    module = resource_module()
+    marker = "/tmp/resource-owned-abcdef/runs"
+    sampler = fake_sampler(module, {}, root=10, marker=marker)
+    process = DiscoveryProcess(
+        80,
+        ["Chrome", f"--user-data-dir={marker}"],
+        8.5,
+        lambda: pytest.fail("non-POSIX discovery must not read uids"),
+    )
+    monkeypatch.setattr(module.psutil, "process_iter", lambda attrs: [process])
+    monkeypatch.setattr(module.os, "name", "nt")
+
+    sampler.discover_orphans()
+
+    result = sampler.result()
+    assert (80, 8.5) in sampler._known
+    assert result["read_errors"] == 0
+    assert result["discovery_uid_stats"]["unfiltered"] == 1
+
+
+def test_foreign_uid_does_not_remove_known_descendant():
+    module = resource_module()
+    root = FakeProcess(10, 1.0)
+    child = FakeProcess(20, 2.0, rss=50, cpu=0.2)
+    child.uids = lambda: SimpleNamespace(effective=os.geteuid() + 1)
+    root.descendants = [child]
+    sampler = fake_sampler(module, {10: root, 20: child})
+
+    sampler.sample()
+
+    result = sampler.result()
+    assert result["peak_tree_rss_bytes"] == 150
+    assert result["observed_child_processes"] == 1
+    assert result["fatal_read_errors"] == 0
+
+
+def test_discover_orphans_same_uid_cmdline_denied_is_fatal(monkeypatch):
+    module = resource_module()
+    marker = "/tmp/resource-owned-abcdef/runs"
+    sampler = fake_sampler(module, {}, root=10, marker=marker)
+
+    def fail_cmdline():
+        raise module.psutil.AccessDenied(50)
+
+    process = DiscoveryProcess(50, fail_cmdline, lambda: pytest.fail("create_time must not run"))
+    monkeypatch.setattr(module.psutil, "process_iter", lambda attrs: [process])
+    sampler.discover_orphans()
+
+    result = sampler.result()
+    assert result["fatal_read_errors"] == 1
+    assert result["unverified_processes"] == 1
+    assert result["cleanup_unverified_processes"] == 1
+    assert result["discovery_uid_stats"]["same_uid"] == 1
+    assert 50 in sampler._marker_unverified
+    detail = result["read_error_details"][0]
+    assert detail["operation"] == "cmdline"
+    assert detail["error_type"] == "AccessDenied"
+    assert detail["effective_uid"] == os.geteuid()
+    assert detail["resolution"] == "unknown"
+    assert detail["resolution_source"] == "discovery_scan"
+
+
+@pytest.mark.parametrize("exception_name", ["NoSuchProcess", "ZombieProcess"])
+def test_discover_orphans_preserves_authoritative_exit_policy(monkeypatch, exception_name):
     module = resource_module()
     marker = "/tmp/resource-owned-abcdef/runs"
     sampler = fake_sampler(module, {}, root=10, marker=marker)
@@ -942,8 +1121,8 @@ def test_discover_orphans_preserves_handled_exception_policy(monkeypatch, except
 
     result = sampler.result()
     assert result["fatal_read_errors"] == 0
-    assert (50 in sampler._marker_unverified) is expect_unverified
-    assert result["cleanup_unverified_processes"] == int(expect_unverified)
+    assert 50 not in sampler._marker_unverified
+    assert result["cleanup_unverified_processes"] == 0
 
 
 def test_cleanup_reports_discovery_oserror_without_escaping(monkeypatch):

@@ -54,6 +54,14 @@ _MEMORY_TASK_VERIFICATIONS = frozenset(
         "unknown",
     }
 )
+_DISCOVERY_UID_STAT_KEYS = (
+    "same_uid",
+    "foreign_uid",
+    "unknown_uid",
+    "pid_zero_skipped",
+    "invalid_pid",
+    "unfiltered",
+)
 ReadIdentity = tuple[int | None, float | None]
 
 
@@ -126,6 +134,7 @@ class ResourceLedger:
         operation: str,
         phase: str,
         sample_index: int,
+        effective_uid: int | None = None,
         resolution: str = "unknown",
         resolution_error: BaseException | None = None,
         resolution_source: str = "identity_fence",
@@ -141,6 +150,7 @@ class ResourceLedger:
             raise ValueError(f"Unsupported resolution source: {resolution_source}")
         if memory_task_verification not in _MEMORY_TASK_VERIFICATIONS:
             raise ValueError(f"Unsupported memory task verification: {memory_task_verification}")
+        effective_uid_value = effective_uid if type(effective_uid) is int and effective_uid >= 0 else None
         self.read_error_types[name] = self.read_error_types.get(name, 0) + 1
         self.read_resolutions[resolution] = self.read_resolutions.get(resolution, 0) + 1
         resolution_error_type = type(resolution_error).__name__ if resolution_error is not None else None
@@ -157,6 +167,7 @@ class ResourceLedger:
                     "sample_index": sample_index,
                     "error_type": name,
                     "errno": errno_value,
+                    "effective_uid": effective_uid_value,
                     "resolution": resolution,
                     "resolution_source": resolution_source,
                     "memory_task_verification": memory_task_verification,
@@ -294,6 +305,10 @@ def _valid_pid(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
+def _valid_uid(value: object) -> bool:
+    return type(value) is int and value >= 0
+
+
 def _exception_pid(error: BaseException) -> int | None:
     value = getattr(error, "pid", None)
     return value if _valid_pid(value) else None
@@ -326,6 +341,7 @@ class ProcessTreeSampler:
         self._ownership_marker = ownership_marker
         self._marker_unverified: set[int] = set()
         self._discovery_unverified = False
+        self._discovery_uid_stats = dict.fromkeys(_DISCOVERY_UID_STAT_KEYS, 0)
         self._process = process_factory or psutil.Process
         self._footprint = footprint_reader if footprint_reader is not None else make_footprint_reader()
         try:
@@ -457,6 +473,7 @@ class ProcessTreeSampler:
         *,
         operation: str,
         identity: ReadIdentity | None,
+        effective_uid: int | None = None,
     ) -> None:
         normalized_identity = (None, None) if identity is None else identity
         pid = normalized_identity[0]
@@ -471,27 +488,61 @@ class ProcessTreeSampler:
             operation=operation,
             phase="orphan_discovery",
             sample_index=self._ledger.samples,
+            effective_uid=effective_uid,
             resolution="unknown",
             resolution_source="discovery_scan",
         )
 
     def discover_orphans(self) -> None:
-        """Recover visible profile-marked children that escaped ancestry sampling."""
+        """Recover marked children without crossing the POSIX effective-UID boundary.
+
+        The UID gate applies only to optional orphan discovery. Ancestry sampling and
+        previously known process sampling remain UID-agnostic.
+        """
         if self._ownership_marker is None:
             return
         self._marker_unverified.clear()
         self._discovery_unverified = False
+        self._discovery_uid_stats = dict.fromkeys(_DISCOVERY_UID_STAT_KEYS, 0)
         try:
             processes = psutil.process_iter(["pid"])
             for process in processes:
                 try:
                     pid = process.pid
                 except Exception as error:
+                    self._discovery_uid_stats["invalid_pid"] += 1
                     self._note_discovery_error(error, operation="pid", identity=None)
                     continue
+                if type(pid) is int and pid == 0:
+                    self._discovery_uid_stats["pid_zero_skipped"] += 1
+                    continue
                 if not _valid_pid(pid):
+                    self._discovery_uid_stats["invalid_pid"] += 1
                     self._note_discovery_error(ValueError("invalid process id"), operation="pid", identity=None)
                     continue
+                effective_uid: int | None = None
+                if os.name == "posix":
+                    try:
+                        candidate_uid = getattr(process.uids(), "effective", None)
+                        if not _valid_uid(candidate_uid):
+                            raise ValueError("invalid effective uid")
+                        assert type(candidate_uid) is int
+                        current_uid = os.geteuid()
+                        if not _valid_uid(current_uid):
+                            raise ValueError("invalid current effective uid")
+                        if candidate_uid != current_uid:
+                            self._discovery_uid_stats["foreign_uid"] += 1
+                            continue
+                        effective_uid = candidate_uid
+                        self._discovery_uid_stats["same_uid"] += 1
+                    except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                        continue
+                    except Exception as error:
+                        self._discovery_uid_stats["unknown_uid"] += 1
+                        self._note_discovery_error(error, operation="uids", identity=(pid, None))
+                        continue
+                else:
+                    self._discovery_uid_stats["unfiltered"] += 1
                 operation = "cmdline"
                 try:
                     command = process.cmdline()
@@ -506,10 +557,13 @@ class ProcessTreeSampler:
                     self._known.add((pid, float(created)))
                 except (psutil.NoSuchProcess, psutil.ZombieProcess):
                     continue
-                except psutil.AccessDenied:
-                    self._marker_unverified.add(pid)
                 except Exception as error:
-                    self._note_discovery_error(error, operation=operation, identity=(pid, None))
+                    self._note_discovery_error(
+                        error,
+                        operation=operation,
+                        identity=(pid, None),
+                        effective_uid=effective_uid,
+                    )
         except Exception as error:
             self._note_discovery_error(error, operation="process_iter", identity=None)
 
@@ -633,6 +687,7 @@ class ProcessTreeSampler:
             **self._ledger.result(),
             "unverified_processes": observation_count,
             "cleanup_unverified_processes": cleanup_count,
+            "discovery_uid_stats": dict(self._discovery_uid_stats),
         }
 
 
