@@ -1,0 +1,547 @@
+{
+  "samples": 5,
+  "warmups": 1,
+  "arms": [
+    "openbrowser-full",
+    "openbrowser-lightweight",
+    "openbrowser-no-render",
+    "playwright-mcp",
+    "playwright-cli"
+  ],
+  "tasks": [
+    "asset_heavy",
+    "js_list",
+    "pagination",
+    "static_article",
+    "table"
+  ],
+  "environment": {
+    "platform": "macOS-26.6-arm64-arm-64bit",
+    "machine": "arm64",
+    "python": "3.12.12",
+    "openbrowser": "0.1.61.dev159+g24570cab9",
+    "chrome_path": "$CHROME_BIN",
+    "chrome_version": "Google Chrome for Testing 159.0.8154.6",
+    "firecrawl": null,
+    "lightpanda": null,
+    "load_average": [
+      3.82470703125,
+      3.0361328125,
+      3.005859375
+    ],
+    "load_average_start": [
+      3.82470703125,
+      3.0361328125,
+      3.005859375
+    ],
+    "cleanup_completed": true,
+    "cleanup_errors": [],
+    "load_average_end": [
+      4.2568359375,
+      3.16552734375,
+      3.05126953125
+    ]
+  },
+  "groups": [
+    {
+      "task": "asset_heavy",
+      "arm": "openbrowser-full",
+      "successes": 5,
+      "runs": 5,
+      "ok": true,
+      "latency": {
+        "count": 5,
+        "p50_ms": 23.891,
+        "p95_ms": 25.217,
+        "mean_ms": 23.75
+      },
+      "mean_output_bytes": 242.0,
+      "mean_requests": 25.0,
+      "mean_response_bytes": 4064.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "asset_heavy",
+      "arm": "openbrowser-lightweight",
+      "successes": 5,
+      "runs": 5,
+      "ok": true,
+      "latency": {
+        "count": 5,
+        "p50_ms": 19.311,
+        "p95_ms": 23.543,
+        "mean_ms": 19.779
+      },
+      "mean_output_bytes": 242.0,
+      "mean_requests": 4.0,
+      "mean_response_bytes": 2492.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "asset_heavy",
+      "arm": "openbrowser-no-render",
+      "successes": 5,
+      "runs": 5,
+      "ok": true,
+      "latency": {
+        "count": 5,
+        "p50_ms": 19.07,
+        "p95_ms": 23.573,
+        "mean_ms": 19.888
+      },
+      "mean_output_bytes": 242.0,
+      "mean_requests": 2.0,
+      "mean_response_bytes": 2330.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "asset_heavy",
+      "arm": "playwright-cli",
+      "successes": 5,
+      "runs": 5,
+      "ok": true,
+      "latency": {
+        "count": 5,
+        "p50_ms": 228.246,
+        "p95_ms": 238.457,
+        "mean_ms": 229.613
+      },
+      "mean_output_bytes": 242.0,
+      "mean_requests": 24.0,
+      "mean_response_bytes": 2899.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "asset_heavy",
+      "arm": "playwright-mcp",
+      "successes": 5,
+      "runs": 5,
+      "ok": true,
+      "latency": {
+        "count": 5,
+        "p50_ms": 30.157,
+        "p95_ms": 31.576,
+        "mean_ms": 30.223
+      },
+      "mean_output_bytes": 242.0,
+      "mean_requests": 24.0,
+      "mean_response_bytes": 2899.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "js_list",
+      "arm": "openbrowser-full",
+      "successes": 5,
+      "runs": 5,
+      "ok": true,
+      "latency": {
+        "count": 5,
+        "p50_ms": 17.291,
+        "p95_ms": 20.144,
+        "mean_ms": 17.629
+      },
+      "mean_output_bytes": 330.0,
+      "mean_requests": 3.0,
+      "mean_response_bytes": 2523.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "js_list",
+      "arm": "openbrowser-lightweight",
+      "successes": 5,
+      "runs": 5,
+      "ok": true,
+      "latency": {
+        "count": 5,
+        "p50_ms": 17.381,
+        "p95_ms": 22.852,
+        "mean_ms": 18.818
+      },
+      "mean_output_bytes": 330.0,
+      "mean_requests": 3.0,
+      "mean_response_bytes": 2523.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "js_list",
+      "arm": "openbrowser-no-render",
+      "successes": 5,
+      "runs": 5,
+      "ok": true,
+      "latency": {
+        "count": 5,
+        "p50_ms": 16.952,
+        "p95_ms": 19.736,
+        "mean_ms": 17.721
+      },
+      "mean_output_bytes": 330.0,
+      "mean_requests": 3.0,
+      "mean_response_bytes": 2523.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "js_list",
+      "arm": "playwright-cli",
+      "successes": 5,
+      "runs": 5,
+      "ok": true,
+      "latency": {
+        "count": 5,
+        "p50_ms": 219.976,
+        "p95_ms": 222.342,
+        "mean_ms": 215.689
+      },
+      "mean_output_bytes": 330.0,
+      "mean_requests": 2.0,
+      "mean_response_bytes": 2091.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "js_list",
+      "arm": "playwright-mcp",
+      "successes": 5,
+      "runs": 5,
+      "ok": true,
+      "latency": {
+        "count": 5,
+        "p50_ms": 26.058,
+        "p95_ms": 28.122,
+        "mean_ms": 26.407
+      },
+      "mean_output_bytes": 330.0,
+      "mean_requests": 2.0,
+      "mean_response_bytes": 2091.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "pagination",
+      "arm": "openbrowser-full",
+      "successes": 5,
+      "runs": 5,
+      "ok": true,
+      "latency": {
+        "count": 5,
+        "p50_ms": 3.463,
+        "p95_ms": 5.598,
+        "mean_ms": 3.949
+      },
+      "mean_output_bytes": 1650.0,
+      "mean_requests": 5.0,
+      "mean_response_bytes": 6923.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "pagination",
+      "arm": "openbrowser-lightweight",
+      "successes": 5,
+      "runs": 5,
+      "ok": true,
+      "latency": {
+        "count": 5,
+        "p50_ms": 3.819,
+        "p95_ms": 4.139,
+        "mean_ms": 3.734
+      },
+      "mean_output_bytes": 1650.0,
+      "mean_requests": 5.0,
+      "mean_response_bytes": 6923.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "pagination",
+      "arm": "openbrowser-no-render",
+      "successes": 5,
+      "runs": 5,
+      "ok": true,
+      "latency": {
+        "count": 5,
+        "p50_ms": 5.878,
+        "p95_ms": 19.941,
+        "mean_ms": 7.718
+      },
+      "mean_output_bytes": 1650.0,
+      "mean_requests": 5.0,
+      "mean_response_bytes": 6923.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "pagination",
+      "arm": "playwright-cli",
+      "successes": 5,
+      "runs": 5,
+      "ok": true,
+      "latency": {
+        "count": 5,
+        "p50_ms": 433.178,
+        "p95_ms": 445.965,
+        "mean_ms": 436.353
+      },
+      "mean_output_bytes": 1650.0,
+      "mean_requests": 5.0,
+      "mean_response_bytes": 6923.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "pagination",
+      "arm": "playwright-mcp",
+      "successes": 5,
+      "runs": 5,
+      "ok": true,
+      "latency": {
+        "count": 5,
+        "p50_ms": 236.454,
+        "p95_ms": 246.15,
+        "mean_ms": 234.134
+      },
+      "mean_output_bytes": 1650.0,
+      "mean_requests": 5.0,
+      "mean_response_bytes": 6923.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "static_article",
+      "arm": "openbrowser-full",
+      "successes": 5,
+      "runs": 5,
+      "ok": true,
+      "latency": {
+        "count": 5,
+        "p50_ms": 0.939,
+        "p95_ms": 2.464,
+        "mean_ms": 1.247
+      },
+      "mean_output_bytes": 1168.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 3631.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "static_article",
+      "arm": "openbrowser-lightweight",
+      "successes": 5,
+      "runs": 5,
+      "ok": true,
+      "latency": {
+        "count": 5,
+        "p50_ms": 0.936,
+        "p95_ms": 1.112,
+        "mean_ms": 0.96
+      },
+      "mean_output_bytes": 1168.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 3631.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "static_article",
+      "arm": "openbrowser-no-render",
+      "successes": 5,
+      "runs": 5,
+      "ok": true,
+      "latency": {
+        "count": 5,
+        "p50_ms": 1.134,
+        "p95_ms": 2.502,
+        "mean_ms": 1.515
+      },
+      "mean_output_bytes": 1168.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 3631.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "static_article",
+      "arm": "playwright-cli",
+      "successes": 5,
+      "runs": 5,
+      "ok": true,
+      "latency": {
+        "count": 5,
+        "p50_ms": 199.694,
+        "p95_ms": 213.898,
+        "mean_ms": 200.308
+      },
+      "mean_output_bytes": 995.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 3631.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "static_article",
+      "arm": "playwright-mcp",
+      "successes": 5,
+      "runs": 5,
+      "ok": true,
+      "latency": {
+        "count": 5,
+        "p50_ms": 10.617,
+        "p95_ms": 11.611,
+        "mean_ms": 10.66
+      },
+      "mean_output_bytes": 995.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 3631.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "table",
+      "arm": "openbrowser-full",
+      "successes": 5,
+      "runs": 5,
+      "ok": true,
+      "latency": {
+        "count": 5,
+        "p50_ms": 1.334,
+        "p95_ms": 2.733,
+        "mean_ms": 1.617
+      },
+      "mean_output_bytes": 8430.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 13067.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "table",
+      "arm": "openbrowser-lightweight",
+      "successes": 5,
+      "runs": 5,
+      "ok": true,
+      "latency": {
+        "count": 5,
+        "p50_ms": 1.426,
+        "p95_ms": 1.577,
+        "mean_ms": 1.402
+      },
+      "mean_output_bytes": 8430.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 13067.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "table",
+      "arm": "openbrowser-no-render",
+      "successes": 5,
+      "runs": 5,
+      "ok": true,
+      "latency": {
+        "count": 5,
+        "p50_ms": 1.508,
+        "p95_ms": 2.638,
+        "mean_ms": 1.877
+      },
+      "mean_output_bytes": 8430.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 13067.0,
+      "engines": [
+        "http"
+      ],
+      "errors": []
+    },
+    {
+      "task": "table",
+      "arm": "playwright-cli",
+      "successes": 5,
+      "runs": 5,
+      "ok": true,
+      "latency": {
+        "count": 5,
+        "p50_ms": 216.708,
+        "p95_ms": 224.5,
+        "mean_ms": 216.011
+      },
+      "mean_output_bytes": 8430.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 13067.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    },
+    {
+      "task": "table",
+      "arm": "playwright-mcp",
+      "successes": 5,
+      "runs": 5,
+      "ok": true,
+      "latency": {
+        "count": 5,
+        "p50_ms": 21.835,
+        "p95_ms": 24.634,
+        "mean_ms": 22.475
+      },
+      "mean_output_bytes": 8430.0,
+      "mean_requests": 1.0,
+      "mean_response_bytes": 13067.0,
+      "engines": [
+        "browser"
+      ],
+      "errors": []
+    }
+  ]
+}

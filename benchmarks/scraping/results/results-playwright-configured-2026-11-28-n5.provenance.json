@@ -1,0 +1,82 @@
+{
+  "method": "configured-ready-session-scraping-v1",
+  "date": "2026-11-28",
+  "source_commit": "a8dea56f461697ee0753c6adc152244b7ab2a022",
+  "source_url": "https://github.com/billy-enrizky/openbrowser-ai/tree/a8dea56f461697ee0753c6adc152244b7ab2a022",
+  "app_digest": "847bbf456edf263ab18e80261e2f509f6ab7d35c485b1bafc5de5dc0b7726a01",
+  "source_and_harness_unchanged": true,
+  "package_unchanged": true,
+  "harness_sha256": {
+    "benchmarks/scraping/scrape_compare.py": "04723f3fe2ac949bdb4ca95bf053e411c3913caa136af143053ba87bd4cd3721",
+    "benchmarks/interactive/adapters/playwright_common.py": "a0fa063950cd731ea374705067f2e2f4ff5abe2b4add31e921049a3547a6f0e5",
+    "benchmarks/interactive/adapters/playwright_mcp.py": "d952d886e24d1e7deaf709396ef7ecc4701de74efc0411e8dc4e965003d5b9e7",
+    "benchmarks/interactive/adapters/playwright_cli.py": "78d053340b9cdf10d3e52f31218c4150261c790c0aa6ec9b5207edd54905d4b5",
+    "benchmarks/interactive/adapters/playwright_tasks.py": "34275b1447c2a79b54f35590f30772860bed4541a20141353373c74f4322e5e6",
+    "benchmarks/interactive/adapters/playwright_scrape_bridge.py": "6a27d325319ebb37005cce3ee30a4ee14fc83fdb078add5dcb8b8d498f519476"
+  },
+  "runtime": {
+    "python": "3.12.12",
+    "chrome": "159.0.8154.6",
+    "revision": 1255,
+    "playwright_mcp": "0.0.86",
+    "playwright_cli": "0.1.25",
+    "playwright_core": "1.66.0-alpha-2026-11-18"
+  },
+  "scope": {
+    "tasks": [
+      "asset_heavy",
+      "js_list",
+      "pagination",
+      "static_article",
+      "table"
+    ],
+    "arms": [
+      "openbrowser-full",
+      "openbrowser-lightweight",
+      "openbrowser-no-render",
+      "playwright-mcp",
+      "playwright-cli"
+    ],
+    "samples_per_cell": 5,
+    "warmups_per_cell": 1,
+    "measured_observations": 125,
+    "exact_passes": 125,
+    "order": "Alternating arm order by sample; ready sessions reused across tasks.",
+    "timed_boundary": "Existing scrape task call through returned result. Service/browser startup, warmup and cleanup are outside the timer.",
+    "metric": "Task wall time in milliseconds. Native memory and CPU remain unmeasured.",
+    "interface": "OpenBrowser namespace scrape_page with automatic HTTP/browser selection, and official Playwright MCP/CLI scripted browser programs.",
+    "oracle": "Complete ordered Item/Value fields, 30 SKU ids, 100 pagination ids, all 40 table rows with six cells, and 20 ordered headlines.",
+    "mechanism": "OpenBrowser uses HTTP on static article, pagination and table; it uses the browser on JS list and asset-heavy pages. Playwright uses Chrome on every task.",
+    "output": "Required fixture data are checked. Markdown/plain-text serialization differs for static articles.",
+    "cleanup": "All five harness cleanup calls succeeded. An independent readable-process scan found no Playwright temporary-scope process. Denied host reads and absent OpenBrowser PID census limit independent cleanup coverage.",
+    "path_redaction": "The public environment uses $CHROME_BIN for the machine-specific executable path; all measured sample fields are unchanged.",
+    "package_version": "The environment OpenBrowser version is installed distribution metadata; source_commit and app_digest identify the package source executed through PYTHONPATH."
+  },
+  "score_against_playwright": {
+    "comparisons": 30,
+    "median_lower": 30,
+    "p95_lower": 30,
+    "pairs_lower": 150,
+    "pairs_total": 150
+  },
+  "files": {
+    "results-playwright-configured-2026-11-28-n5.json": "970d78bddc23085b3fbc3bd496c0b7a4718215254a0d5065e0828dbab0bb06aa",
+    "results-playwright-configured-2026-11-28-n5.jsonl": "2b853576b8831e1e2df2ec65ee3c2b6a227752db7cc9508db7c7a57575ec126c"
+  },
+  "original_private_raw_sha256": "3680b48209a1902522265568a79d66d25f40ec24d153e971b6a45bcfe51c6e82",
+  "host": {
+    "logical_cores": 18,
+    "load_average_before": [
+      3.82470703125,
+      3.0361328125,
+      3.005859375
+    ],
+    "load_average_after": [
+      4.2568359375,
+      3.16552734375,
+      3.05126953125
+    ],
+    "background": "An existing OpenBrowser daemon and background communication/security applications were present in both host snapshots. The run uses interleaved samples under this shared load.",
+    "independent_after_run_daemon_probe": "An unchanged PID/create-time daemon used 0.370802688 CPU seconds in a one-second read-only probe after the run. Its exact CPU usage during measured samples was not recorded. No signal was sent."
+  }
+}
