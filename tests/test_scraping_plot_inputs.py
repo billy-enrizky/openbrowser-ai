@@ -1,6 +1,10 @@
 """Scraping charts keep current Playwright cells and dated service references."""
 
-from benchmarks.scraping import plot_results as plot
+import pytest
+
+pytest.importorskip("matplotlib")
+
+from benchmarks.scraping import plot_results as plot  # noqa: E402
 
 
 def test_default_charts_use_exact_current_and_reference_cells(monkeypatch, tmp_path):

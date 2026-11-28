@@ -63,5 +63,20 @@
     "results-playwright-configured-2026-11-28-n5.json": "970d78bddc23085b3fbc3bd496c0b7a4718215254a0d5065e0828dbab0bb06aa",
     "results-playwright-configured-2026-11-28-n5.jsonl": "2b853576b8831e1e2df2ec65ee3c2b6a227752db7cc9508db7c7a57575ec126c"
   },
-  "original_private_raw_sha256": "3680b48209a1902522265568a79d66d25f40ec24d153e971b6a45bcfe51c6e82"
+  "original_private_raw_sha256": "3680b48209a1902522265568a79d66d25f40ec24d153e971b6a45bcfe51c6e82",
+  "host": {
+    "logical_cores": 18,
+    "load_average_before": [
+      3.82470703125,
+      3.0361328125,
+      3.005859375
+    ],
+    "load_average_after": [
+      4.2568359375,
+      3.16552734375,
+      3.05126953125
+    ],
+    "background": "An existing OpenBrowser daemon and background communication/security applications were present in both host snapshots. The run uses interleaved samples under this shared load.",
+    "independent_after_run_daemon_probe": "An unchanged PID/create-time daemon used 0.370802688 CPU seconds in a one-second read-only probe after the run. Its exact CPU usage during measured samples was not recorded. No signal was sent."
+  }
 }
