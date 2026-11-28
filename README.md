@@ -684,14 +684,6 @@ Sequential scraping, N=10, OpenBrowser lightweight against Firecrawl Local `0.1.
 
 OpenBrowser lightweight won 50 of 50 paired samples. The full arm won 49 of 50, with one static sample 0.13 ms slower. The batch surface measured 2.834 ms against Firecrawl Local batch at 13.448 ms, a 4.75x win in 10 of 10 pairs, with no browser started.
 
-Memory depends on the surface. Values are process-tree RSS on a local fixture:
-
-| Path | p50 latency | p50 peak process-tree RSS (MiB) |
-| --- | ---: | ---: |
-| OpenBrowser no-browser mode, static scrape | 142.7 ms | 47.6 MiB |
-| JavaScript scrape, headless shell | 940.1 ms | 355.4 MiB |
-| JavaScript scrape, full Chrome | 1296.0 ms | 742.4 MiB |
-
 The `scrape` browser fallback uses the Playwright headless shell by default. `OPENBROWSER_USE_HEADLESS_SHELL=0` restores full Chrome.
 
 No-browser MCP memory, 2026-11-26. Peak process-tree RSS (MiB) ↓ **Lower is better**. Each observation starts a fresh MCP server.
