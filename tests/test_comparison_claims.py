@@ -47,7 +47,7 @@ def test_comparison_page_has_current_sections_only():
         '2. How to read this page',
         '3. Current interactive lanes, 2026-11-27',
         '4. OpenBrowser no-browser memory, 2026-11-26',
-        '5. Other native local lanes, 2026-11-24',
+        '5. Configured scraping and local reference lanes',
         '6. Why OpenBrowser is faster and more efficient',
         '7. How to choose a surface',
         '8. What these lanes show',
@@ -111,7 +111,7 @@ def test_benchmark_readmes_have_current_sections_only():
     ]
     assert _sections(scraping) == [
         '1. How to read these numbers',
-        '2. Current results, 2026-11-26, and reference lanes',
+        '2. Current results, 2026-11-28, and reference lanes',
         '3. Arms',
         '4. Tasks',
         '5. Run',

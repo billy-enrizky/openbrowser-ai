@@ -59,7 +59,7 @@ Host load was 3.82/3.04/3.01 before and 4.26/3.17/3.05 after on 18 logical cores
 
 [Raw observations](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-playwright-configured-2026-11-28-n5.jsonl), [summary](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-playwright-configured-2026-11-28-n5.json), and [source and scope](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-playwright-configured-2026-11-28-n5.provenance.json).
 
-![Ready-session scraping times for all five configured interfaces. Lower is better.](../../docs/images/native-scraping-playwright-2026-11-28-p50.png)
+![Ready-session scraping times for all five configured interfaces. Lower is better.](https://github.com/billy-enrizky/openbrowser-ai/blob/main/docs/images/native-scraping-playwright-2026-11-28-p50.png)
 
 ### 2.2. OpenBrowser no-browser MCP scrape_web memory lane, 2026-11-26
 
