@@ -4,11 +4,12 @@
 ## Contents
 
 - [1. How to read these numbers](#1-how-to-read-these-numbers)
-- [2. Current results, 2026-11-26, and reference lanes](#2-current-results-2026-11-26-and-reference-lanes)
-  - [2.1. OpenBrowser no-browser MCP scrape_web memory lane, 2026-11-26](#21-openbrowser-no-browser-mcp-scrape_web-memory-lane-2026-11-26)
-  - [2.2. Firecrawl Local sequential, 2026-11-25, N=10](#22-firecrawl-local-sequential-2026-11-25-n10)
-  - [2.3. Firecrawl Local batch, 2026-11-24, N=10](#23-firecrawl-local-batch-2026-11-24-n10)
-  - [2.4. Lightpanda no-render latency, 2026-11-25, N=10](#24-lightpanda-no-render-latency-2026-11-25-n10)
+- [2. Current results, 2026-11-28, and reference lanes](#2-current-results-2026-11-28-and-reference-lanes)
+  - [2.1. Playwright MCP and CLI scraping, 2026-11-28](#21-playwright-mcp-and-cli-scraping-2026-11-28)
+  - [2.2. OpenBrowser no-browser MCP scrape_web memory lane, 2026-11-26](#22-openbrowser-no-browser-mcp-scrape_web-memory-lane-2026-11-26)
+  - [2.3. Firecrawl Local sequential, 2026-11-25, N=10](#23-firecrawl-local-sequential-2026-11-25-n10)
+  - [2.4. Firecrawl Local batch, 2026-11-24, N=10](#24-firecrawl-local-batch-2026-11-24-n10)
+  - [2.5. Lightpanda no-render latency, 2026-11-25, N=10](#25-lightpanda-no-render-latency-2026-11-25-n10)
 - [3. Arms](#3-arms)
 - [4. Tasks](#4-tasks)
 - [5. Run](#5-run)
@@ -31,14 +32,36 @@ Measure OpenBrowser render modes on deterministic local pages. No external netwo
 - The `scrape_web` memory lane uses N=5 for both one call and 25 concurrent calls. The Firecrawl Local and Lightpanda latency lanes use N=10 per arm and task.
 - The memory lane is from 2026-11-26. The Firecrawl Local sequential and Lightpanda reference lanes are from 2026-11-25. The Firecrawl Local batch lane is from 2026-11-24.
 - No AWS or cloud browser was used.
-- The brief does not report host load for these scraping lanes. Historical sections state their own recorded load where available.
+- The 2026-11-28 scraping lane records host load and background activity. Each reference lane retains its own host metadata.
 - Published Lightpanda and Firecrawl figures provide context and come from other measurement scopes.
 
-## 2. Current results, 2026-11-26, and reference lanes
+## 2. Current results, 2026-11-28, and reference lanes
 
 The 2026-11-26 MCP memory lane appears first. The Firecrawl Local sequential and Lightpanda lanes are the latest reference runs from 2026-11-25. The Firecrawl Local batch lane is from 2026-11-24.
 
-### 2.1. OpenBrowser no-browser MCP scrape_web memory lane, 2026-11-26
+### 2.1. Playwright MCP and CLI scraping, 2026-11-28
+
+Each cell is **p50 / p95 task time in milliseconds**. **Lower is better** ↓. N=5 per cell, one warmup, alternating arm order. All 125 measured samples passed the complete ordered oracles.
+
+| Task | OpenBrowser full | OpenBrowser lightweight | OpenBrowser no-render | Playwright MCP | Playwright CLI |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `static_article` | 0.939 / 2.464 | 0.936 / 1.112 | 1.134 / 2.502 | 10.617 / 11.611 | 199.694 / 213.898 |
+| `pagination` | 3.463 / 5.598 | 3.819 / 4.139 | 5.878 / 19.941 | 236.454 / 246.150 | 433.178 / 445.965 |
+| `table` | 1.334 / 2.733 | 1.426 / 1.577 | 1.508 / 2.638 | 21.835 / 24.634 | 216.708 / 224.500 |
+| `js_list` | 17.291 / 20.144 | 17.381 / 22.852 | 16.952 / 19.736 | 26.058 / 28.122 | 219.976 / 222.342 |
+| `asset_heavy` | 23.891 / 25.217 | 19.311 / 23.543 | 19.070 / 23.573 | 30.157 / 31.576 | 228.246 / 238.457 |
+
+OpenBrowser uses the namespace `scrape_page` helper with automatic HTTP or browser selection. The Playwright arms use the official MCP and CLI scripted interfaces. All browser paths use Chrome for Testing 159.0.8154.6, revision 1255. Session startup, warmup, and cleanup are outside timing. Memory and CPU remain unmeasured in this lane.
+
+HTTP handles the static article, pagination, and table tasks. The browser handles the JavaScript list and asset-heavy tasks. Playwright uses Chrome for every task. Each OpenBrowser mode has lower p50 and p95 on all five tasks against both Playwright interfaces: 30 of 30 groups and 150 of 150 sample pairs. The static-page serializers return different text layouts while preserving every required field.
+
+Host load was 3.82/3.04/3.01 before and 4.26/3.17/3.05 after on 18 logical cores. Background applications and an existing OpenBrowser daemon remained active. Interleaving shares that host load across the arms; these observations describe the configured run.
+
+[Raw observations](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-playwright-configured-2026-11-28-n5.jsonl), [summary](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-playwright-configured-2026-11-28-n5.json), and [source and scope](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-playwright-configured-2026-11-28-n5.provenance.json).
+
+![Ready-session scraping times for all five configured interfaces. Lower is better.](../../docs/images/native-scraping-playwright-2026-11-28-p50.png)
+
+### 2.2. OpenBrowser no-browser MCP scrape_web memory lane, 2026-11-26
 
 The `scrape_web` MCP tool runs without Chromium, Blink, or V8. It performs an HTTP fetch and parses the response. It does not run JavaScript, take screenshots, or use browser cookies.
 
@@ -74,7 +97,7 @@ Scope rules:
 - The no-browser mode cannot execute JavaScript, take screenshots, or use browser cookies.
 - State our numbers only as OpenBrowser process-tree RSS for this local fixture.
 
-### 2.2. Firecrawl Local sequential, 2026-11-25, N=10
+### 2.3. Firecrawl Local sequential, 2026-11-25, N=10
 
 OpenBrowser lightweight won 50 of 50 paired samples across five tasks. The full arm won 49 of 50, with one static sample 0.13 ms slower. Each task used 10 pairs. All 150 measured runs passed the complete ordered oracle. HTTP-only tasks do not start a browser. Browser tasks start their browser before the timed sample. A zero-warmup run also passed all 150 correctness checks, but the first static sample per arm pays the HTTP client setup and can lose one pair. The published lane keeps one warmup so both arms compare steady-state task work.
 
@@ -95,7 +118,7 @@ Raw evidence:
 - [results-firecrawl-final6-2026-11-25-n10-interleaved.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-firecrawl-final6-2026-11-25-n10-interleaved.json)
 - [results-firecrawl-final6-2026-11-25-n10-interleaved.jsonl](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-firecrawl-final6-2026-11-25-n10-interleaved.jsonl)
 
-### 2.3. Firecrawl Local batch, 2026-11-24, N=10
+### 2.4. Firecrawl Local batch, 2026-11-24, N=10
 
 Lower is better for latency ↓.
 
@@ -108,7 +131,7 @@ OpenBrowser won 10 of 10 pairs and was 4.75 times faster at p50. Raw evidence:
 
 - [results-batch-firecrawl-final-2026-11-24-n10.json](https://github.com/billy-enrizky/openbrowser-ai/blob/main/benchmarks/scraping/results/results-batch-firecrawl-final-2026-11-24-n10.json)
 
-### 2.4. Lightpanda no-render latency, 2026-11-25, N=10
+### 2.5. Lightpanda no-render latency, 2026-11-25, N=10
 
 Lower is better for latency ↓.
 

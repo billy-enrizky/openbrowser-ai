@@ -660,6 +660,18 @@ Local deterministic fixtures, no LLM, and interleaved samples with exact oracles
 
 These interactive figures describe the configured native workflows. Every browser interface in the 2026-11-27 lanes uses the same pinned Chrome for Testing build, revision 1255, and complete executable bindings. Read the older scraping lanes within their recorded build scopes.
 
+Ready-session scraping against Playwright, 2026-11-28, N=5. Cells show **p50 / p95 milliseconds**, **Lower is better** ↓.
+
+| Task | OpenBrowser full | OpenBrowser lightweight | OpenBrowser no-render | Playwright MCP | Playwright CLI |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `static_article` | 0.939 / 2.464 | 0.936 / 1.112 | 1.134 / 2.502 | 10.617 / 11.611 | 199.694 / 213.898 |
+| `pagination` | 3.463 / 5.598 | 3.819 / 4.139 | 5.878 / 19.941 | 236.454 / 246.150 | 433.178 / 445.965 |
+| `table` | 1.334 / 2.733 | 1.426 / 1.577 | 1.508 / 2.638 | 21.835 / 24.634 | 216.708 / 224.500 |
+| `js_list` | 17.291 / 20.144 | 17.381 / 22.852 | 16.952 / 19.736 | 26.058 / 28.122 | 219.976 / 222.342 |
+| `asset_heavy` | 23.891 / 25.217 | 19.311 / 23.543 | 19.070 / 23.573 | 30.157 / 31.576 | 228.246 / 238.457 |
+
+All 125 exact oracles passed. Each OpenBrowser mode has lower p50 and p95 on all five tasks against both Playwright interfaces. OpenBrowser uses HTTP for static article, pagination, and table, and Chrome for JavaScript tasks. Playwright uses Chrome throughout. Browser paths share Chrome 159.0.8154.6. Session startup is outside timing; this lane measures task latency. Background applications and an existing daemon remained active. [Raw data and full scope](benchmarks/scraping/README.md).
+
 Sequential scraping, N=10, OpenBrowser lightweight against Firecrawl Local `0.1.1`:
 
 | Task | OpenBrowser p50 | Firecrawl Local p50 | Result | Pairs won |
